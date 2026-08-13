@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Test coverage output
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Build and packaging output
+build/
+dist/
+*.so
+.Python
+*.egg-info/
+
+# Local environment and model data
+speaker_info/
+.venv/
+venv/
+
+# Local editor and operating-system files
+.DS_Store
+.idea/
