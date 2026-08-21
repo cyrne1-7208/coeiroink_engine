@@ -52,23 +52,26 @@ jobs:
           set -euo pipefail
           container_id="$(docker run --detach --publish 127.0.0.1:50032:50032 "$IMAGE")"
           cleanup() {
-            status=$?
+            local status="$1"
             if [ "$status" -ne 0 ]; then
               docker logs "$container_id" || true
             fi
             docker rm --force "$container_id" >/dev/null 2>&1 || true
-            exit "$status"
           }
-          trap cleanup EXIT
+          trap 'cleanup "$?"' EXIT
 
           for attempt in $(seq 1 12); do
             status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
               http://127.0.0.1:50032/voicevox/version || true)"
             if [ "$status" = 200 ]; then
               echo "CPU container is ready"
+              trap - EXIT
+              cleanup 0
               exit 0
             fi
             echo "Attempt $attempt/12: HTTP status ${status:-connection failure}"
             sleep 5
           done
+          trap - EXIT
+          cleanup 1
           exit 1
