@@ -51,7 +51,7 @@ def load_runtime_lib(runtime_dirs: list[Path]):
     for lib_name in lib_names:
         try:
             CDLL(find_library(lib_name))
-        except OSError, TypeError:
+        except (OSError, TypeError):
             pass
 
 

@@ -94,7 +94,7 @@ def _call_with_supported_kwargs(function: Callable[..., Any], **kwargs: Any) -> 
 
     try:
         signature = inspect.signature(function)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return function(**kwargs)
 
     parameters = signature.parameters.values()
@@ -1484,7 +1484,7 @@ def create_v2_router(
             if result is None:
                 raise StyleNotFoundError("<unspecified>", style_id)
             return result
-        except StyleNotFoundError, AmbiguousStyleError:
+        except (StyleNotFoundError, AmbiguousStyleError):
             return SpeakerMetaForTextBox(
                 speakerUuid="None",
                 styleId=0,

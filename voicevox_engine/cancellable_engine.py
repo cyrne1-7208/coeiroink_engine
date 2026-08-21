@@ -124,7 +124,7 @@ class CancellableEngine:
         if sub_proc_con is not None:
             try:
                 sub_proc_con.close()
-            except OSError, ValueError:
+            except (OSError, ValueError):
                 pass
         try:
             if proc.is_alive():
@@ -177,7 +177,7 @@ class CancellableEngine:
         except EOFError as error:
             try:
                 sub_proc_con1.close()
-            except OSError, ValueError:
+            except (OSError, ValueError):
                 pass
             self.finalize_con(request, proc, None)
             raise HTTPException(
