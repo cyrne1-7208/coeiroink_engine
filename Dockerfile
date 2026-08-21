@@ -2,11 +2,12 @@
 ARG PYTHON_IMAGE=python:3.14-slim-bookworm
 ARG UV_VERSION=0.12.5
 ARG COEIROINK_BACKEND=cpu
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 FROM ${PYTHON_IMAGE}
 
 ARG COEIROINK_BACKEND=cpu
 
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
