@@ -23,24 +23,14 @@ def is_development() -> bool:
     Nuitka/Pyinstallerでコンパイルされていない場合は開発環境とする。
     """
     # nuitkaビルドをした際はグローバルに__compiled__が含まれる
-    if "__compiled__" in globals():
-        return False
-
-    # pyinstallerでビルドをした際はsys.frozenが設定される
-    elif getattr(sys, "frozen", False):
-        return False
-
-    return True
+    return not ("__compiled__" in globals() or getattr(sys, "frozen", False))
 
 
 def get_save_dir():
     # FIXME: ファイル保存場所をエンジン固有のIDが入ったものにする
     # FIXME: Windowsは`voicevox-engine/voicevox-engine`ディレクトリに保存されているので
     # `VOICEVOX/voicevox-engine`に変更する
-    if is_development():
-        app_name = "coeiroink-engine-dev"
-    else:
-        app_name = "coeiroink-engine"
+    app_name = "coeiroink-engine-dev" if is_development() else "coeiroink-engine"
     return Path(user_data_dir(app_name))
 
 

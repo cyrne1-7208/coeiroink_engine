@@ -1,76 +1,84 @@
-import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Literal, cast
+
+from coeirocore import __version__ as coeirocore_version
 
 from ..utility import engine_root
-from .core_wrapper import load_runtime_lib
 from .synthesis_engine import SynthesisEngineBase
+
+Device = Literal["cpu", "cuda", "directml", "opencl"]
+SUPPORTED_DEVICES = ("cpu", "cuda", "directml", "opencl")
+
+
+def resolve_device(
+    device: str | None = None,
+    use_gpu: bool | None = None,
+) -> Device:
+    """旧GPUフラグを含む指定を、Coreへ渡すデバイス名へ正規化する。"""
+
+    # 旧use_gpuと新deviceの併用は優先順位を設けず、曖昧な設定として拒否する。
+    if device is not None and use_gpu is not None:
+        raise ValueError("--deviceと--use_gpuは同時に指定できません。")
+
+    if use_gpu is not None:
+        return "cuda" if use_gpu else "cpu"
+
+    if device is None:
+        return "cpu"
+    if device not in SUPPORTED_DEVICES:
+        supported = ", ".join(SUPPORTED_DEVICES)
+        raise ValueError(
+            f"未対応のデバイスです: {device} ({supported}から指定してください)"
+        )
+    return cast(Device, device)
 
 
 def make_synthesis_engines(
-    use_gpu: bool,
-    voicelib_dirs: Optional[List[Path]] = None,
-    voicevox_dir: Optional[Path] = None,
-    runtime_dirs: Optional[List[Path]] = None,
-    cpu_num_threads: Optional[int] = None,
+    use_gpu: bool | None = None,
+    voicelib_dirs: list[Path] | None = None,
+    voicevox_dir: Path | None = None,
+    runtime_dirs: list[Path] | None = None,
+    cpu_num_threads: int | None = None,
     enable_mock: bool = True,
     load_all_models: bool = False,
-    speaker_info_dir: Optional[Path] = None,
-) -> Dict[str, SynthesisEngineBase]:
+    speaker_info_dir: Path | None = None,
+    device: str | None = None,
+    device_index: int = 0,
+    opencl_platform_index: int = 0,
+) -> dict[str, SynthesisEngineBase]:
     """
     音声ライブラリをロードして、音声合成エンジンを生成
 
     Parameters
     ----------
-    use_gpu: bool
-        音声ライブラリに GPU を使わせるか否か
+    use_gpu: bool, optional
+        旧互換引数。Trueはcuda、Falseはcpuに変換される。
     voicelib_dirs: List[Path], optional, default=None
-        音声ライブラリ自体があるディレクトリのリスト
+        旧Engineとの呼び出し互換性のために受け取る。Python版Coreでは使用しない。
     voicevox_dir: Path, optional, default=None
         コンパイル済みのvoicevox、またはvoicevox_engineがあるディレクトリ
     runtime_dirs: List[Path], optional, default=None
-        コアで使用するライブラリのあるディレクトリのリスト
-        None のとき、voicevox_dir、カレントディレクトリになる
+        旧Engineとの呼び出し互換性のために受け取る。Python版Coreでは使用しない。
     cpu_num_threads: int, optional, default=None
         音声ライブラリが、推論に用いるCPUスレッド数を設定する
         Noneのとき、ライブラリ側の挙動により論理コア数の半分か、物理コア数が指定される
     enable_mock: bool, optional, default=True
-        コア読み込みに失敗したとき、代わりにmockを使用するかどうか
+        旧Engineとの呼び出し互換性のために受け取る。
     load_all_models: bool, optional, default=False
-        起動時に全てのモデルを読み込むかどうか
+        旧Engineとの呼び出し互換性のために受け取る。モデルは要求時に読み込む。
     speaker_info_dir: Path, optional, default=None
         MYCOEIROINKを展開したspeaker_infoディレクトリ
+    device: str, optional, default=None
+        Coreで使用するデバイス。cpu、cuda、directml、openclから指定する。
+    device_index: int, optional, default=0
+        Coreで使用するデバイス番号。
+    opencl_platform_index: int, optional, default=0
+        OpenCLで使用するプラットフォーム番号。
     """
+    selected_device = resolve_device(device=device, use_gpu=use_gpu)
+
     if cpu_num_threads == 0 or cpu_num_threads is None:
-        print(
-            "Warning: cpu_num_threads is set to 0. "
-            + "( The library leaves the decision to the synthesis runtime )",
-            file=sys.stderr,
-        )
         cpu_num_threads = 0
-
-    if voicevox_dir is not None:
-        if voicelib_dirs is not None:
-            voicelib_dirs.append(voicevox_dir)
-        else:
-            voicelib_dirs = [voicevox_dir]
-        if runtime_dirs is not None:
-            runtime_dirs.append(voicevox_dir)
-        else:
-            runtime_dirs = [voicevox_dir]
-    else:
-        root_dir = engine_root()
-        if voicelib_dirs is None:
-            voicelib_dirs = [root_dir]
-        if runtime_dirs is None:
-            runtime_dirs = [root_dir]
-
-    voicelib_dirs = [p.expanduser() for p in voicelib_dirs]
-    runtime_dirs = [p.expanduser() for p in runtime_dirs]
-
-    load_runtime_lib(runtime_dirs)
-
-    synthesis_engines = {}
 
     if speaker_info_dir is None:
         speaker_info_dir = (
@@ -82,12 +90,15 @@ def make_synthesis_engines(
     from ..dev.core import supported_devices as mock_supported_devices
     from ..dev.synthesis_engine import MockSynthesisEngine
 
-    # Linux OSS構成では公開CoreのAudioManagerを使うEngineを唯一の合成エンジンとして登録します。
-    synthesis_engines["0.0.0"] = MockSynthesisEngine(
-        speakers=mock_metas(speaker_info_dir=speaker_info_dir),
-        supported_devices=mock_supported_devices(),
-        speaker_info_dir=speaker_info_dir,
-        cpu_num_threads=cpu_num_threads,
-    )
-
-    return synthesis_engines
+    # デバイス名と番号を分離したままCoreへ渡し、バックエンド自体を利用できない場合はEngine側でCPUへ置き換えない。
+    return {
+        coeirocore_version: MockSynthesisEngine(
+            speakers=mock_metas(speaker_info_dir=speaker_info_dir),
+            supported_devices=mock_supported_devices(),
+            speaker_info_dir=speaker_info_dir,
+            cpu_num_threads=cpu_num_threads,
+            device=selected_device,
+            device_index=device_index,
+            opencl_platform_index=opencl_platform_index,
+        )
+    }

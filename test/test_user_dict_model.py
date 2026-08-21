@@ -30,7 +30,7 @@ class TestUserDictWords(TestCase):
         try:
             UserDictWord(**test_value)
         except ValidationError as e:
-            self.fail(f"Unexpected Validation Error\n{str(e)}")
+            self.fail(f"Unexpected Validation Error\n{e!s}")
 
     def test_convert_to_zenkaku(self):
         test_value = deepcopy(self.test_model)

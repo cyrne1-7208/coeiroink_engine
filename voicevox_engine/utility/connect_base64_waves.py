@@ -1,6 +1,5 @@
 import base64
 import io
-from typing import List, Tuple
 
 import numpy as np
 import soundfile
@@ -13,7 +12,7 @@ class ConnectBase64WavesException(Exception):
         self.message = message
 
 
-def decode_base64_waves(waves: List[str]) -> List[Tuple[np.ndarray, int]]:
+def decode_base64_waves(waves: list[str]) -> list[tuple[np.ndarray, int]]:
     """
     base64エンコードされた複数のwavデータをデコードする
     Parameters
@@ -33,9 +32,7 @@ def decode_base64_waves(waves: List[str]) -> List[Tuple[np.ndarray, int]]:
         try:
             wav_bin = base64.standard_b64decode(wave)
         except (TypeError, ValueError) as error:
-            raise ConnectBase64WavesException(
-                "base64デコードに失敗しました"
-            ) from error
+            raise ConnectBase64WavesException("base64デコードに失敗しました") from error
         try:
             _data = soundfile.read(io.BytesIO(wav_bin))
         except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -47,7 +44,7 @@ def decode_base64_waves(waves: List[str]) -> List[Tuple[np.ndarray, int]]:
     return waves_nparray_sr
 
 
-def connect_base64_waves(waves: List[str]) -> Tuple[np.ndarray, int]:
+def connect_base64_waves(waves: list[str]) -> tuple[np.ndarray, int]:
     waves_nparray_sr = decode_base64_waves(waves)
 
     max_sampling_rate = max([sr for _, sr in waves_nparray_sr])

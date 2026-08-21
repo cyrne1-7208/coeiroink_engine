@@ -1,16 +1,14 @@
-import json
 import importlib
+import json
 import shutil
 import threading
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Dict, List, Optional
 from uuid import UUID, uuid4
 
 import numpy as np
 import pyopenjtalk
 from fastapi import HTTPException
-from pydantic import conint
 
 from .model import UserDictWord, WordTypes
 from .part_of_speech_data import MAX_PRIORITY, MIN_PRIORITY, part_of_speech_data
@@ -32,33 +30,26 @@ mutex_openjtalk_dict = threading.Lock()
 
 
 def _create_user_dict(source_path: Path, compiled_path: Path) -> None:
-    """複数世代のpyopenjtalk APIに対応してユーザー辞書を構築します。"""
-    if hasattr(pyopenjtalk, "mecab_dict_index"):
-        pyopenjtalk.mecab_dict_index(str(source_path), str(compiled_path))
-    else:
-        pyopenjtalk.create_user_dict(str(source_path), str(compiled_path))
+    """pyopenjtalk 0.4.1の公開APIでユーザー辞書をコンパイルする。"""
+    pyopenjtalk.mecab_dict_index(str(source_path), str(compiled_path))
 
 
 def _set_user_dict(compiled_path: Path) -> None:
-    """複数世代のpyopenjtalk APIに対応してコンパイル済み辞書を適用します。"""
-    if hasattr(pyopenjtalk, "update_global_jtalk_with_user_dict"):
-        pyopenjtalk.update_global_jtalk_with_user_dict(str(compiled_path))
-    else:
-        pyopenjtalk.set_user_dict(str(compiled_path))
+    """pyopenjtalk 0.4.1の公開APIでコンパイル済み辞書を適用する。"""
+    pyopenjtalk.update_global_jtalk_with_user_dict(str(compiled_path))
 
 
 def reset_user_dict() -> None:
-    """ユーザー辞書更新後にpyopenjtalkの既定辞書へ戻します。"""
+    """ユーザー辞書更新後のpyopenjtalkを既定辞書へ戻す。"""
     if hasattr(pyopenjtalk, "unset_user_dict"):
         pyopenjtalk.unset_user_dict()
     else:
-        # pyopenjtalk 0.4以降は辞書適用APIを公開しますが、解除APIはありません。
-        # モジュールを再読み込みして既定のOpenJTalkインスタンスを作り直し、非公開実装へ依存しません。
+        # pyopenjtalk 0.4系には解除用公開APIがないため、非公開状態へ依存せずモジュール再読込で既定のOpenJTalkインスタンスを再生成する。
         importlib.reload(pyopenjtalk)
 
 
 @mutex_wrapper(mutex_user_dict)
-def write_to_json(user_dict: Dict[str, UserDictWord], user_dict_path: Path):
+def write_to_json(user_dict: dict[str, UserDictWord], user_dict_path: Path):
     converted_user_dict = {}
     for word_uuid, word in user_dict.items():
         word_dict = word.model_dump()
@@ -78,8 +69,10 @@ def update_dict(
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
 ):
-    temporary_source_path: Optional[Path] = None
-    temporary_compiled_path: Optional[Path] = None
+    """既定辞書とユーザー辞書を一時領域でコンパイルし、成功後に実運用辞書へ置換して適用する。"""
+
+    temporary_source_path: Path | None = None
+    temporary_compiled_path: Path | None = None
     try:
         with NamedTemporaryFile(
             encoding="utf-8", mode="w", delete=False, dir=save_dir
@@ -130,9 +123,8 @@ def update_dict(
             raise RuntimeError("辞書のコンパイル時にエラーが発生しました。")
         reset_user_dict()
         try:
-            shutil.move(
-                temporary_compiled_path, compiled_dict_path
-            )  # ドライブを跨ぐためPath.replaceが使えない
+            # 保存先が別ドライブでも更新できるよう、同一ファイルシステムを前提とするPath.replaceは使わない。
+            shutil.move(temporary_compiled_path, compiled_dict_path)
         finally:
             if compiled_dict_path.is_file():
                 _set_user_dict(compiled_dict_path.resolve(strict=True))
@@ -144,7 +136,7 @@ def update_dict(
 
 
 @mutex_wrapper(mutex_user_dict)
-def read_dict(user_dict_path: Path = user_dict_path) -> Dict[str, UserDictWord]:
+def read_dict(user_dict_path: Path = user_dict_path) -> dict[str, UserDictWord]:
     if not user_dict_path.is_file():
         return {}
     with user_dict_path.open(encoding="utf-8") as f:
@@ -168,12 +160,12 @@ def create_word(
     surface: str,
     pronunciation: str,
     accent_type: int,
-    word_type: Optional[WordTypes] = None,
-    priority: Optional[int] = None,
+    word_type: WordTypes | None = None,
+    priority: int | None = None,
 ) -> UserDictWord:
     if word_type is None:
         word_type = WordTypes.PROPER_NOUN
-    if word_type not in part_of_speech_data.keys():
+    if word_type not in part_of_speech_data:
         raise HTTPException(status_code=422, detail="不明な品詞です")
     if priority is None:
         priority = 5
@@ -202,8 +194,8 @@ def apply_word(
     surface: str,
     pronunciation: str,
     accent_type: int,
-    word_type: Optional[WordTypes] = None,
-    priority: Optional[int] = None,
+    word_type: WordTypes | None = None,
+    priority: int | None = None,
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
 ) -> str:
@@ -227,8 +219,8 @@ def rewrite_word(
     surface: str,
     pronunciation: str,
     accent_type: int,
-    word_type: Optional[WordTypes] = None,
-    priority: Optional[int] = None,
+    word_type: WordTypes | None = None,
+    priority: int | None = None,
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
 ):
@@ -241,7 +233,9 @@ def rewrite_word(
     )
     user_dict = read_dict(user_dict_path=user_dict_path)
     if word_uuid not in user_dict:
-        raise HTTPException(status_code=422, detail="UUIDに該当するワードが見つかりませんでした")
+        raise HTTPException(
+            status_code=422, detail="UUIDに該当するワードが見つかりませんでした"
+        )
     user_dict[word_uuid] = word
     write_to_json(user_dict, user_dict_path)
     update_dict(user_dict_path=user_dict_path, compiled_dict_path=compiled_dict_path)
@@ -254,14 +248,16 @@ def delete_word(
 ):
     user_dict = read_dict(user_dict_path=user_dict_path)
     if word_uuid not in user_dict:
-        raise HTTPException(status_code=422, detail="IDに該当するワードが見つかりませんでした")
+        raise HTTPException(
+            status_code=422, detail="IDに該当するワードが見つかりませんでした"
+        )
     del user_dict[word_uuid]
     write_to_json(user_dict, user_dict_path)
     update_dict(user_dict_path=user_dict_path, compiled_dict_path=compiled_dict_path)
 
 
 def import_user_dict(
-    dict_data: Dict[str, UserDictWord],
+    dict_data: dict[str, UserDictWord],
     override: bool = False,
     user_dict_path: Path = user_dict_path,
     default_dict_path: Path = default_dict_path,
@@ -302,14 +298,14 @@ def import_user_dict(
     )
 
 
-def search_cost_candidates(context_id: int) -> List[int]:
+def search_cost_candidates(context_id: int) -> list[int]:
     for value in part_of_speech_data.values():
         if value.context_id == context_id:
             return value.cost_candidates
     raise HTTPException(status_code=422, detail="品詞IDが不正です")
 
 
-def cost2priority(context_id: int, cost: conint(ge=-32768, le=32767)) -> int:
+def cost2priority(context_id: int, cost: int) -> int:
     cost_candidates = search_cost_candidates(context_id)
     # cost_candidatesの中にある値で最も近い値を元にpriorityを返す
     # 参考: https://qiita.com/Krypf/items/2eada91c37161d17621d
@@ -317,8 +313,6 @@ def cost2priority(context_id: int, cost: conint(ge=-32768, le=32767)) -> int:
     return MAX_PRIORITY - np.argmin(np.abs(np.array(cost_candidates) - cost))
 
 
-def priority2cost(
-    context_id: int, priority: conint(ge=MIN_PRIORITY, le=MAX_PRIORITY)
-) -> int:
+def priority2cost(context_id: int, priority: int) -> int:
     cost_candidates = search_cost_candidates(context_id)
     return cost_candidates[MAX_PRIORITY - priority]

@@ -140,7 +140,8 @@ def test_speech_like_voiced_unvoiced_transitions_remain_finite_and_bounded():
     assert result.dtype == np.float32
     assert np.isfinite(result).all()
     assert np.max(np.abs(result)) <= 2.0 * np.max(np.abs(wave)) + 1e-6
-    # 区間はグレインより長い無声音なので、有声音のオーバーラップ加算で埋めてはいけません。
+    # The gap is unvoiced and longer than a grain, so it must not be filled by
+    # a voiced overlap-add operation.
     gap = slice(int(0.24 * sampling_rate), int(0.30 * sampling_rate))
     np.testing.assert_array_equal(result[gap], wave[gap])
 

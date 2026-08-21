@@ -1,9 +1,11 @@
+"""Engine設定ファイルの読み書き。"""
+
 from pathlib import Path
 
 import yaml
 
 from ..utility import engine_root, get_save_dir
-from .Setting import Setting
+from .setting import Setting
 
 DEFAULT_SETTING_PATH: Path = engine_root() / "default_setting.yml"
 USER_SETTING_PATH: Path = get_save_dir() / "setting.yml"
@@ -19,12 +21,10 @@ class SettingLoader:
         else:
             setting = yaml.safe_load(self.setting_file_path.read_text(encoding="utf-8"))
 
-        setting = Setting(
+        return Setting(
             cors_policy_mode=setting["cors_policy_mode"],
             allow_origin=setting["allow_origin"],
         )
-
-        return setting
 
     def dump_setting_file(self, settings: Setting) -> None:
         settings_dict = settings.model_dump()

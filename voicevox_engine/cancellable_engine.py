@@ -4,20 +4,20 @@ import queue
 from multiprocessing import Pipe, Process
 from multiprocessing.connection import Connection
 from tempfile import NamedTemporaryFile
-from typing import List, Optional, Tuple
 
 import soundfile
-from packaging.version import Version
 
-# FIXME: FastAPI依存を削除する。
+# FIXME: remove FastAPI dependency
 from fastapi import HTTPException, Request
+from packaging.version import Version
 
 from .model import AudioQuery
 from .synthesis_engine import make_synthesis_engines
+from .synthesis_engine.make_synthesis_engines import resolve_device
 
 
 def _version_key(version: str) -> Version:
-    """+cpuなどのローカルサフィックスを含むCoreバージョン比較用の値を返します。"""
+    """`+cpu`などのローカル接尾辞を含むCoreバージョンを比較可能な値へ変換する。"""
     return Version(version)
 
 
@@ -49,15 +49,17 @@ class CancellableEngine:
                 status_code=404,
                 detail="実験的機能はデフォルトで無効になっています。使用するには引数を指定してください。",
             )
+        if self.args.init_processes < 1:
+            raise ValueError("init_processes must be at least 1")
 
-        self.watch_con_list: List[Tuple[Request, Process]] = []
-        self.procs_and_cons: queue.Queue[Tuple[Process, Connection]] = queue.Queue()
+        self.watch_con_list: list[tuple[Request, Process]] = []
+        self.procs_and_cons: queue.Queue[tuple[Process, Connection]] = queue.Queue()
         for _ in range(self.args.init_processes):
             self.procs_and_cons.put(self.start_new_proc())
 
     def start_new_proc(
         self,
-    ) -> Tuple[Process, Connection]:
+    ) -> tuple[Process, Connection]:
         """
         新しく開始したプロセスを返す関数
 
@@ -69,6 +71,7 @@ class CancellableEngine:
             ret_procのプロセスと通信するためのPipe
         """
         sub_proc_con1, sub_proc_con2 = Pipe(True)
+        # Windowsのspawn方式でも再importできるよう、targetにはモジュール直下の関数だけを渡す。
         ret_proc = Process(
             target=start_synthesis_subprocess,
             kwargs={
@@ -84,7 +87,7 @@ class CancellableEngine:
         self,
         req: Request,
         proc: Process,
-        sub_proc_con: Optional[Connection],
+        sub_proc_con: Connection | None,
     ) -> None:
         """
         接続が切断された時の処理を行う関数
@@ -121,7 +124,7 @@ class CancellableEngine:
         if sub_proc_con is not None:
             try:
                 sub_proc_con.close()
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 pass
         try:
             if proc.is_alive():
@@ -138,7 +141,7 @@ class CancellableEngine:
         speaker_id: int,
         request: Request,
         enable_interrogative_upspeak: bool,
-        core_version: Optional[str],
+        core_version: str | None,
     ) -> str:
         """
         音声合成を行う関数
@@ -171,13 +174,15 @@ class CancellableEngine:
                 )
             )
             f_name = sub_proc_con1.recv()
-        except EOFError:
+        except EOFError as error:
             try:
                 sub_proc_con1.close()
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 pass
             self.finalize_con(request, proc, None)
-            raise HTTPException(status_code=422, detail="既にサブプロセスは終了されています")
+            raise HTTPException(
+                status_code=422, detail="既にサブプロセスは終了されています"
+            ) from error
         except Exception:
             self.finalize_con(request, proc, sub_proc_con1)
             raise
@@ -221,8 +226,15 @@ def start_synthesis_subprocess(
         メインプロセスと通信するためのPipe
     """
 
+    device = resolve_device(
+        device=getattr(args, "device", None),
+        use_gpu=getattr(args, "use_gpu", None),
+    )
+    # キャンセル用ワーカも親プロセスと同じ物理デバイスを選ぶため、両方の番号を引き継ぐ。
     synthesis_engines = make_synthesis_engines(
-        use_gpu=args.use_gpu,
+        device=device,
+        device_index=getattr(args, "device_index", 0),
+        opencl_platform_index=getattr(args, "opencl_platform_index", 0),
         voicelib_dirs=args.voicelib_dir,
         voicevox_dir=args.voicevox_dir,
         runtime_dirs=args.runtime_dir,
@@ -250,6 +262,7 @@ def start_synthesis_subprocess(
                 speaker_id,
                 enable_interrogative_upspeak=enable_interrogative_upspeak,
             )
+            # Windowsで一時ファイルを別ハンドルから再オープンせず、作成済みハンドルへ直接書き込む。
             with NamedTemporaryFile(delete=False) as f:
                 soundfile.write(
                     file=f, data=wave, samplerate=query.outputSamplingRate, format="WAV"

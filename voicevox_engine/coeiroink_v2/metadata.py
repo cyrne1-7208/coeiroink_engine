@@ -1,19 +1,25 @@
-"""公開COEIROINK v2話者フォルダ向けのメタデータ処理です。
-このモジュールの処理対象は``speaker_info``ディレクトリですが、ディレクトリ名は話者の識別子ではなく``metas.json``の値を識別子として使います。
-これは``rintos_ver1.0``のようにディレクトリ名とspeaker UUIDが異なるMYCOEIROINKパッケージで重要です。
-HTTP処理とダウンロード処理は含めず、v2ルートが使う話者メタデータとアセットのファイル操作だけを提供します。
+"""Metadata helpers for the public COEIROINK v2 speaker folders.
+
+The helpers in this module deliberately operate on a ``speaker_info``
+directory.  A directory name is not a speaker identity: the identity comes
+from ``metas.json``.  This matters for MYCOEIROINK packages such as
+``rintos_ver1.0`` whose directory name is different from its speaker UUID.
+
+This module contains no HTTP or download code.  It provides the file-system
+operations that v2 routes can use for speaker metadata and assets.
 """
+
+from __future__ import annotations
 
 import base64
 import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
 
-from voicevox_engine.metas.MetasStore import MetasStore
+from voicevox_engine.metas.metas_store import MetasStore
 
 from .models import (
     SpeakerInfo,
@@ -28,11 +34,11 @@ from .models import (
 
 
 class MetadataError(Exception):
-    """不正な話者メタデータや不足した話者アセットの基底例外です。"""
+    """Base class for invalid speaker metadata or missing speaker assets."""
 
 
 class SpeakerNotFoundError(MetadataError, LookupError):
-    """話者UUIDが話者ディレクトリに存在しない場合に発生します。"""
+    """Raised when a speaker UUID is not present in the speaker directory."""
 
     def __init__(self, speaker_uuid: str) -> None:
         self.speaker_uuid = speaker_uuid
@@ -40,7 +46,7 @@ class SpeakerNotFoundError(MetadataError, LookupError):
 
 
 class StyleNotFoundError(MetadataError, LookupError):
-    """話者に指定スタイルが存在しない場合に発生します。"""
+    """Raised when a style is not present for a speaker."""
 
     def __init__(self, speaker_uuid: str, style_id: int) -> None:
         self.speaker_uuid = speaker_uuid
@@ -51,9 +57,9 @@ class StyleNotFoundError(MetadataError, LookupError):
 
 
 class AmbiguousStyleError(MetadataError, LookupError):
-    """一意な話者UUIDなしで複数話者に存在するスタイルIDを使った場合に発生します。"""
+    """Raised when a style ID is used without a unique speaker UUID."""
 
-    def __init__(self, style_id: int, speaker_uuids: List[str]) -> None:
+    def __init__(self, style_id: int, speaker_uuids: list[str]) -> None:
         self.style_id = style_id
         self.speaker_uuids = tuple(speaker_uuids)
         joined = ", ".join(repr(uuid) for uuid in speaker_uuids)
@@ -64,7 +70,7 @@ class AmbiguousStyleError(MetadataError, LookupError):
 
 
 class MetadataAssetNotFoundError(MetadataError, FileNotFoundError):
-    """必要な肖像・アイコン・規約・ライセンス・サンプルがない場合に発生します。"""
+    """Raised when a required portrait, icon, policy, license, or sample is absent."""
 
     def __init__(self, path: Path, description: str) -> None:
         self.path = path
@@ -119,19 +125,26 @@ def _base64_file(path: Path, description: str) -> str:
 
 
 def _parse_folder_metadata(raw_metadata: object, meta_path: Path) -> SpeakerMeta:
-    """アセットを追加する前に応答モデルでフォルダメタデータを検証します。
-    ``metas.json``はモデル情報なのでv2応答に必要なBase64項目を持ちません。
-    検証時だけ空のプレースホルダーを使い、応答作成時に実際のアセットファイルを読み込みます。
+    """Validate folder metadata with the response model before adding assets.
+
+    ``metas.json`` describes a model and therefore does not contain the
+    base64 fields required by the v2 response model.  Empty placeholders are
+    used only for validation; actual values are read from the asset files
+    when a response is built.
     """
 
     if not isinstance(raw_metadata, dict):
-        raise MetadataError(f"invalid speaker metadata: {meta_path}: expected an object")
+        raise MetadataError(
+            f"invalid speaker metadata: {meta_path}: expected an object"
+        )
     wire_metadata = dict(raw_metadata)
     wire_metadata.setdefault("base64Portrait", "")
     wire_styles = []
     raw_styles = wire_metadata.get("styles")
     if not isinstance(raw_styles, list):
-        raise MetadataError(f"invalid speaker metadata: {meta_path}: styles must be a list")
+        raise MetadataError(
+            f"invalid speaker metadata: {meta_path}: styles must be a list"
+        )
     for raw_style in raw_styles:
         if not isinstance(raw_style, dict):
             raise MetadataError(
@@ -148,12 +161,15 @@ def _parse_folder_metadata(raw_metadata: object, meta_path: Path) -> SpeakerMeta
 
 
 class SpeakerMetadataStore:
-    """公開モデルディレクトリからv2話者メタデータとアセットを解決します。
-    UUIDとフォルダの対応は``MetasStore``を正とし、各フォルダの``metas.json``をv2通信モデルへ変換してアセットをエンコードします。
+    """Resolve v2 speaker metadata and assets from a public model directory.
+
+    ``MetasStore`` is used as the authoritative UUID-to-folder index.  The
+    v2 metadata is then parsed from each folder's ``metas.json`` so that the
+    result can be returned with the v2 wire models and asset encodings.
     """
 
     def __init__(
-        self, speaker_info_dir: Path, metas_store: Optional[MetasStore] = None
+        self, speaker_info_dir: Path, metas_store: MetasStore | None = None
     ) -> None:
         root = Path(speaker_info_dir).expanduser().resolve()
         if not root.is_dir():
@@ -162,11 +178,12 @@ class SpeakerMetadataStore:
         try:
             self._metas_store = metas_store or MetasStore(root)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            raise MetadataError(f"could not load speaker metadata from {root}: {exc}") from exc
+            raise MetadataError(
+                f"could not load speaker metadata from {root}: {exc}"
+            ) from exc
 
         self._speaker_info_dir = root
-        # UUID・メタデータ・フォルダの対応は起動時に検証して固定します。
-        self._records: Dict[str, _SpeakerRecord] = {}
+        self._records: dict[str, _SpeakerRecord] = {}
         for speaker_uuid in sorted(self._metas_store.loaded_metas):
             try:
                 folder = Path(self._metas_store.speaker_path(speaker_uuid)).resolve()
@@ -185,7 +202,9 @@ class SpeakerMetadataStore:
                 json.JSONDecodeError,
                 MetadataError,
             ) as exc:
-                raise MetadataError(f"invalid speaker metadata: {meta_path}: {exc}") from exc
+                raise MetadataError(
+                    f"invalid speaker metadata: {meta_path}: {exc}"
+                ) from exc
 
             if metadata.speaker_uuid != speaker_uuid:
                 raise MetadataError(
@@ -212,8 +231,8 @@ class SpeakerMetadataStore:
         return self._speaker_info_dir
 
     @property
-    def speaker_uuids(self) -> Tuple[str, ...]:
-        """すべての話者UUIDを決定的な順序で返します。"""
+    def speaker_uuids(self) -> tuple[str, ...]:
+        """Return all speaker UUIDs in deterministic order."""
 
         return tuple(sorted(self._records))
 
@@ -224,12 +243,12 @@ class SpeakerMetadataStore:
             raise SpeakerNotFoundError(speaker_uuid) from exc
 
     def speaker_path(self, speaker_uuid: str) -> Path:
-        """``speaker_uuid``に対応する物理フォルダを返します。"""
+        """Return the physical folder for ``speaker_uuid``."""
 
         return self._record(speaker_uuid).folder
 
     def lookup_speaker_folder(self, speaker_uuid: str) -> Path:
-        """ルートアダプターが使う``speaker_path``の別名です。"""
+        """Alias for :meth:`speaker_path` used by route adapters."""
 
         return self.speaker_path(speaker_uuid)
 
@@ -242,14 +261,14 @@ class SpeakerMetadataStore:
         raise StyleNotFoundError(speaker_uuid, style_id)
 
     def get_style(self, speaker_uuid: str, style_id: int) -> SpeakerMetaStyle:
-        """一意なUUIDとスタイルIDの組み合わせでスタイルを検索します。"""
+        """Look up one style using the unambiguous UUID plus style ID key."""
 
         return self._style(speaker_uuid, style_id)
 
     def speaker_meta_for_style(
-        self, style_id: int, speaker_uuid: Optional[str] = None
+        self, style_id: int, speaker_uuid: str | None = None
     ) -> SpeakerMetaForTextBox:
-        """UUIDとスタイルIDで選択された話者・スタイルの組を返します。"""
+        """Return the speaker/style pair selected by UUID and style ID."""
 
         speaker_uuid, style = self.find_style(style_id, speaker_uuid)
         metadata = self._record(speaker_uuid).metadata
@@ -261,18 +280,21 @@ class SpeakerMetadataStore:
         )
 
     def style_id_to_speaker_meta(
-        self, style_id: int, speaker_uuid: Optional[str] = None
+        self, style_id: int, speaker_uuid: str | None = None
     ) -> SpeakerMetaForTextBox:
-        """v2のスタイル単独検索規則でテキストボックス用メタデータを返します。
-        Coreのモデル読込は話者UUIDなしの曖昧なスタイルIDを拒否しますが、表示専用のこのメソッドでは最後に一致した値を使います。
-        互換動作をモデル読込へ広げないため、例外的な規則をこのメソッド内に限定します。
+        """Return text-box metadata using the v2 style-only lookup rule.
+
+        Core model loading rejects an ambiguous style ID unless a speaker UUID
+        is supplied.  The official metadata endpoint instead keeps the last
+        loaded match, so that compatibility behavior stays local to this
+        display-only method.
         """
 
         if speaker_uuid is not None:
             return self.speaker_meta_for_style(style_id, speaker_uuid)
 
         style_id = _style_id(style_id)
-        selected: Optional[Tuple[str, SpeakerMetaStyle]] = None
+        selected: tuple[str, SpeakerMetaStyle] | None = None
         for candidate_uuid in self.speaker_uuids:
             for style in self._records[candidate_uuid].metadata.styles:
                 if style.style_id == style_id:
@@ -290,9 +312,9 @@ class SpeakerMetadataStore:
         )
 
     def find_style(
-        self, style_id: int, speaker_uuid: Optional[str] = None
-    ) -> Tuple[str, SpeakerMetaStyle]:
-        """複数話者に一致するスタイルIDを拒否してスタイルを検索します。"""
+        self, style_id: int, speaker_uuid: str | None = None
+    ) -> tuple[str, SpeakerMetaStyle]:
+        """Find a style, rejecting a style ID that matches several speakers."""
 
         style_id = _style_id(style_id)
         if speaker_uuid is not None:
@@ -332,21 +354,22 @@ class SpeakerMetadataStore:
             speakerUuid=record.metadata.speaker_uuid,
             styles=styles,
             version=record.metadata.version,
-            base64Portrait=_base64_file(record.folder / "portrait.png", "speaker portrait"),
+            base64Portrait=_base64_file(
+                record.folder / "portrait.png", "speaker portrait"
+            ),
         )
 
     def speaker_meta(self, speaker_uuid: str) -> SpeakerMeta:
-        # Base64化した肖像・アイコンは話者数に比例してメモリを消費するため、プロセス全体のキャッシュには保持しません。
-        # 合成経路ではないこのAPIで毎回アセットを読むことで、再起動せずに差し替えも反映できます。
+        # base64画像は話者数に比例してメモリを占有し合成のホットパスでもないためキャッシュせず、差替えも再起動なしで反映する。
         return self._speaker_meta(self._record(speaker_uuid))
 
-    def list_speakers(self) -> List[SpeakerMeta]:
-        """Base64化した肖像とスタイルアイコンを含むv2話者メタデータを返します。"""
+    def list_speakers(self) -> list[SpeakerMeta]:
+        """Return v2 speaker metadata with base64 portrait and style icons."""
 
         return [self.speaker_meta(uuid) for uuid in self.speaker_uuids]
 
-    def speakers(self) -> List[SpeakerMeta]:
-        """``list_speakers``の簡易エイリアスです。"""
+    def speakers(self) -> list[SpeakerMeta]:
+        """Convenience alias for :meth:`list_speakers`."""
 
         return self.list_speakers()
 
@@ -383,21 +406,21 @@ class SpeakerMetadataStore:
     def speaker_meta_path_variant(self, speaker_uuid: str) -> SpeakerMetaPathVariant:
         return self._speaker_meta_path_variant(self._record(speaker_uuid))
 
-    def list_speakers_path_variant(self) -> List[SpeakerMetaPathVariant]:
-        """ローカル画像アセットのパスを含むv2話者メタデータを返します。"""
+    def list_speakers_path_variant(self) -> list[SpeakerMetaPathVariant]:
+        """Return v2 speaker metadata with paths to local image assets."""
 
         return [
             self._speaker_meta_path_variant(self._records[uuid])
             for uuid in self.speaker_uuids
         ]
 
-    def speakers_path_variant(self) -> List[SpeakerMetaPathVariant]:
-        """``list_speakers_path_variant``の簡易エイリアスです。"""
+    def speakers_path_variant(self) -> list[SpeakerMetaPathVariant]:
+        """Convenience alias for :meth:`list_speakers_path_variant`."""
 
         return self.list_speakers_path_variant()
 
-    def voice_sample_paths(self, speaker_uuid: str, style_id: int) -> List[Path]:
-        """スタイルの音声サンプルを数値サフィックス順で返します。"""
+    def voice_sample_paths(self, speaker_uuid: str, style_id: int) -> list[Path]:
+        """Return all voice samples for a style, ordered by numeric suffix."""
 
         style_id = _style_id(style_id)
         self._style(speaker_uuid, style_id)
@@ -419,7 +442,7 @@ class SpeakerMetadataStore:
     def sample_voice_path(
         self, speaker_uuid: str, style_id: int, index: int = 0
     ) -> Path:
-        """数値ファイル順の0始まりインデックスで音声サンプルを返します。"""
+        """Return a voice sample by zero-based position in numeric file order."""
 
         index = _sample_index(index)
         paths = self.voice_sample_paths(speaker_uuid, style_id)
@@ -443,14 +466,14 @@ class SpeakerMetadataStore:
         return _base64_file(path, "voice sample")
 
     def read_policy(self, speaker_uuid: str) -> str:
-        """必須の``policy.md``をUTF-8テキストとして読み込みます。"""
+        """Read the required ``policy.md`` file as UTF-8 text."""
 
         return _read_text(
             self.speaker_path(speaker_uuid) / "policy.md", "speaker policy"
         )
 
-    def license_paths(self, speaker_uuid: str) -> List[Path]:
-        """すべてのLICENSEファイルを安定したファイル名順で返します。"""
+    def license_paths(self, speaker_uuid: str) -> list[Path]:
+        """Return all LICENSE files in stable filename order."""
 
         folder = self.speaker_path(speaker_uuid)
         paths = [
@@ -460,10 +483,12 @@ class SpeakerMetadataStore:
         ]
         return sorted(paths, key=lambda path: (path.name.lower(), path.name))
 
-    def read_license(self, speaker_uuid: str) -> Optional[str]:
-        """標準ライセンスを読み込み、なければ最初のLICENSEファイルへフォールバックします。
-        パッケージに作者固有の``LICENSE_*.txt``があっても``LICENSE.txt``を優先します。
-        すべてのライセンスを個別に表示する呼び出し元は``license_paths``を使えます。
+    def read_license(self, speaker_uuid: str) -> str | None:
+        """Read the canonical license, falling back to the first LICENSE file.
+
+        ``LICENSE.txt`` is preferred when a package also contains an
+        author-specific ``LICENSE_*.txt``.  ``license_paths`` remains
+        available to callers that need to present every license separately.
         """
 
         paths = self.license_paths(speaker_uuid)
@@ -475,23 +500,21 @@ class SpeakerMetadataStore:
         return _read_text(preferred, "speaker license")
 
     def speaker_policy(self, speaker_uuid: str) -> SpeakerPolicy:
-        """1話者分の規約と任意のライセンス本文を返します。"""
+        """Return policy and optional license text for one speaker."""
 
         policy_path = self.speaker_path(speaker_uuid) / "policy.md"
         policy = (
-            _read_text(policy_path, "speaker policy")
-            if policy_path.is_file()
-            else None
+            _read_text(policy_path, "speaker policy") if policy_path.is_file() else None
         )
         return SpeakerPolicy(policy=policy, license=self.read_license(speaker_uuid))
 
     def read_policy_license(self, speaker_uuid: str) -> SpeakerPolicy:
-        """``speaker_policy``の簡易エイリアスです。"""
+        """Convenience alias for :meth:`speaker_policy`."""
 
         return self.speaker_policy(speaker_uuid)
 
     def speaker_info(self, speaker_uuid: str) -> SpeakerInfo:
-        """旧形式の追加話者情報オブジェクトを構築します。"""
+        """Build the legacy-style additional speaker information object."""
 
         record = self._record(speaker_uuid)
         style_infos = []
@@ -510,7 +533,9 @@ class SpeakerMetadataStore:
                     ),
                     voice_samples=[
                         _base64_file(path, "voice sample")
-                        for path in self.voice_sample_paths(speaker_uuid, style.style_id)
+                        for path in self.voice_sample_paths(
+                            speaker_uuid, style.style_id
+                        )
                     ],
                 )
             )

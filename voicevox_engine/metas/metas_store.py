@@ -1,8 +1,12 @@
+"""Coreごとのメタデータを統合するストア。"""
+
+from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING
 
-from voicevox_engine.metas.Metas import CoreSpeaker, EngineSpeaker, Speaker, StyleInfo
+from voicevox_engine.metas.metas import CoreSpeaker, EngineSpeaker, Speaker, StyleInfo
 
 if TYPE_CHECKING:
     from voicevox_engine.synthesis_engine.synthesis_engine_base import (
@@ -17,10 +21,9 @@ class MetasStore:
 
     def __init__(self, engine_speakers_path: Path) -> None:
         self._engine_speakers_path = engine_speakers_path
-        self._loaded_metas: Dict[str, EngineSpeaker] = {}
-        self._speaker_paths: Dict[str, Path] = {}
+        self._loaded_metas: dict[str, EngineSpeaker] = {}
+        self._speaker_paths: dict[str, Path] = {}
 
-        # UUIDと物理フォルダの対応は起動時に読み込み、リクエストごとの探索を避けます。
         for folder in sorted(engine_speakers_path.iterdir()):
             if not folder.is_dir() or folder.name.startswith("."):
                 continue
@@ -41,7 +44,7 @@ class MetasStore:
     def speaker_path(self, speaker_uuid: str) -> Path:
         return self._speaker_paths[speaker_uuid]
 
-    def combine_metas(self, core_metas: List[CoreSpeaker]) -> List[Speaker]:
+    def combine_metas(self, core_metas: list[CoreSpeaker]) -> list[Speaker]:
         """
         与えられたmetaにエンジンのコア情報を付加して返す
         core_metas: コアのmetas()が返すJSONのModel
@@ -55,8 +58,9 @@ class MetasStore:
             for speaker_meta in core_metas
         ]
 
-    # FIXME: engineではなくList[CoreSpeaker]を渡す形にしてSynthesisEngineBaseの循環importを修正する。
-    def load_combined_metas(self, engine: "SynthesisEngineBase") -> List[Speaker]:
+    # FIXME: engineではなくList[CoreSpeaker]を渡す形にすることで
+    # SynthesisEngineBaseによる循環importを修正する
+    def load_combined_metas(self, engine: SynthesisEngineBase) -> list[Speaker]:
         """
         与えられたエンジンから、コア・エンジン両方の情報を含んだMetasを返す
         """
@@ -69,16 +73,16 @@ class MetasStore:
         return self._engine_speakers_path
 
     @property
-    def loaded_metas(self) -> Dict[str, EngineSpeaker]:
+    def loaded_metas(self) -> dict[str, EngineSpeaker]:
         return self._loaded_metas
 
 
-def construct_lookup(speakers: List[Speaker]) -> Dict[int, Tuple[Speaker, StyleInfo]]:
+def construct_lookup(speakers: list[Speaker]) -> dict[int, tuple[Speaker, StyleInfo]]:
     """
     `{style.id: StyleInfo}`の変換テーブル
     """
 
-    lookup_table = dict()
+    lookup_table = {}
     for speaker in speakers:
         for style in speaker.styles:
             lookup_table[style.id] = (speaker, style)

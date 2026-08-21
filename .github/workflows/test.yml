@@ -1,0 +1,111 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/**"
+      - "build_util/**"
+      - "default.csv"
+      - "default_setting.yml"
+      - "engine_manifest.json"
+      - "engine_manifest_assets/**"
+      - "generate_licenses.py"
+      - "presets.yaml"
+      - "pyproject.toml"
+      - "run.py"
+      - "test/**"
+      - "ui_template/**"
+      - "uv.lock"
+      - "voicevox_engine/**"
+  pull_request:
+    paths:
+      - ".github/**"
+      - "build_util/**"
+      - "default.csv"
+      - "default_setting.yml"
+      - "engine_manifest.json"
+      - "engine_manifest_assets/**"
+      - "generate_licenses.py"
+      - "presets.yaml"
+      - "pyproject.toml"
+      - "run.py"
+      - "test/**"
+      - "ui_template/**"
+      - "uv.lock"
+      - "voicevox_engine/**"
+  workflow_dispatch:
+
+concurrency:
+  group: coeiroink-engine-test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux-cpu:
+    name: Linux CPU lock/lint/unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out Engine
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: coeiroink_engine
+          persist-credentials: false
+
+      - name: Check out adjacent Core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cyrne1-7208/coeiroink_core
+          ref: main
+          path: coeiroink_core
+          persist-credentials: false
+
+      - name: Set up uv and Python 3.14
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.12.5
+          python-version: "3.14"
+          activate-environment: true
+          working-directory: coeiroink_engine
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Validate Engine uv.lock
+        working-directory: coeiroink_engine
+        run: uv lock --check
+
+      - name: Validate workflow files
+        working-directory: coeiroink_engine
+        run: |
+          actionlint_version=1.7.12
+          actionlint_dir="${RUNNER_TEMP}/actionlint"
+          archive="${actionlint_dir}/actionlint.tar.gz"
+          mkdir -p "${actionlint_dir}"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output "${archive}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  ${archive}" | sha256sum --check
+          tar -xzf "${archive}" -C "${actionlint_dir}" actionlint
+          "${actionlint_dir}/actionlint" -color
+
+      - name: Install the locked Linux CPU development environment
+        working-directory: coeiroink_engine
+        run: uv sync --locked --extra cpu --group dev
+
+      - name: Check linting and formatting
+        working-directory: coeiroink_engine
+        run: |
+          uv run --locked --extra cpu --group dev ruff check .
+          uv run --locked --extra cpu --group dev ruff format --check .
+
+      - name: Run unit tests
+        working-directory: coeiroink_engine
+        run: uv run --locked --extra cpu --group dev pytest -q

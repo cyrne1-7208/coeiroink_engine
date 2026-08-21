@@ -1,5 +1,8 @@
+"""話者・スタイルのメタデータモデル。"""
+
+from __future__ import annotations
+
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,7 +37,7 @@ class SpeakerSupportPermittedSynthesisMorphing(str, Enum):
     NOTHING = "NOTHING"  # 全て禁止
 
     @classmethod
-    def _missing_(cls, value: object) -> "SpeakerSupportPermittedSynthesisMorphing":
+    def _missing_(cls, value: object) -> SpeakerSupportPermittedSynthesisMorphing:
         return SpeakerSupportPermittedSynthesisMorphing.ALL
 
 
@@ -44,7 +47,8 @@ class SpeakerSupportedFeatures(BaseModel):
     """
 
     permitted_synthesis_morphing: SpeakerSupportPermittedSynthesisMorphing = Field(
-        title="モーフィング機能への対応", default=SpeakerSupportPermittedSynthesisMorphing(None)
+        title="モーフィング機能への対応",
+        default=SpeakerSupportPermittedSynthesisMorphing(None),
     )
 
 
@@ -55,7 +59,7 @@ class CoreSpeaker(BaseModel):
 
     name: str = Field(title="名前")
     speaker_uuid: str = Field(title="スピーカーのUUID")
-    styles: List[SpeakerStyle] = Field(title="スピーカースタイルの一覧")
+    styles: list[SpeakerStyle] = Field(title="スピーカースタイルの一覧")
     version: str = Field(title="スピーカーのバージョン")
 
 
@@ -75,7 +79,6 @@ class Speaker(CoreSpeaker, EngineSpeaker):
     """
 
 
-
 class StyleInfo(BaseModel):
     """
     スタイルの追加情報
@@ -83,11 +86,13 @@ class StyleInfo(BaseModel):
 
     id: int = Field(title="スタイルID")
     icon: str = Field(title="当該スタイルのアイコンをbase64エンコードしたもの")
-    portrait: Optional[str] = Field(
+    portrait: str | None = Field(
         default=None,
         title="当該スタイルのportrait.pngをbase64エンコードしたもの",
     )
-    voice_samples: List[str] = Field(title="voice_sampleのwavファイルをbase64エンコードしたもの")
+    voice_samples: list[str] = Field(
+        title="voice_sampleのwavファイルをbase64エンコードしたもの"
+    )
 
 
 class SpeakerInfo(BaseModel):
@@ -97,4 +102,4 @@ class SpeakerInfo(BaseModel):
 
     policy: str = Field(title="policy.md")
     portrait: str = Field(title="portrait.pngをbase64エンコードしたもの")
-    style_infos: List[StyleInfo] = Field(title="スタイルの追加情報")
+    style_infos: list[StyleInfo] = Field(title="スタイルの追加情報")

@@ -1,0 +1,175 @@
+name: test-engine-package
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "成果物を作成したbuild-engine workflow run ID"
+        required: true
+        type: string
+      target:
+        description: "成果物を検証する依存環境"
+        required: true
+        type: choice
+        default: linux-cpu
+        options:
+          - linux-cpu
+          - linux-cuda
+          - linux-opencl
+          - windows-cpu
+          - windows-cuda
+          - windows-directml
+
+concurrency:
+  group: coeiroink-engine-package-test-${{ github.ref }}-${{ inputs.target }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Test Engine package on ${{ inputs.target }}
+    runs-on: ${{ startsWith(inputs.target, 'windows-') && 'windows-2022' || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    steps:
+      - name: Select dependency profile
+        id: profile
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            linux-cpu|windows-cpu) extra=cpu; python=3.14 ;;
+            linux-cuda|windows-cuda) extra=cuda; python=3.14 ;;
+            linux-opencl) extra=opencl; python=3.14 ;;
+            windows-directml) extra=directml; python=3.12 ;;
+            *) echo "unknown target: $TARGET" >&2; exit 2 ;;
+          esac
+          echo "extra=$extra" >> "$GITHUB_OUTPUT"
+          echo "python=$python" >> "$GITHUB_OUTPUT"
+
+      - name: Download package from selected build run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coeiroink-engine-package
+          path: package
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.build_run_id }}
+
+      - name: Extract the runnable source bundle
+        run: |
+          set -euo pipefail
+          bundle="$GITHUB_WORKSPACE/package/coeiroink-server-oss-source.tar.gz"
+          test -f "$bundle"
+          tar -xzf "$bundle" -C "$RUNNER_TEMP"
+          test -f "$RUNNER_TEMP/coeiroink-server-oss/coeiroink_engine/run.py"
+          test -f "$RUNNER_TEMP/coeiroink-server-oss/coeiroink_engine/uv.lock"
+          test -f "$RUNNER_TEMP/coeiroink-server-oss/coeiroink_core/pyproject.toml"
+
+      - name: Install OpenCL build headers
+        if: inputs.target == 'linux-opencl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libsqlite3-dev \
+            ocl-icd-opencl-dev \
+            opencl-headers
+
+      - name: Set up target Python and uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.12.5
+          python-version: ${{ steps.profile.outputs.python }}
+          activate-environment: true
+          working-directory: ${{ runner.temp }}/coeiroink-server-oss/coeiroink_engine
+
+      - name: Validate Engine uv.lock
+        working-directory: ${{ runner.temp }}/coeiroink-server-oss/coeiroink_engine
+        run: uv lock --check
+
+      - name: Install locked runtime dependencies
+        working-directory: ${{ runner.temp }}/coeiroink-server-oss/coeiroink_engine
+        run: uv sync --locked --extra "${{ steps.profile.outputs.extra }}" --no-dev
+
+      - name: Validate archives and install the built wheel
+        working-directory: ${{ runner.temp }}/coeiroink-server-oss/coeiroink_engine
+        run: |
+          set -euo pipefail
+          wheel_path="$(find "$GITHUB_WORKSPACE/package" -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          sdist_path="$(find "$GITHUB_WORKSPACE/package" -maxdepth 1 -type f -name 'coeiroink_engine-*.tar.gz' -print -quit)"
+          test -n "$wheel_path"
+          test -n "$sdist_path"
+          uv pip install --python .venv --no-deps --force-reinstall "$wheel_path"
+          python - "$wheel_path" "$sdist_path" <<'PY'
+          import sys
+          import tarfile
+          import zipfile
+
+          wheel_path, sdist_path = sys.argv[1:]
+          with zipfile.ZipFile(wheel_path) as wheel:
+              assert wheel.testzip() is None
+          with tarfile.open(sdist_path) as sdist:
+              assert sdist.getmembers()
+          PY
+          uv pip check
+
+      - name: Import the installed package outside the checkout
+        run: |
+          set -euo pipefail
+          test_dir="$(mktemp -d)"
+          cd "$test_dir"
+          python -c "import importlib.metadata as metadata; import coeirocore, torch, voicevox_engine; print(metadata.version('coeiroink-engine')); print(voicevox_engine.__version__); print(torch.__version__)"
+
+      - name: Import-check DirectML bindings
+        if: steps.profile.outputs.extra == 'directml'
+        run: python -c "import torch_directml; print('torch-directml import ok')"
+
+      - name: Import-check OpenCL bindings
+        if: steps.profile.outputs.extra == 'opencl'
+        run: python -c "import pytorch_ocl; print('OpenCL bindings import ok')"
+
+      - name: Start the packaged mock server and check HTTP
+        working-directory: ${{ runner.temp }}/coeiroink-server-oss/coeiroink_engine
+        run: |
+          set -euo pipefail
+          speaker_dir="${RUNNER_TEMP}/speaker_info"
+          server_log="${RUNNER_TEMP}/coeiroink-engine.log"
+          mkdir -p "$speaker_dir"
+          python run.py \
+            --enable_mock \
+            --device cpu \
+            --host 127.0.0.1 \
+            --port 50032 \
+            --speaker_info_dir "$speaker_dir" >"$server_log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            status=$?
+            if kill -0 "$server_pid" 2>/dev/null; then
+              kill "$server_pid"
+              wait "$server_pid" || true
+            fi
+            if [ "$status" -ne 0 ]; then
+              cat "$server_log"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 12); do
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              http://127.0.0.1:50032/voicevox/version || true)"
+            if [ "$status" = 200 ]; then
+              echo "Packaged Engine HTTP server is ready"
+              exit 0
+            fi
+            echo "Attempt $attempt/12: HTTP status ${status:-connection failure}"
+            sleep 5
+          done
+          exit 1

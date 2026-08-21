@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import platform
 from ctypes import CDLL, POINTER, c_bool, c_char_p, c_float, c_int, c_long
@@ -5,7 +7,6 @@ from ctypes.util import find_library
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 
@@ -14,7 +15,13 @@ class OldCoreError(Exception):
     """古いコアが使用されている場合に発生するエラー"""
 
 
-def load_runtime_lib(runtime_dirs: List[Path]):
+class CoreRuntimeError(RuntimeError):
+    """ネイティブCoreが報告した推論・初期化エラー。"""
+
+
+def load_runtime_lib(runtime_dirs: list[Path]):
+    """候補ランタイムを先に読み込み、共有ライブラリ探索時の依存解決を補助する。"""
+
     if platform.system() == "Windows":
         # DirectML.dllはonnxruntimeと互換性のないWindows標準搭載のものを優先して読み込むことがあるため、明示的に読み込む
         # 参考 1. https://github.com/microsoft/onnxruntime/issues/3360
@@ -34,6 +41,7 @@ def load_runtime_lib(runtime_dirs: List[Path]):
         lib_names = ["onnxruntime"]
     else:
         raise RuntimeError("不明なOSです")
+    # 候補の欠落は正常系であり、実際に選択されたCore本体を読めない場合はload_coreが詳細を報告する。
     for lib_path in runtime_dirs:
         for file_name in lib_file_names:
             try:
@@ -43,7 +51,7 @@ def load_runtime_lib(runtime_dirs: List[Path]):
     for lib_name in lib_names:
         try:
             CDLL(find_library(lib_name))
-        except (OSError, TypeError):
+        except OSError, TypeError:
             pass
 
 
@@ -65,7 +73,7 @@ class CoreInfo:
 
 # version 0.12 より前のコアの情報
 CORE_INFOS = [
-    # Windows向け
+    # Windows
     CoreInfo(
         name="core.dll",
         platform="Windows",
@@ -143,7 +151,7 @@ CORE_INFOS = [
         core_type="onnxruntime",
         gpu_type=GPUType.DIRECT_ML,
     ),
-    # Linux向け
+    # Linux
     CoreInfo(
         name="libcore.so",
         platform="Linux",
@@ -186,7 +194,7 @@ CORE_INFOS = [
         core_type="onnxruntime",
         gpu_type=GPUType.NONE,
     ),
-    # macOS向け
+    # macOS
     CoreInfo(
         name="libcore_cpu_universal2.dylib",
         platform="Darwin",
@@ -207,7 +215,7 @@ CORENAME_DICT = {
 }
 
 
-def find_version_0_12_core_or_later(core_dir: Path) -> Optional[str]:
+def find_version_0_12_core_or_later(core_dir: Path) -> str | None:
     """
     core_dir で指定したディレクトリにあるコアライブラリが Version 0.12 以降である場合、
     見つかった共有ライブラリの名前を返す。
@@ -230,23 +238,22 @@ def find_version_0_12_core_or_later(core_dir: Path) -> Optional[str]:
     return None
 
 
-def get_arch_name() -> Optional[str]:
+def get_arch_name() -> str | None:
     """
     platform.machine() が特定のアーキテクチャ上で複数パターンの文字列を返し得るので、
     一意な文字列に変換する
     サポート外のアーキテクチャである場合、None を返す
     """
     machine = platform.machine()
-    if machine == "x86_64" or machine == "x64" or machine == "AMD64":
+    if machine in {"x86_64", "x64", "AMD64"}:
         return "x64"
-    elif machine == "i386" or machine == "x86":
+    if machine in {"i386", "x86"}:
         return "x86"
-    elif machine == "arm64":
+    if machine == "arm64":
         return "aarch64"
-    elif machine in ["armv7l", "aarch64"]:
+    if machine in {"armv7l", "aarch64"}:
         return machine
-    else:
-        return None
+    return None
 
 
 def get_core_name(
@@ -254,7 +261,7 @@ def get_core_name(
     platform_name: str,
     model_type: str,
     gpu_type: GPUType,
-) -> Optional[str]:
+) -> str | None:
     if platform_name == "Darwin":
         if gpu_type == GPUType.NONE and (arch_name == "x64" or arch_name == "aarch64"):
             arch_name = "universal"
@@ -274,7 +281,7 @@ def get_core_name(
 def get_suitable_core_name(
     model_type: str,
     gpu_type: GPUType,
-) -> Optional[str]:
+) -> str | None:
     arch_name = get_arch_name()
     if arch_name is None:
         return None
@@ -282,7 +289,7 @@ def get_suitable_core_name(
     return get_core_name(arch_name, platform_name, model_type, gpu_type)
 
 
-def check_core_type(core_dir: Path) -> Optional[str]:
+def check_core_type(core_dir: Path) -> str | None:
     # libtorch版はDirectML未対応なので、ここでは`gpu_type=GPUType.DIRECT_ML`は入れない
     libtorch_core_names = [
         get_suitable_core_name("libtorch", gpu_type=GPUType.CUDA),
@@ -293,23 +300,23 @@ def check_core_type(core_dir: Path) -> Optional[str]:
         get_suitable_core_name("onnxruntime", gpu_type=GPUType.DIRECT_ML),
         get_suitable_core_name("onnxruntime", gpu_type=GPUType.NONE),
     ]
-    if any([(core_dir / name).is_file() for name in libtorch_core_names if name]):
+    if any((core_dir / name).is_file() for name in libtorch_core_names if name):
         return "libtorch"
-    elif any([(core_dir / name).is_file() for name in onnxruntime_core_names if name]):
+    if any((core_dir / name).is_file() for name in onnxruntime_core_names if name):
         return "onnxruntime"
-    else:
-        return None
+    return None
 
 
 def load_core(core_dir: Path, use_gpu: bool) -> CDLL:
-    load_errors: List[str] = []
-    last_load_error: Optional[OSError] = None
+    """Core世代・実装方式・GPU指定に合う共有ライブラリを優先順に読み込む。"""
 
-    def try_load(core_name: str) -> Optional[CDLL]:
+    load_errors: list[str] = []
+    last_load_error: OSError | None = None
+
+    def try_load(core_name: str) -> CDLL | None:
         nonlocal last_load_error
         try:
-            # NOTE: CDLL クラスのコンストラクタの引数 name には文字列を渡す必要がある。
-            #       Windows 環境では PathLike オブジェクトを引数として渡すと初期化に失敗する。
+            # WindowsではCDLLのnameへPathLikeを渡すと初期化に失敗するため、全OSで文字列へ統一する。
             return CDLL(str((core_dir / core_name).resolve(strict=True)))
         except OSError as error:
             last_load_error = error
@@ -359,6 +366,8 @@ def load_core(core_dir: Path, use_gpu: bool) -> CDLL:
 
 
 class CoreWrapper:
+    """複数世代のVOICEVOX Core共有ライブラリを共通のctypes APIへ適合させる。"""
+
     def __init__(
         self,
         use_gpu: bool,
@@ -430,26 +439,27 @@ class CoreWrapper:
             POINTER(c_float),
         )
 
+        # 旧Coreは相対パスでモデル資産を探すため、初期化中だけ作業ディレクトリをCore配置先へ切り替える。
         cwd = os.getcwd()
         os.chdir(core_dir)
         try:
             if is_version_0_12_core_or_later:
                 if not self.core.initialize(use_gpu, cpu_num_threads, load_all_models):
-                    raise Exception(
+                    raise CoreRuntimeError(
                         self.core.last_error_message().decode(
                             "utf-8", "backslashreplace"
                         )
                     )
             elif exist_cpu_num_threads:
                 if not self.core.initialize(".", use_gpu, cpu_num_threads):
-                    raise Exception(
+                    raise CoreRuntimeError(
                         self.core.last_error_message().decode(
                             "utf-8", "backslashreplace"
                         )
                     )
             else:
                 if not self.core.initialize(".", use_gpu):
-                    raise Exception(
+                    raise CoreRuntimeError(
                         self.core.last_error_message().decode(
                             "utf-8", "backslashreplace"
                         )
@@ -474,7 +484,7 @@ class CoreWrapper:
             output.ctypes.data_as(POINTER(c_float)),
         )
         if not success:
-            raise Exception(
+            raise CoreRuntimeError(
                 self.core.last_error_message().decode("utf-8", "backslashreplace")
             )
         return output
@@ -509,7 +519,7 @@ class CoreWrapper:
             output.ctypes.data_as(POINTER(c_float)),
         )
         if not success:
-            raise Exception(
+            raise CoreRuntimeError(
                 self.core.last_error_message().decode("utf-8", "backslashreplace")
             )
         return output
@@ -532,7 +542,7 @@ class CoreWrapper:
             output.ctypes.data_as(POINTER(c_float)),
         )
         if not success:
-            raise Exception(
+            raise CoreRuntimeError(
                 self.core.last_error_message().decode("utf-8", "backslashreplace")
             )
         return output

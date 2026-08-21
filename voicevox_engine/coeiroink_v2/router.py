@@ -1,22 +1,27 @@
-"""公開COEIROINK v2サーバー機能のHTTPアダプターです。
-ルーターを``run.py``から独立させ、アプリケーションがAudioManager相当のオブジェクトと話者メタデータストアを渡す構成にします。
-そのためニューラルモデルを読み込まずにテストでき、合成と音声処理は公開オブジェクトまたはv2ヘルパーへ委譲します。
+"""公開COEIROINK v2 APIをHTTPへ接続するアダプター。
+
+ルーターは`run.py`から独立させ、AudioManager互換オブジェクトと話者メタデータストアを外部から受け取る。
+音声合成と波形処理はCoreの公開APIまたはこのパッケージのv2ヘルパーへ委譲する。
 """
 
 import inspect
 import math
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any
 
 import numpy as np
 from coeirocore.coeiro_manager import (
     AmbiguousStyleError as CoreAmbiguousStyleError,
 )
+from coeirocore.coeiro_manager import CoeiroCoreError
 from coeirocore.coeiro_manager import (
     StyleNotFoundError as CoreStyleNotFoundError,
 )
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse, Response
+
+from voicevox_engine import __version__
 
 from . import audio as audio_helpers
 from .catalog import OfficialSiteCatalogClient
@@ -61,20 +66,35 @@ from .prosody import (
     estimate_prosody,
     estimate_prosody_from_kana,
 )
-from .td_psola import process_td_psola
+from .td_psola import (
+    TDPSOLAProcessingError,
+    TDPSOLAValidationError,
+    process_td_psola,
+)
 
 CatalogCallback = Callable[[], Any]
 DictionaryCallback = Callable[[DictionaryWords], Any]
 
+# 想定済みの公開APIエラーだけをHTTPへ変換し、未知の例外はASGIまで伝播させてtracebackを残す。
+HANDLED_API_ERRORS = (
+    HTTPException,
+    CoeiroCoreError,
+    MetadataError,
+    OSError,
+    audio_helpers.AudioProcessingError,
+    TDPSOLAProcessingError,
+    TDPSOLAValidationError,
+    TypeError,
+    ValueError,
+)
+
 
 def _call_with_supported_kwargs(function: Callable[..., Any], **kwargs: Any) -> Any:
-    """小さなテスト用代替オブジェクトも受け付けてマネージャーのメソッドを呼び出します。
-    実際のCoreは``speaker_uuid``を受け付けますが、簡易スタブは省略することがあるため、検査できるシグネチャの引数だけを渡します。
-    """
+    """Core実装と最小テストダブルの両方を呼べるよう、関数が受理するキーワード引数だけを渡す。"""
 
     try:
         signature = inspect.signature(function)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return function(**kwargs)
 
     parameters = signature.parameters.values()
@@ -87,11 +107,13 @@ def _call_with_supported_kwargs(function: Callable[..., Any], **kwargs: Any) -> 
         if parameter.kind
         in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
     }
-    return function(**{name: value for name, value in kwargs.items() if name in accepted})
+    return function(
+        **{name: value for name, value in kwargs.items() if name in accepted}
+    )
 
 
 def _attribute_or_call(value: Any, names: Sequence[str], default: Any = None) -> Any:
-    """最初に一致した属性を取得し、呼び出し可能なら実行して返します。"""
+    """候補名から最初の属性を取得し、呼出可能なら引数なしで評価する。"""
 
     for name in names:
         if not hasattr(value, name):
@@ -106,7 +128,7 @@ def _metadata_value(store: Any, names: Sequence[str], default: Any = None) -> An
 
 
 def _raw_attribute(value: Any, names: Sequence[str], default: Any = None) -> Any:
-    """引数が必要なメソッド向けに、属性を実行せず取得します。"""
+    """引数を必要とするメソッド向けに、候補名から属性を呼び出さず取得する。"""
 
     for name in names:
         if hasattr(value, name):
@@ -124,7 +146,7 @@ def _model_value(value: Any, *names: str, default: Any = None) -> Any:
 
 
 def _as_http_error(error: Exception, default_status: int = 500) -> HTTPException:
-    """公開アダプターの例外をトレースバックなしの安定したHTTPエラーへ変換します。"""
+    """既知の公開例外だけを安定したHTTPエラーへ変換し、未知の障害はこの関数へ渡さない。"""
 
     if isinstance(error, HTTPException):
         return error
@@ -161,12 +183,14 @@ def _as_waveform(value: Any) -> np.ndarray:
     if wave.ndim != 1:
         wave = wave.reshape(-1)
     if wave.size == 0 or not np.isfinite(wave).all():
-        raise audio_helpers.AudioValidationError("audio manager returned an invalid waveform")
+        raise audio_helpers.AudioValidationError(
+            "audio manager returned an invalid waveform"
+        )
     return wave
 
 
-def _prediction_parts(result: Any) -> Tuple[np.ndarray, List[int]]:
-    """公開CoreのPredictionResultと同等の小さな代替結果を受け付けます。"""
+def _prediction_parts(result: Any) -> tuple[np.ndarray, list[int]]:
+    """CoreのPredictionResultと、同じ情報を持つ互換オブジェクトを波形・継続長へ分解する。"""
 
     if isinstance(result, Mapping):
         wave = result.get("wav")
@@ -192,7 +216,7 @@ def _prediction_parts(result: Any) -> Tuple[np.ndarray, List[int]]:
     return _as_waveform(wave), duration_frames
 
 
-def _mora_phonemes(mora: Any) -> List[str]:
+def _mora_phonemes(mora: Any) -> list[str]:
     value = _model_value(mora, "phoneme")
     if not isinstance(value, str) or not value:
         raise ProsodyError("prosodyDetail contains an invalid phoneme")
@@ -202,30 +226,131 @@ def _mora_phonemes(mora: Any) -> List[str]:
     return [phoneme if phoneme == "N" else phoneme.lower() for phoneme in result]
 
 
+def _detail_special_kind(phrase: Sequence[Any]) -> str | None:
+    """公式v2形式の特殊プロソディ句を検証して分類する。"""
+
+    moras = list(phrase)
+    if not moras:
+        raise ProsodyError("prosodyDetail contains an empty phrase")
+
+    first_phoneme = _model_value(moras[0], "phoneme", default=None)
+    if first_phoneme not in {"_", "?"}:
+        for mora in moras:
+            if any(phoneme in {"_", "?"} for phoneme in _mora_phonemes(mora)):
+                raise ProsodyError("prosodyDetail contains an invalid special phrase")
+        return None
+
+    if len(moras) != 1:
+        raise ProsodyError("a special prosody phrase must contain one mora")
+    mora = moras[0]
+    accent = _model_value(mora, "accent", default=None)
+    hira = _model_value(mora, "hira", default=None)
+    expected_hira = {"_": "、", "?": "？"}[first_phoneme]
+    if (
+        isinstance(accent, bool)
+        or not isinstance(accent, int)
+        or accent != 0
+        or hira != expected_hira
+    ):
+        raise ProsodyError("prosodyDetail contains an invalid special phrase")
+    return first_phoneme
+
+
+def _split_prosody_detail(
+    detail: Sequence[Sequence[Any]],
+) -> tuple[list[list[Any]], list[bool], bool, bool]:
+    """通常句と公式形式の休止・疑問句を分離する。"""
+
+    try:
+        phrases = [list(phrase) for phrase in detail]
+    except TypeError as error:
+        raise ProsodyError("prosodyDetail must be a sequence of phrases") from error
+
+    ordinary: list[list[Any]] = []
+    pause_moras: list[bool] = []
+    pending_pause = False
+    terminal_interrogative = False
+    has_special_phrase = False
+
+    for phrase_index, phrase in enumerate(phrases):
+        special = _detail_special_kind(phrase)
+        if special == "_":
+            has_special_phrase = True
+            if not ordinary or pending_pause or terminal_interrogative:
+                raise ProsodyError("prosodyDetail contains an unexpected pause phrase")
+            pending_pause = True
+            continue
+        if special == "?":
+            has_special_phrase = True
+            if (
+                not ordinary
+                or pending_pause
+                or terminal_interrogative
+                or phrase_index != len(phrases) - 1
+            ):
+                raise ProsodyError(
+                    "the terminal question phrase must be the final prosody phrase"
+                )
+            terminal_interrogative = True
+            continue
+        if terminal_interrogative:
+            raise ProsodyError(
+                "prosodyDetail contains a phrase after the terminal question"
+            )
+        if pending_pause:
+            pause_moras[-1] = True
+            pending_pause = False
+        ordinary.append(phrase)
+        pause_moras.append(False)
+
+    if pending_pause:
+        raise ProsodyError("prosodyDetail contains a trailing pause phrase")
+    return ordinary, pause_moras, terminal_interrogative, has_special_phrase
+
+
+def _accent_markers(accent: int, mora_count: int) -> list[int]:
+    if accent == 0:
+        return [0] * mora_count
+    if accent == 1:
+        return [int(index == 0) for index in range(mora_count)]
+    return [int(0 < index < accent) for index in range(mora_count)]
+
+
 def _detail_accent(moras: Sequence[Any]) -> int:
-    """v2のモーラ高低記号からCoreのアクセント位置を復元します。"""
+    """v2の高低アクセント値からCoreのアクセント位置を復元する。"""
 
     accents = [_model_value(mora, "accent") for mora in moras]
-    if any(isinstance(value, bool) or not isinstance(value, int) for value in accents):
+    if not accents or any(
+        isinstance(value, bool) or value not in (0, 1) for value in accents
+    ):
         raise ProsodyError("prosodyDetail contains an invalid accent")
-    if not accents or all(value == 0 for value in accents):
-        return 0
-    if accents[0] == 1:
-        return 1
-    try:
-        return accents.index(1) + 1
-    except ValueError:
-        return 0
+    candidates = [
+        accent
+        for accent in range(len(accents) + 1)
+        if _accent_markers(accent, len(accents)) == accents
+    ]
+    if not candidates:
+        raise ProsodyError("prosodyDetail contains an invalid accent pattern")
+    return candidates[0]
 
 
 def _detail_to_plain(
     detail: Sequence[Sequence[Any]],
-    pause_moras: Optional[Sequence[bool]] = None,
+    pause_moras: Sequence[bool] | None = None,
     terminal_interrogative: bool = False,
-) -> List[str]:
-    """v2の``prosodyDetail``から公開Coreのトークン列を構築します。"""
+) -> list[str]:
+    """v2のprosodyDetailからCore公開形式のトークン列を組み立てる。"""
 
-    phrases = list(detail)
+    phrases, detail_pause_moras, detail_terminal, has_special = _split_prosody_detail(
+        detail
+    )
+    if pause_moras is None:
+        pause_moras = detail_pause_moras
+        terminal_interrogative = detail_terminal
+    elif has_special:
+        raise ProsodyError(
+            "pause_moras cannot be combined with special prosody phrases"
+        )
     if pause_moras is not None and len(pause_moras) != len(phrases):
         raise ProsodyError("pause_moras and prosodyDetail must have the same length")
     tokens = ["^"]
@@ -241,7 +366,9 @@ def _detail_to_plain(
                 tokens.append("[")
                 raised = True
         if phrase_index + 1 != len(phrases):
-            use_pause = bool(pause_moras[phrase_index]) if pause_moras is not None else False
+            use_pause = (
+                bool(pause_moras[phrase_index]) if pause_moras is not None else False
+            )
             tokens.append("_" if use_pause else "#")
     tokens.append("?" if terminal_interrogative else "$")
     return tokens
@@ -261,13 +388,12 @@ def _mora_to_prosody(mora: Any, index: int, accent: int, count: int) -> Mora:
     if not isinstance(text, str):
         text = str(text)
     hira = "".join(
-        chr(ord(char) - 0x60) if "\u30a1" <= char <= "\u30f6" else char
-        for char in text
+        chr(ord(char) - 0x60) if "\u30a1" <= char <= "\u30f6" else char for char in text
     )
     if not 0 <= accent <= count:
         raise ProsodyError("accent must be between 0 and the number of moras")
     if accent == 0:
-        high = int(index > 0)
+        high = 0
     elif accent == 1:
         high = int(index == 0)
     else:
@@ -276,9 +402,8 @@ def _mora_to_prosody(mora: Any, index: int, accent: int, count: int) -> Mora:
 
 
 def _query_to_prosody(query: AudioQuery) -> Prosody:
-    detail: List[List[Mora]] = []
-    pause_moras: List[bool] = []
-    for phrase in query.accent_phrases:
+    detail: list[list[Mora]] = []
+    for phrase_index, phrase in enumerate(query.accent_phrases):
         moras = list(phrase.moras)
         accent = int(phrase.accent)
         detail.append(
@@ -287,23 +412,21 @@ def _query_to_prosody(query: AudioQuery) -> Prosody:
                 for index, mora in enumerate(moras)
             ]
         )
-        pause_moras.append(phrase.pause_mora is not None)
+        if phrase_index + 1 != len(query.accent_phrases):
+            if phrase.pause_mora is not None:
+                detail.append([Mora(phoneme="_", hira="、", accent=0)])
+        elif phrase.is_interrogative:
+            detail.append([Mora(phoneme="?", hira="？", accent=0)])
     return Prosody(
-        plain=_detail_to_plain(
-            detail,
-            pause_moras=pause_moras,
-            terminal_interrogative=(
-                bool(query.accent_phrases[-1].is_interrogative)
-                if query.accent_phrases
-                else False
-            ),
-        ),
+        plain=_detail_to_plain(detail),
         detail=detail,
     )
 
 
 def _hop_length(audio_manager: Any, style_id: int, speaker_uuid: str) -> int:
-    value = _attribute_or_call(audio_manager, ("hop_length", "frame_shift", "samples_per_frame"))
+    value = _attribute_or_call(
+        audio_manager, ("hop_length", "frame_shift", "samples_per_frame")
+    )
     if value is None:
         getter = getattr(audio_manager, "get_hop_length", None)
         if getter is not None:
@@ -324,14 +447,20 @@ def _call_prediction(
     style_id: int,
     speed_scale: float,
     with_duration: bool,
-) -> Tuple[np.ndarray, List[int]]:
+) -> tuple[np.ndarray, list[int]]:
+    """継続長が必要な呼出しでは対応メソッドを優先し、通常呼出しでは波形だけのpredictも受け付ける。"""
+
     method_names = (
         ("predict_with_duration", "predict_with_durations")
         if with_duration
         else ("predict", "predict_with_duration", "predict_with_durations")
     )
     method = next(
-        (getattr(audio_manager, name) for name in method_names if hasattr(audio_manager, name)),
+        (
+            getattr(audio_manager, name)
+            for name in method_names
+            if hasattr(audio_manager, name)
+        ),
         None,
     )
     if method is None:
@@ -350,13 +479,15 @@ def _call_prediction(
 
 
 def _sampling_rate(audio_manager: Any) -> int:
-    value = _attribute_or_call(audio_manager, ("fs", "sampling_rate", "default_sampling_rate"), 44100)
+    value = _attribute_or_call(
+        audio_manager, ("fs", "sampling_rate", "default_sampling_rate"), 44100
+    )
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError("audio manager sampling rate must be a positive integer")
     return value
 
 
-def _manager_audio_method(audio_manager: Any, name: str) -> Optional[Callable[..., Any]]:
+def _manager_audio_method(audio_manager: Any, name: str) -> Callable[..., Any] | None:
     method = getattr(audio_manager, name, None)
     return method if callable(method) else None
 
@@ -365,7 +496,9 @@ def _validated_f0(value: Sequence[float]) -> np.ndarray:
     try:
         f0 = np.asarray(value, dtype=np.float64)
     except Exception as error:
-        raise audio_helpers.AudioValidationError("adjusted_f0 must be numeric") from error
+        raise audio_helpers.AudioValidationError(
+            "adjusted_f0 must be numeric"
+        ) from error
     if f0.ndim != 1 or f0.size == 0 or not np.isfinite(f0).all():
         raise audio_helpers.AudioValidationError(
             "adjusted_f0 must be a non-empty finite one-dimensional array"
@@ -377,7 +510,7 @@ def _validated_f0(value: Sequence[float]) -> np.ndarray:
 
 def _manager_world_f0(
     audio_manager: Any, wave: np.ndarray, sampling_rate: int
-) -> Optional[np.ndarray]:
+) -> np.ndarray | None:
     get_world = _manager_audio_method(audio_manager, "get_world")
     if get_world is None:
         return None
@@ -403,9 +536,9 @@ def _world_process(
     sampling_rate: int,
     pitch_scale: float,
     intonation_scale: float,
-    adjusted_f0: Optional[Sequence[float]],
+    adjusted_f0: Sequence[float] | None,
 ) -> np.ndarray:
-    """任意の明示F0トラックを使い、CoreのWORLD処理を実行します。"""
+    """CoreのWORLD処理を使い、必要なら呼出元が指定したF0軌跡を適用する。"""
 
     if adjusted_f0 is None:
         pitch = _manager_audio_method(audio_manager, "pitch_intonation")
@@ -425,19 +558,21 @@ def _world_process(
             "audio manager returned an invalid WORLD result"
         )
     base_f0, spectral_envelope, aperiodicity = result[:3]
-    f0 = _validated_f0(adjusted_f0) if adjusted_f0 is not None else _validated_f0(base_f0)
+    f0 = (
+        _validated_f0(adjusted_f0)
+        if adjusted_f0 is not None
+        else _validated_f0(base_f0)
+    )
     f0 = _fit_f0_track(f0, len(np.asarray(base_f0).reshape(-1)))
     if pitch_scale != 0.0:
         f0 *= 2.0 ** float(pitch_scale)
     if intonation_scale != 1.0:
-        # WORLDは無声音フレームをF0=0で表すため、有声フレームだけを調整して休止や無声子音を有音化しません。
+        # WORLDは無声音をF0=0で表すため、有声音だけへ抑揚を適用して休止や無声子音に音高を作らない。
         voiced = f0 > 0.0
         if np.any(voiced):
             voiced_f0 = f0[voiced]
             mean = float(np.mean(voiced_f0))
-            f0[voiced] = (
-                (voiced_f0 - mean) * float(intonation_scale) + mean
-            )
+            f0[voiced] = (voiced_f0 - mean) * float(intonation_scale) + mean
 
     try:
         from coeirocore.pyworld_compat import load_pyworld
@@ -461,25 +596,23 @@ def _processing_number(
     value: object,
     name: str,
     *,
-    minimum: Optional[float] = None,
-    maximum: Optional[float] = None,
+    minimum: float | None = None,
+    maximum: float | None = None,
 ) -> float:
     if (
         isinstance(value, bool)
         or not isinstance(value, (int, float, np.integer, np.floating))
         or not math.isfinite(float(value))
     ):
-        raise audio_helpers.AudioValidationError(
-            "{} must be a finite number".format(name)
-        )
+        raise audio_helpers.AudioValidationError(f"{name} must be a finite number")
     result = float(value)
     if minimum is not None and result < minimum:
         raise audio_helpers.AudioValidationError(
-            "{} must be greater than or equal to {}".format(name, minimum)
+            f"{name} must be greater than or equal to {minimum}"
         )
     if maximum is not None and result > maximum:
         raise audio_helpers.AudioValidationError(
-            "{} must be no greater than {}".format(name, maximum)
+            f"{name} must be no greater than {maximum}"
         )
     return result
 
@@ -501,9 +634,7 @@ def _processing_sampling_rate(value: object, name: str) -> int:
         or int(value) > audio_helpers.MAX_SAMPLING_RATE
     ):
         raise audio_helpers.AudioValidationError(
-            "{} must be a positive integer no greater than {}".format(
-                name, audio_helpers.MAX_SAMPLING_RATE
-            )
+            f"{name} must be a positive integer no greater than {audio_helpers.MAX_SAMPLING_RATE}"
         )
     return int(value)
 
@@ -511,9 +642,7 @@ def _processing_sampling_rate(value: object, name: str) -> int:
 def _require_processing_size(size: int, name: str = "processed wave") -> None:
     if size <= 0 or size > audio_helpers.MAX_GENERATED_WAVE_SAMPLES:
         raise audio_helpers.AudioValidationError(
-            "{} would exceed the maximum of {} samples".format(
-                name, audio_helpers.MAX_GENERATED_WAVE_SAMPLES
-            )
+            f"{name} would exceed the maximum of {audio_helpers.MAX_GENERATED_WAVE_SAMPLES} samples"
         )
 
 
@@ -530,15 +659,15 @@ def _process_wave(
     output_sampling_rate: int,
     start_trim_buffer: float,
     end_trim_buffer: float,
-    processing_algorithm: Optional[str] = None,
-    adjusted_f0: Optional[Sequence[float]] = None,
-    sampled_interval_value: Optional[int] = None,
-    pause_length: Optional[float] = None,
-    pause_start_trim_buffer: Optional[float] = None,
-    pause_end_trim_buffer: Optional[float] = None,
-    mora_durations: Optional[Sequence[Any]] = None,
-) -> Tuple[np.ndarray, int]:
-    """指定されたマネージャーの公開プリミティブでv2処理を実行します。"""
+    processing_algorithm: str | None = None,
+    adjusted_f0: Sequence[float] | None = None,
+    sampled_interval_value: int | None = None,
+    pause_length: float | None = None,
+    pause_start_trim_buffer: float | None = None,
+    pause_end_trim_buffer: float | None = None,
+    mora_durations: Sequence[Any] | None = None,
+) -> tuple[np.ndarray, int]:
+    """受け取ったAudioManagerの公開プリミティブを使い、v2の波形後処理を定められた順序で適用する。"""
 
     current = _as_waveform(wave)
     _require_processing_size(current.size, "input wave")
@@ -546,24 +675,18 @@ def _process_wave(
     output_sampling_rate = _processing_sampling_rate(
         output_sampling_rate, "output_sampling_rate"
     )
-    volume_scale = _processing_number(
-        volume_scale, "volume_scale", minimum=0.0
-    )
+    volume_scale = _processing_number(volume_scale, "volume_scale", minimum=0.0)
     pitch_scale = _processing_number(
         pitch_scale, "pitch_scale", minimum=-32.0, maximum=32.0
     )
     intonation_scale = _processing_number(
         intonation_scale, "intonation_scale", minimum=0.0
     )
-    pre_phoneme_length = _processing_duration(
-        pre_phoneme_length, "pre_phoneme_length"
-    )
+    pre_phoneme_length = _processing_duration(pre_phoneme_length, "pre_phoneme_length")
     post_phoneme_length = _processing_duration(
         post_phoneme_length, "post_phoneme_length"
     )
-    start_trim_buffer = _processing_duration(
-        start_trim_buffer, "start_trim_buffer"
-    )
+    start_trim_buffer = _processing_duration(start_trim_buffer, "start_trim_buffer")
     end_trim_buffer = _processing_duration(end_trim_buffer, "end_trim_buffer")
     pause_start_trim_buffer = _processing_duration(
         pause_start_trim_buffer if pause_start_trim_buffer is not None else 0.0,
@@ -576,18 +699,16 @@ def _process_wave(
     if pause_length is not None:
         pause_length = _processing_duration(pause_length, "pause_length")
 
-    # 空の``adjustedF0``リストは呼び出し元のF0トラックがないことを表します。
+    # 公式リクエスト例の`adjustedF0: []`は、呼出元指定のF0軌跡がないことを表す。
     if adjusted_f0 is not None and len(adjusted_f0) == 0:
         adjusted_f0 = None
-    target_f0 = (
-        _validated_f0(adjusted_f0) if adjusted_f0 is not None else None
-    )
+    target_f0 = _validated_f0(adjusted_f0) if adjusted_f0 is not None else None
 
     algorithm = (processing_algorithm or "td-psola").lower()
     if algorithm not in ("td-psola", "world", "resampling"):
         algorithm = "td-psola"
 
-    # F0トラックはトリミング前のモデル波形に対応するため、休止長変更や端の無音トリミングより先にピッチ処理を行います。
+    # F0軌跡は未トリムのモデル波形を基準にするため、休止長変更や端部トリムより先に音高処理を行う。
     if pitch_scale != 0.0 or intonation_scale != 1.0 or target_f0 is not None:
         if algorithm == "world":
             current = _world_process(
@@ -599,12 +720,9 @@ def _process_wave(
                 target_f0,
             )
         elif algorithm == "resampling":
-            # 固定レートのピッチシフトでは時間変化するF0トラックを表せません。
-            # その成分は決定的なピッチマークで処理し、選択されたリサンプリングは全体のピッチ差分だけに適用します。
+            # 固定倍率のリサンプリングでは時間変化するF0を表現できないため、その成分だけTD-PSOLAで処理して全体の音高差へリサンプリングを適用する。
             if target_f0 is not None or intonation_scale != 1.0:
-                source_f0 = _manager_world_f0(
-                    audio_manager, current, sampling_rate
-                )
+                source_f0 = _manager_world_f0(audio_manager, current, sampling_rate)
                 current = _as_waveform(
                     process_td_psola(
                         current,
@@ -623,9 +741,7 @@ def _process_wave(
                 pitch_scale,
             )
         else:
-            source_f0 = _manager_world_f0(
-                audio_manager, current, sampling_rate
-            )
+            source_f0 = _manager_world_f0(audio_manager, current, sampling_rate)
             current = _as_waveform(
                 process_td_psola(
                     current,
@@ -691,9 +807,7 @@ def _process_wave(
             current = np.concatenate((pre, current, post)).astype(np.float32)
 
     if output_sampling_rate != sampling_rate:
-        projected_size = int(
-            math.ceil(current.size * output_sampling_rate / sampling_rate)
-        )
+        projected_size = math.ceil(current.size * output_sampling_rate / sampling_rate)
         _require_processing_size(projected_size, "resampled wave")
         resampling = _manager_audio_method(audio_manager, "resampling")
         if resampling is not None:
@@ -720,14 +834,14 @@ def _process_wave(
     current = _as_waveform(current)
     _require_processing_size(current.size)
 
-    # 旧形式のサンプリング間隔は通信互換性のため受け付けますが、公開処理側が安全な解析間隔を決めます。
+    # 旧sampling intervalは通信互換性のため受理するが、公開処理器は安全な解析間隔を内部で決める。
     del sampled_interval_value
     return current, output_sampling_rate
 
 
 def _catalog_result(
     catalog: Any,
-    explicit_callback: Optional[CatalogCallback],
+    explicit_callback: CatalogCallback | None,
     names: Sequence[str],
     default: Any,
 ) -> Any:
@@ -750,7 +864,7 @@ def _catalog_result(
 
 
 def _public_dictionary_callback(payload: DictionaryWords) -> None:
-    """エンドポイントが使われた時だけ公開辞書アダプターを読み込みます。"""
+    """辞書エンドポイントが使われた時だけ公開辞書アダプターを読み込む。"""
 
     from .dictionary import set_dictionary
 
@@ -760,7 +874,7 @@ def _public_dictionary_callback(payload: DictionaryWords) -> None:
 def _first_speaker_uuid(store: Any) -> str:
     uuids = _metadata_value(store, ("speaker_uuids",), default=None)
     if uuids:
-        return sorted(str(value) for value in uuids)[0]
+        return min(str(value) for value in uuids)
     speakers = _metadata_value(store, ("list_speakers", "speakers"), default=[])
     if speakers:
         uuid = _model_value(speakers[0], "speaker_uuid", "speakerUuid")
@@ -769,7 +883,11 @@ def _first_speaker_uuid(store: Any) -> str:
     raise SpeakerNotFoundError("<first>")
 
 
-def _speaker_style(store: Any, speaker_uuid: Optional[str], style_id: Optional[int]) -> Tuple[str, int]:
+def _speaker_style(
+    store: Any, speaker_uuid: str | None, style_id: int | None
+) -> tuple[str, int]:
+    """明示指定、スタイル検索、先頭話者の順にサンプル音声用の話者・スタイルを確定する。"""
+
     if speaker_uuid is not None and style_id is not None:
         get_style = getattr(store, "get_style", None)
         if callable(get_style):
@@ -809,9 +927,11 @@ def _speaker_style(store: Any, speaker_uuid: Optional[str], style_id: Optional[i
     return resolved_uuid, int(_model_value(styles[0], "style_id", "styleId", "id"))
 
 
-def _default_trim_values(value: Optional[Union[TrimBufferSettings, Mapping[str, Any]]]) -> Dict[str, float]:
+def _default_trim_values(
+    value: TrimBufferSettings | Mapping[str, Any] | None,
+) -> dict[str, float]:
     if value is None:
-        # v2合成の既定値は端に短いバッファを残し、設定エンドポイントで4値を実行時に置き換えられます。
+        # 公式v2合成と同じ短い端部バッファを既定値とし、4項目とも設定APIから実行時に変更できる。
         value = TrimBufferSettings(
             startTrimBuffer=0.05,
             endTrimBuffer=0.05,
@@ -832,23 +952,22 @@ def create_v2_router(
     audio_manager: Any,
     metadata_store: Any = None,
     *,
-    speaker_info_dir: Optional[Union[str, Path]] = None,
+    speaker_info_dir: str | Path | None = None,
     catalog: Any = None,
-    dictionary_callback: Optional[DictionaryCallback] = None,
-    download_info_callback: Optional[CatalogCallback] = None,
-    downloadable_speakers_callback: Optional[CatalogCallback] = None,
-    update_info_callback: Optional[CatalogCallback] = None,
-    engine_version: str = "2.13.0",
+    dictionary_callback: DictionaryCallback | None = None,
+    download_info_callback: CatalogCallback | None = None,
+    downloadable_speakers_callback: CatalogCallback | None = None,
+    update_info_callback: CatalogCallback | None = None,
+    engine_version: str = __version__,
     device: str = "cpu",
     default_processing_algorithm: str = "td-psola",
-    default_trim_buffer: Optional[Union[TrimBufferSettings, Mapping[str, Any]]] = None,
+    default_trim_buffer: TrimBufferSettings | Mapping[str, Any] | None = None,
     **compatibility_options: Any,
 ) -> APIRouter:
-    """ルートに依存しないCOEIROINK v2 APIルーターを作成します。
-    ``audio_manager``は公開Coreの``AudioManager``またはpredict系メソッドと任意の音声処理を持つテスト用オブジェクトを受け付けます。
-    ``metadata_store``は``SpeakerMetadataStore``または互換オブジェクトで、パスを渡した場合は公開メタデータヘルパーで読み込みます。
-    カタログコールバックは任意で、未指定なら空リストを返します。
-    ``dictionary_callback``には解析済みの``DictionaryWords``を渡し、アプリケーションの辞書を更新できます。
+    """ルートパスに依存しないCOEIROINK v2ルーターを構築する。
+
+    audio_managerとmetadata_storeは公開実装または同じAPIを持つテストダブルを受け付ける。
+    外部カタログのコールバックは任意で、未指定時の一覧APIは空配列を返す。
     """
 
     if audio_manager is None:
@@ -866,19 +985,20 @@ def create_v2_router(
     if catalog is None:
         catalog = OfficialSiteCatalogClient()
 
-    # 短いコールバック名も互換性のため受け付けますが、HTTP契約には追加しません。
+    # 短いコールバック名はPython呼出し互換として受け付けるが、HTTP契約には含めない。
     download_info_callback = download_info_callback or compatibility_options.pop(
         "download_info", None
     )
-    downloadable_speakers_callback = downloadable_speakers_callback or compatibility_options.pop(
-        "downloadable_speakers", None
+    downloadable_speakers_callback = (
+        downloadable_speakers_callback
+        or compatibility_options.pop("downloadable_speakers", None)
     )
     update_info_callback = update_info_callback or compatibility_options.pop(
         "update_info", None
     )
     if compatibility_options:
         unknown = ", ".join(sorted(compatibility_options))
-        raise TypeError("unknown create_v2_router option(s): {}".format(unknown))
+        raise TypeError(f"unknown create_v2_router option(s): {unknown}")
 
     router = APIRouter()
     settings = {
@@ -888,7 +1008,9 @@ def create_v2_router(
 
     def metadata_required() -> Any:
         if metadata_store is None:
-            raise HTTPException(status_code=500, detail="speaker metadata is not configured")
+            raise HTTPException(
+                status_code=500, detail="speaker metadata is not configured"
+            )
         return metadata_store
 
     def make_wave_response(wave: np.ndarray, sampling_rate: int) -> Response:
@@ -897,18 +1019,23 @@ def create_v2_router(
             media_type="audio/wav",
         )
 
-    def request_detail(param: Union[WavMakingParam, SynthesisParam]) -> Tuple[List[str], List[List[Any]]]:
-        # v2の仕様では、呼び出し元が``text``からの韻律推定を求める場合に空リストを送ります。
+    def request_detail(
+        param: WavMakingParam | SynthesisParam,
+    ) -> tuple[list[str], list[list[Any]]]:
+        # v2仕様では空のprosodyDetailが、textからサーバー側でプロソディを推定する指定になる。
         if param.prosody_detail:
             detail = [list(phrase) for phrase in param.prosody_detail]
-            return _detail_to_plain(detail), detail
+            plain = _detail_to_plain(detail)
+            ordinary, _, _, _ = _split_prosody_detail(detail)
+            return plain, ordinary
         estimated = estimate_prosody(param.text)
-        return estimated.plain, estimated.detail
+        ordinary, _, _, _ = _split_prosody_detail(estimated.detail)
+        return estimated.plain, ordinary
 
     def predict_request(
-        param: Union[WavMakingParam, SynthesisParam],
+        param: WavMakingParam | SynthesisParam,
         with_duration: bool = False,
-    ) -> Tuple[np.ndarray, List[int], List[str], List[List[Any]], int]:
+    ) -> tuple[np.ndarray, list[int], list[str], list[list[Any]], int]:
         plain, detail = request_detail(param)
         wave, frames = _call_prediction(
             audio_manager,
@@ -931,23 +1058,23 @@ def create_v2_router(
 
     @router.get(
         "/v1/speakers",
-        response_model=List[SpeakerMeta],
+        response_model=list[SpeakerMeta],
         operation_id="get_speakers_v1_speakers_get",
     )
-    def get_speakers() -> List[SpeakerMeta]:
+    def get_speakers() -> list[SpeakerMeta]:
         store = metadata_required()
         try:
             result = _metadata_value(store, ("list_speakers", "speakers"), default=[])
             return list(result)
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.get(
         "/v1/speakers_path_variant",
-        response_model=List[SpeakerMetaPathVariant],
+        response_model=list[SpeakerMetaPathVariant],
         operation_id="get_speakers_v1_speakers_path_variant_get",
     )
-    def get_speakers_path_variant() -> List[SpeakerMetaPathVariant]:
+    def get_speakers_path_variant() -> list[SpeakerMetaPathVariant]:
         store = metadata_required()
         try:
             result = _metadata_value(
@@ -956,8 +1083,8 @@ def create_v2_router(
                 default=[],
             )
             return list(result)
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/estimate_prosody",
@@ -967,8 +1094,8 @@ def create_v2_router(
     def get_estimated_prosody(param: ProsodyMakingParam) -> Prosody:
         try:
             return estimate_prosody(param.text)
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/estimate_prosody_from_kana",
@@ -978,8 +1105,8 @@ def create_v2_router(
     def get_estimated_prosody_from_kana(param: ProsodyMakingParam) -> Phrase:
         try:
             return Phrase(detail=estimate_prosody_from_kana(param.text).detail)
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/estimate_f0",
@@ -997,13 +1124,15 @@ def create_v2_router(
             f0, _, _ = get_world(wave.astype(np.float64), sampling_rate)
             f0_array = np.asarray(f0, dtype=np.float32).reshape(-1)
             if not np.isfinite(f0_array).all():
-                raise audio_helpers.AudioProcessingError("WORLD F0 contains non-finite values")
+                raise audio_helpers.AudioProcessingError(
+                    "WORLD F0 contains non-finite values"
+                )
             return WorldF0(
                 f0=[float(value) for value in f0_array],
                 moraDurations=param.mora_durations,
             )
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/predict",
@@ -1022,8 +1151,8 @@ def create_v2_router(
         try:
             wave, _, _, _, sampling_rate = predict_request(param, with_duration=False)
             return make_wave_response(wave, sampling_rate)
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/predict_with_duration",
@@ -1045,14 +1174,16 @@ def create_v2_router(
                 wavBase64=audio_helpers.encode_pcm_wav_base64(wave, sampling_rate),
                 moraDurations=durations,
             )
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     def process_parameter(
         param: WavProcessingParam,
         wave: np.ndarray,
         sampling_rate: int,
-    ) -> Tuple[np.ndarray, int]:
+    ) -> tuple[np.ndarray, int]:
+        """リクエスト値を優先し、未指定のトリム・アルゴリズム設定だけをサーバー既定値で補う。"""
+
         start = (
             param.start_trim_buffer
             if param.start_trim_buffer is not None
@@ -1113,8 +1244,8 @@ def create_v2_router(
             wave, sampling_rate = audio_helpers.decode_pcm_wav_base64(param.wav_base64)
             output, output_sampling_rate = process_parameter(param, wave, sampling_rate)
             return make_wave_response(output, output_sampling_rate)
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/process_with_pitch",
@@ -1126,7 +1257,6 @@ def create_v2_router(
         },
     )
     def process_with_pitch() -> Response:
-        # 専用処理は持たず、同じ入力契約を検証するprocessへ307で委譲します。
         return RedirectResponse(url="/v1/process", status_code=307)
 
     @router.post(
@@ -1143,8 +1273,9 @@ def create_v2_router(
         },
     )
     def synthesis(param: SynthesisParam) -> Response:
+        """生波形を推論し、休止長変更に必要な場合だけ継続長を取得してから後処理する。"""
+
         try:
-            # pause_lengthがある場合だけdurationを求め、不要なフレーム変換を省きます。
             needs_duration = param.pause_length is not None
             wave, frames, plain, detail, sampling_rate = predict_request(
                 param, with_duration=needs_duration
@@ -1154,9 +1285,7 @@ def create_v2_router(
                     plain,
                     detail,
                     frames,
-                    _hop_length(
-                        audio_manager, param.style_id, param.speaker_uuid
-                    ),
+                    _hop_length(audio_manager, param.style_id, param.speaker_uuid),
                 )
                 if needs_duration
                 else None
@@ -1203,8 +1332,8 @@ def create_v2_router(
                 mora_durations=mora_durations,
             )
             return make_wave_response(output, output_sampling_rate)
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/set_dictionary",
@@ -1215,7 +1344,7 @@ def create_v2_router(
             422: {"model": HTTPValidationError},
         },
     )
-    def set_dictionary(words: DictionaryWords) -> Dict[str, Any]:
+    def set_dictionary(words: DictionaryWords) -> dict[str, Any]:
         try:
             callback = (
                 dictionary_callback
@@ -1229,11 +1358,10 @@ def create_v2_router(
                     words=words,
                     dictionary_words=words,
                 )
-            # 辞書更新前の解析結果を再利用しないよう、韻律キャッシュを破棄します。
             clear_prosody_cache()
             return {}
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/set_default_processing_algorithm",
@@ -1246,7 +1374,6 @@ def create_v2_router(
     )
     def set_default_processing_algorithm(param: AlgorithmSettings) -> None:
         settings["processing_algorithm"] = param.processing_algorithm
-        return None
 
     @router.post(
         "/v1/set_default_trim_buffer",
@@ -1264,15 +1391,13 @@ def create_v2_router(
             pause_start_trim_buffer=param.pause_start_trim_buffer,
             pause_end_trim_buffer=param.pause_end_trim_buffer,
         )
-        return None
 
     @router.get(
         "/v1/download_info",
-        response_model=List[DownloadableModel],
+        response_model=list[DownloadableModel],
         operation_id="get_download_info_v1_download_info_get",
     )
-    def download_info() -> List[DownloadableModel]:
-        # カタログ未提供時はHTTPエラーではなく空配列を返します。
+    def download_info() -> list[DownloadableModel]:
         result = _catalog_result(
             catalog,
             download_info_callback,
@@ -1283,11 +1408,10 @@ def create_v2_router(
 
     @router.get(
         "/v1/downloadable_speakers",
-        response_model=List[DownloadableSpeaker],
+        response_model=list[DownloadableSpeaker],
         operation_id="get_downloadable_speakers_v1_downloadable_speakers_get",
     )
-    def downloadable_speakers() -> List[DownloadableSpeaker]:
-        # ダウンロード機能を注入しない構成でもAPI形状を維持します。
+    def downloadable_speakers() -> list[DownloadableSpeaker]:
         result = _catalog_result(
             catalog,
             downloadable_speakers_callback,
@@ -1302,9 +1426,8 @@ def create_v2_router(
         operation_id="get_speaker_folder_path_v1_speaker_folder_path_get",
     )
     def speaker_folder_path(
-        speaker_uuid: Optional[str] = Query(None, alias="speakerUuid"),
+        speaker_uuid: str | None = Query(None, alias="speakerUuid"),
     ) -> SpeakerFolderPath:
-        # 旧APIの未解決値は404ではなく文字列"None"で返します。
         if speaker_uuid is None:
             return SpeakerFolderPath(speakerFolderPath="None")
         try:
@@ -1312,18 +1435,14 @@ def create_v2_router(
             path_getter = _raw_attribute(
                 store, ("speaker_path", "lookup_speaker_folder"), default=None
             )
-            path = (
-                path_getter(speaker_uuid)
-                if callable(path_getter)
-                else path_getter
-            )
+            path = path_getter(speaker_uuid) if callable(path_getter) else path_getter
             if path is None:
                 raise SpeakerNotFoundError(speaker_uuid)
             return SpeakerFolderPath(speakerFolderPath=str(path))
         except SpeakerNotFoundError:
             return SpeakerFolderPath(speakerFolderPath="None")
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/query2prosody",
@@ -1333,8 +1452,8 @@ def create_v2_router(
     def query2prosody(query: AudioQuery) -> Prosody:
         try:
             return _query_to_prosody(query)
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/style_id_to_speaker_meta",
@@ -1342,9 +1461,9 @@ def create_v2_router(
         operation_id="speaker_folder_path_v1_style_id_to_speaker_meta_post",
     )
     def style_id_to_speaker_meta(
-        style_id: Optional[int] = Query(None, alias="styleId"),
+        style_id: int | None = Query(None, alias="styleId"),
     ) -> SpeakerMetaForTextBox:
-        # 表示用の旧APIは未指定・未解決のスタイルを互換値で返します。
+        # 未指定・未導入スタイルを`None`文字列で返すのは、公式v2 APIの既存レスポンス契約に合わせた挙動。
         if style_id is None:
             return SpeakerMetaForTextBox(
                 speakerUuid="None",
@@ -1359,19 +1478,21 @@ def create_v2_router(
                 ("style_id_to_speaker_meta", "speaker_meta_for_style"),
                 default=None,
             )
-            result = result_getter(style_id) if callable(result_getter) else result_getter
+            result = (
+                result_getter(style_id) if callable(result_getter) else result_getter
+            )
             if result is None:
                 raise StyleNotFoundError("<unspecified>", style_id)
             return result
-        except (StyleNotFoundError, AmbiguousStyleError):
+        except StyleNotFoundError, AmbiguousStyleError:
             return SpeakerMetaForTextBox(
                 speakerUuid="None",
                 styleId=0,
                 speakerName="None",
                 styleName="None",
             )
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.get(
         "/v1/sample_voice",
@@ -1387,13 +1508,15 @@ def create_v2_router(
         },
     )
     def sample_voice(
-        speaker_uuid: Optional[str] = Query(None, alias="speakerUuid"),
-        style_id: Optional[int] = Query(None, alias="styleId"),
-        index: Optional[int] = Query(None),
+        speaker_uuid: str | None = Query(None, alias="speakerUuid"),
+        style_id: int | None = Query(None, alias="styleId"),
+        index: int | None = Query(None),
     ) -> Response:
         try:
             store = metadata_required()
-            resolved_uuid, resolved_style = _speaker_style(store, speaker_uuid, style_id)
+            resolved_uuid, resolved_style = _speaker_style(
+                store, speaker_uuid, style_id
+            )
             resolved_index = 0 if index is None else index
             read_sample = getattr(store, "read_sample_voice", None)
             if callable(read_sample):
@@ -1404,12 +1527,12 @@ def create_v2_router(
                 )
                 content = Path(path).read_bytes()
             return Response(content=content, media_type="audio/wav")
-        except MetadataAssetNotFoundError:
+        except MetadataAssetNotFoundError as error:
             raise HTTPException(
                 status_code=400, detail="Sample voice file not found"
-            )
-        except Exception as error:
-            raise _as_http_error(error)
+            ) from error
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.get(
         "/v1/speaker_policy",
@@ -1417,7 +1540,7 @@ def create_v2_router(
         operation_id="get_speaker_policy_v1_speaker_policy_get",
     )
     def speaker_policy(
-        speaker_uuid: Optional[str] = Query(None, alias="speakerUuid"),
+        speaker_uuid: str | None = Query(None, alias="speakerUuid"),
     ) -> SpeakerPolicy:
         try:
             store = metadata_required()
@@ -1433,15 +1556,15 @@ def create_v2_router(
             if result is None:
                 raise MetadataError("speaker policy is not configured")
             return result
-        except Exception as error:
-            raise _as_http_error(error)
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.get(
         "/v1/update_info",
-        response_model=List[UpdateInfo],
+        response_model=list[UpdateInfo],
         operation_id="get_update_info_v1_update_info_get",
     )
-    def update_info() -> List[UpdateInfo]:
+    def update_info() -> list[UpdateInfo]:
         result = _catalog_result(
             catalog,
             update_info_callback,

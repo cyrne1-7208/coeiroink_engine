@@ -1,21 +1,22 @@
+"""エンジンマニフェストの読み込み処理。"""
+
 import json
 from base64 import b64encode
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-from .EngineManifest import EngineManifest, LicenseInfo, UpdateInfo
+from .engine_manifest import EngineManifest, LicenseInfo, UpdateInfo
 
 
 class EngineManifestLoader:
     def __init__(self, manifest_path: Path, root_dir: Path):
         self.manifest_path = manifest_path
         self.root_dir = root_dir
-        # マニフェストとライセンス・アイコンはサーバーの起動中に変化しません。
-        # 機能確認のたびに再読込・再エンコードせず、プロセス内に保持します。
-        self._raw_manifest: Optional[Dict[str, Any]] = None
-        self._manifest: Optional[EngineManifest] = None
+        # マニフェストとライセンス・アイコン資産はプロセス稼働中に不変なので、機能確認のたびに再読込・再エンコードしない。
+        self._raw_manifest: dict[str, Any] | None = None
+        self._manifest: EngineManifest | None = None
 
-    def _load_json(self) -> Dict[str, Any]:
+    def _load_json(self) -> dict[str, Any]:
         if self._raw_manifest is None:
             self._raw_manifest = json.loads(
                 self.manifest_path.read_text(encoding="utf-8")
@@ -41,6 +42,7 @@ class EngineManifestLoader:
             name=manifest["name"],
             brand_name=manifest["brand_name"],
             uuid=manifest["uuid"],
+            version=manifest["version"],
             url=manifest["url"],
             default_sampling_rate=manifest["default_sampling_rate"],
             frame_rate=manifest.get("frame_rate", 93.75),
@@ -68,6 +70,5 @@ class EngineManifestLoader:
                 for key, item in manifest["supported_features"].items()
             },
         )
-        # 初回構築時は共有キャッシュを直接公開せず、防御的コピーを返します。
-        # 次回以降は既存のキャッシュを返すため、呼び出し元は応答を変更しないでください。
+        # 初回構築時は、呼出元へプロセス共通キャッシュそのものを渡さない。
         return self._manifest.model_copy(deep=True)

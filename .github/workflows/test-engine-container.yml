@@ -1,0 +1,74 @@
+name: test-engine-container
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "build-engine-containerでGHCRへpushした完全なイメージ名"
+        required: true
+        type: string
+
+concurrency:
+  group: coeiroink-engine-container-test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Test GHCR CPU container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Log in to GHCR only
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the selected image
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          set -euo pipefail
+          case "$IMAGE" in
+            ghcr.io/*) docker pull "$IMAGE" ;;
+            *)
+              echo "Only ghcr.io images are accepted" >&2
+              exit 2 ;;
+          esac
+
+      - name: Start the CPU container and check the HTTP server
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          set -euo pipefail
+          container_id="$(docker run --detach --publish 127.0.0.1:50032:50032 "$IMAGE")"
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              docker logs "$container_id" || true
+            fi
+            docker rm --force "$container_id" >/dev/null 2>&1 || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 12); do
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              http://127.0.0.1:50032/voicevox/version || true)"
+            if [ "$status" = 200 ]; then
+              echo "CPU container is ready"
+              exit 0
+            fi
+            echo "Attempt $attempt/12: HTTP status ${status:-connection failure}"
+            sleep 5
+          done
+          exit 1

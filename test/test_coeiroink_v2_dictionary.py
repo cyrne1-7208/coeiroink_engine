@@ -44,11 +44,12 @@ def test_set_dictionary_replaces_then_compiles(tmp_path: Path):
     bundled = tmp_path / "default.csv"
     bundled.write_text("", encoding="utf-8")
 
-    with patch(
-        "voicevox_engine.coeiroink_v2.dictionary.write_to_json"
-    ) as write, patch(
-        "voicevox_engine.coeiroink_v2.dictionary.update_dict"
-    ) as compile_dictionary:
+    with (
+        patch("voicevox_engine.coeiroink_v2.dictionary.write_to_json") as write,
+        patch(
+            "voicevox_engine.coeiroink_v2.dictionary.update_dict"
+        ) as compile_dictionary,
+    ):
         set_dictionary(
             _payload(),
             user_dict_path=user_json,

@@ -9,7 +9,7 @@ class TestOpenJTalkMoraList(TestCase):
         self.assertEqual("ティ", openjtalk_mora2text["ti"])
         self.assertEqual("トゥ", openjtalk_mora2text["tu"])
         self.assertEqual("ディ", openjtalk_mora2text["di"])
-        # GitHub issue #60の回帰テスト
+        # GitHub issue #60
         self.assertEqual("ギェ", openjtalk_mora2text["gye"])
         self.assertEqual("イェ", openjtalk_mora2text["ye"])
 

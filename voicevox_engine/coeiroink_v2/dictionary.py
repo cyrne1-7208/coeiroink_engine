@@ -1,31 +1,31 @@
-"""COEIROINK v2辞書ペイロードを公開Engineへ渡すアダプターです。
-v2エンドポイントはUUID単位ではなく辞書全体を受け取ります。
-このモジュールは凍結版公開Engineの``UserDictWord``へ変換し、コンパイル済み辞書を置き換えます。
+"""Adapter from the COEIROINK v2 dictionary payload to the public Engine.
+
+The v2 endpoint submits the complete dictionary rather than individual UUID
+operations.  This module converts that list to the frozen public Engine's
+``UserDictWord`` representation and replaces the compiled user dictionary.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Union
 from uuid import NAMESPACE_URL, uuid5
 
 from voicevox_engine.model import UserDictWord
 from voicevox_engine.user_dict import (
     compiled_dict_path as default_compiled_dict_path,
 )
-from voicevox_engine.user_dict import create_word
+from voicevox_engine.user_dict import create_word, update_dict, write_to_json
 from voicevox_engine.user_dict import default_dict_path as bundled_dict_path
-from voicevox_engine.user_dict import update_dict
 from voicevox_engine.user_dict import user_dict_path as default_user_dict_path
-from voicevox_engine.user_dict import write_to_json
 
 from .models import DictionaryWord, DictionaryWords
 
 
 class DictionaryError(ValueError):
-    """v2辞書ペイロードを安全にコンパイルできない場合に発生します。"""
+    """Raised when a v2 dictionary payload cannot be compiled safely."""
 
 
 def _validated_words(
-    payload: Union[DictionaryWords, Sequence[DictionaryWord]],
+    payload: DictionaryWords | Sequence[DictionaryWord],
 ) -> Sequence[DictionaryWord]:
     if isinstance(payload, DictionaryWords):
         return payload.dictionary_words
@@ -43,11 +43,11 @@ def _validated_words(
 
 
 def build_user_dictionary(
-    payload: Union[DictionaryWords, Sequence[DictionaryWord]],
-) -> Dict[str, UserDictWord]:
-    """v2ペイロードから公開Engine用の安定した辞書レコードを構築します。"""
+    payload: DictionaryWords | Sequence[DictionaryWord],
+) -> dict[str, UserDictWord]:
+    """Build stable public-Engine dictionary records from a v2 payload."""
 
-    result: Dict[str, UserDictWord] = {}
+    result: dict[str, UserDictWord] = {}
     for index, item in enumerate(_validated_words(payload)):
         try:
             record = create_word(
@@ -57,29 +57,28 @@ def build_user_dictionary(
             )
         except Exception as error:
             raise DictionaryError(
-                "invalid dictionary word at index {}: {}".format(index, error)
+                f"invalid dictionary word at index {index}: {error}"
             ) from error
         if record.mora_count != item.num_moras:
             raise DictionaryError(
-                "numMoras does not match yomi at index {}: {} != {}".format(
-                    index, item.num_moras, record.mora_count
-                )
+                f"numMoras does not match yomi at index {index}: {item.num_moras} != {record.mora_count}"
             )
-        stable_key = "{}\0{}\0{}\0{}\0{}".format(
-            index, item.word, item.yomi, item.accent, item.num_moras
+        # v2は単語UUIDを受け取らないため、同じ辞書内容から毎回同じ公開Engine形式を作れるよう内容ベースのUUIDを生成する。
+        stable_key = (
+            f"{index}\0{item.word}\0{item.yomi}\0{item.accent}\0{item.num_moras}"
         )
         result[str(uuid5(NAMESPACE_URL, stable_key))] = record
     return result
 
 
 def set_dictionary(
-    payload: Union[DictionaryWords, Sequence[DictionaryWord]],
+    payload: DictionaryWords | Sequence[DictionaryWord],
     *,
-    user_dict_path: Optional[Path] = None,
-    compiled_dict_path: Optional[Path] = None,
-    default_dict_path: Optional[Path] = None,
+    user_dict_path: Path | None = None,
+    compiled_dict_path: Path | None = None,
+    default_dict_path: Path | None = None,
 ) -> None:
-    """公開Engineのユーザー辞書を置き換えてコンパイルします。"""
+    """Replace and compile the public Engine user dictionary."""
 
     target_json = Path(user_dict_path or default_user_dict_path)
     target_compiled = Path(compiled_dict_path or default_compiled_dict_path)

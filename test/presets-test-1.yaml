@@ -1,6 +1,6 @@
 - id: 1
   name: test
-  speaker_uuid: 00000000-0000-0000-0000-000000000010
+  speaker_uuid: 00000000-0000-4000-8000-000000000001
   style_id: 0
   speedScale: 1
   pitchScale: 0
@@ -11,7 +11,7 @@
 
 - id: 2
   name: test2
-  speaker_uuid: 00000000-0000-0000-0000-000000000010
+  speaker_uuid: 00000000-0000-4000-8000-000000000001
   style_id: 2
   speedScale: 1.5
   pitchScale: 0

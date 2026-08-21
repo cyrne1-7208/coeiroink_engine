@@ -1,91 +1,12 @@
 import asyncio
-import json
 import threading
 from pathlib import Path
 from unittest.mock import Mock
 
-import numpy as np
 import pytest
+
 import run as engine_run
-from fastapi.testclient import TestClient
-
-from voicevox_engine.dev.synthesis_engine import MockSynthesisEngine
-from voicevox_engine.setting import SettingLoader
-
-
-SPEAKER_UUID = "00000000-0000-0000-0000-000000000001"
-STYLE_ID = 1001
-
-
-def _create_speaker_fixture(
-    speaker_info_dir: Path, folder_name: str = SPEAKER_UUID
-) -> Path:
-    speaker_dir = speaker_info_dir / folder_name
-    (speaker_dir / "icons").mkdir(parents=True)
-    (speaker_dir / "voice_samples").mkdir()
-    (speaker_dir / "metas.json").write_text(
-        json.dumps(
-            {
-                "speakerName": "テスト話者",
-                "speakerUuid": SPEAKER_UUID,
-                "styles": [{"styleName": "標準", "styleId": STYLE_ID}],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    (speaker_dir / "policy.md").write_text("test policy", encoding="utf-8")
-    (speaker_dir / "portrait.png").write_bytes(b"portrait")
-    (speaker_dir / "icons" / f"{STYLE_ID}.png").write_bytes(b"icon")
-    for index in range(1, 4):
-        (speaker_dir / "voice_samples" / f"{STYLE_ID}_{index:03}.wav").write_bytes(
-            f"sample {index}".encode()
-        )
-    return speaker_dir
-
-
-def create_test_client(
-    tmp_path: Path,
-    folder_name: str = SPEAKER_UUID,
-    cancellable_engine=None,
-):
-    speaker_info_dir = tmp_path / "speaker_info"
-    _create_speaker_fixture(speaker_info_dir, folder_name=folder_name)
-
-    core_metas = json.dumps(
-        [
-            {
-                "name": "テスト話者",
-                "speaker_uuid": SPEAKER_UUID,
-                "styles": [{"name": "標準", "id": STYLE_ID}],
-                "version": "0.0.1",
-            }
-        ],
-        ensure_ascii=False,
-    )
-    audio_manager = Mock()
-    audio_manager.synthesis.return_value = np.linspace(
-        -0.1, 0.1, 4410, dtype=np.float32
-    )
-    audio_manager.fs = 44100
-    audio_manager.predict.return_value = np.linspace(
-        -0.1, 0.1, 4410, dtype=np.float32
-    )
-    engine = MockSynthesisEngine(
-        speakers=core_metas,
-        supported_devices=json.dumps({"cpu": True, "cuda": False}),
-        audio_manager=audio_manager,
-    )
-    app = engine_run.generate_app(
-        synthesis_engines={"0.0.0": engine},
-        latest_core_version="0.0.0",
-        setting_loader=SettingLoader(tmp_path / "setting.yml"),
-        root_dir=Path(__file__).parents[1],
-        speaker_info_dir=speaker_info_dir,
-        cancellable_engine=cancellable_engine,
-    )
-    return TestClient(app), audio_manager
-
+from test.test_old_mycoeiroink import SPEAKER_UUID, STYLE_ID, create_test_client
 
 LEGACY_VOICEVOX_PATHS = {
     "/accent_phrases",
@@ -140,6 +61,25 @@ def _audio_query(client):
     )
     assert response.status_code == 200
     return response.json()
+
+
+def _preset(**overrides):
+    values = {
+        "id": 1,
+        "name": "テストプリセット",
+        "speaker_uuid": SPEAKER_UUID,
+        "style_id": STYLE_ID,
+        "speedScale": 1,
+        "pitchScale": 0,
+        "intonationScale": 1,
+        "volumeScale": 1,
+        "prePhonemeLength": 0.1,
+        "postPhonemeLength": 0.1,
+        "pauseLength": None,
+        "pauseLengthScale": 1,
+    }
+    values.update(overrides)
+    return engine_run.Preset(**values)
 
 
 def test_voicevox_routes_are_prefixed_without_moving_coeiroink_v1(tmp_path: Path):
@@ -219,7 +159,12 @@ def test_katakana_english_parameter_is_wire_compatible_but_not_advertised(
     assert manifest["supported_features"]["apply_katakana_english"] is False
 
 
-def test_audio_query_from_legacy_preset_adds_0252_pause_defaults(tmp_path: Path):
+def test_audio_query_from_legacy_preset_adds_0252_pause_defaults(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        engine_run.PresetManager, "load_presets", lambda _self: [_preset()]
+    )
     client, _ = create_test_client(tmp_path)
 
     response = client.post(
@@ -234,6 +179,26 @@ def test_audio_query_from_legacy_preset_adds_0252_pause_defaults(tmp_path: Path)
     assert response.status_code == 200
     assert response.json()["pauseLength"] is None
     assert response.json()["pauseLengthScale"] == 1
+
+
+def test_audio_query_from_unsupported_pause_preset_returns_501(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        engine_run.PresetManager,
+        "load_presets",
+        lambda _self: [_preset(pauseLength=0.25)],
+    )
+    client, audio_manager = create_test_client(tmp_path)
+
+    response = client.post(
+        "/voicevox/audio_query_from_preset",
+        params={"text": "テストです", "preset_id": 1},
+    )
+
+    assert response.status_code == 501
+    assert "pauseLength" in response.json()["detail"]
+    audio_manager.synthesis.assert_not_called()
 
 
 def test_multi_synthesis_accepts_modern_interrogative_flag(tmp_path: Path):
@@ -271,9 +236,7 @@ def test_multi_synthesis_accepts_modern_interrogative_flag(tmp_path: Path):
     assert audio_manager.synthesis.call_count == 1
 
 
-def test_multi_synthesis_removes_partial_zip_after_failure(
-    tmp_path: Path, monkeypatch
-):
+def test_multi_synthesis_removes_partial_zip_after_failure(tmp_path: Path, monkeypatch):
     client, audio_manager = create_test_client(tmp_path)
     query = _audio_query(client)
     temporary_dir = tmp_path / "multi-synthesis-temp"
@@ -283,9 +246,7 @@ def test_multi_synthesis_removes_partial_zip_after_failure(
     def temporary_file_in_test_dir(**kwargs):
         return original_named_temporary_file(dir=temporary_dir, **kwargs)
 
-    monkeypatch.setattr(
-        engine_run, "NamedTemporaryFile", temporary_file_in_test_dir
-    )
+    monkeypatch.setattr(engine_run, "NamedTemporaryFile", temporary_file_in_test_dir)
     audio_manager.synthesis.side_effect = RuntimeError("test synthesis failure")
 
     with pytest.raises(RuntimeError, match="test synthesis failure"):
@@ -416,9 +377,7 @@ def test_missing_required_audio_query_field_returns_422(tmp_path: Path):
         ("post", "/voicevox/install_library/example"),
     ],
 )
-def test_out_of_scope_apis_return_explicit_501(
-    tmp_path: Path, method: str, path: str
-):
+def test_out_of_scope_apis_return_explicit_501(tmp_path: Path, method: str, path: str):
     client, _ = create_test_client(tmp_path)
     response = getattr(client, method)(path)
 
@@ -465,9 +424,7 @@ def test_validate_kana_matches_voicevox_0252_contract(tmp_path: Path):
     client, _ = create_test_client(tmp_path)
 
     valid = client.post("/voicevox/validate_kana", params={"text": "ア'"})
-    invalid = client.post(
-        "/voicevox/validate_kana", params={"text": "ア'ク'セント"}
-    )
+    invalid = client.post("/voicevox/validate_kana", params={"text": "ア'ク'セント"})
 
     assert valid.status_code == 200
     assert valid.json() is True
@@ -520,9 +477,7 @@ def test_openapi_contains_voicevox_0252_talk_parameters(tmp_path: Path):
 
     audio_query_parameters = {
         parameter["name"]
-        for parameter in schema["paths"]["/voicevox/audio_query"]["post"][
-            "parameters"
-        ]
+        for parameter in schema["paths"]["/voicevox/audio_query"]["post"]["parameters"]
     }
     assert "enable_katakana_english" in audio_query_parameters
 

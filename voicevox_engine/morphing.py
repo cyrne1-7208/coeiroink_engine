@@ -1,20 +1,21 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import chain
-from typing import Dict, List, Tuple
 
 import numpy as np
 from coeirocore.pyworld_compat import load_pyworld
 
-from .metas.Metas import Speaker, SpeakerSupportPermittedSynthesisMorphing, StyleInfo
-from .metas.MetasStore import construct_lookup
+from .metas.metas import Speaker, SpeakerSupportPermittedSynthesisMorphing, StyleInfo
+from .metas.metas_store import construct_lookup
 from .model import AudioQuery, MorphableTargetInfo, SpeakerNotFoundError
 from .synthesis_engine import SynthesisEngine
 
 pw = load_pyworld()
 
 
-# FIXME: ndarrayの型ヒントを追加する。https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/blob/2b64f86197573497c685c785c6e0e743f407b63e/pyworld/pyworld.pyx#L398
+# FIXME: ndarray type hint, https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/blob/2b64f86197573497c685c785c6e0e743f407b63e/pyworld/pyworld.pyx#L398
 @dataclass(frozen=True)
 class MorphingParameter:
     fs: float
@@ -50,9 +51,9 @@ def create_morphing_parameter(
 
 
 def get_morphable_targets(
-    speakers: List[Speaker],
-    base_speakers: List[int],
-) -> List[Dict[int, MorphableTargetInfo]]:
+    speakers: list[Speaker],
+    base_speakers: list[int],
+) -> list[dict[int, MorphableTargetInfo]]:
     """
     speakers: 全話者の情報
     base_speakers: モーフィング可能か判定したいベースの話者リスト（スタイルID）
@@ -61,7 +62,7 @@ def get_morphable_targets(
 
     morphable_targets_arr = []
     for base_speaker in base_speakers:
-        morphable_targets = dict()
+        morphable_targets = {}
         for style in chain.from_iterable(speaker.styles for speaker in speakers):
             morphable_targets[style.id] = MorphableTargetInfo(
                 is_morphable=is_synthesis_morphing_permitted(
@@ -76,7 +77,7 @@ def get_morphable_targets(
 
 
 def is_synthesis_morphing_permitted(
-    speaker_lookup: Dict[int, Tuple[Speaker, StyleInfo]],
+    speaker_lookup: dict[int, tuple[Speaker, StyleInfo]],
     base_speaker: int,
     target_speaker: int,
 ) -> bool:

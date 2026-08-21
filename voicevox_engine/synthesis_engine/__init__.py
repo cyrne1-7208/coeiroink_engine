@@ -5,8 +5,8 @@ from .synthesis_engine_base import SynthesisEngineBase
 
 __all__ = [
     "CoreWrapper",
-    "load_runtime_lib",
-    "make_synthesis_engines",
     "SynthesisEngine",
     "SynthesisEngineBase",
+    "load_runtime_lib",
+    "make_synthesis_engines",
 ]

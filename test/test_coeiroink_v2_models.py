@@ -1,5 +1,3 @@
-from typing import Dict, Type
-
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -37,15 +35,17 @@ from voicevox_engine.coeiroink_v2.models import (
     TrimBufferSettings,
     UpdateInfo,
     UtilMora,
-    ValidationError as ModelValidationError,
     WavMakingParam,
     WavProcessingParam,
     WavWithDuration,
     WorldF0,
 )
+from voicevox_engine.coeiroink_v2.models import (
+    ValidationError as ModelValidationError,
+)
 
 
-def _schema_shape(model: Type[BaseModel]) -> Dict[str, object]:
+def _schema_shape(model: type[BaseModel]) -> dict[str, object]:
     schema = model.model_json_schema(by_alias=True)
     return {
         "properties": list(schema["properties"]),
@@ -224,7 +224,12 @@ def _schema_shape(model: Type[BaseModel]) -> Dict[str, object]:
             ["name", "speaker_uuid", "styles", "version"],
             {},
         ),
-        (StyleInfo, ["id", "icon", "voice_samples"], ["id", "icon", "voice_samples"], {}),
+        (
+            StyleInfo,
+            ["id", "icon", "voice_samples"],
+            ["id", "icon", "voice_samples"],
+            {},
+        ),
         (
             SpeakerInfo,
             ["policy", "portrait", "style_infos"],
@@ -313,7 +318,12 @@ def _schema_shape(model: Type[BaseModel]) -> Dict[str, object]:
             ["download_path", "volume", "speaker", "speaker_info"],
             {},
         ),
-        (UpdateInfo, ["version", "date", "contents"], ["version", "date", "contents"], {}),
+        (
+            UpdateInfo,
+            ["version", "date", "contents"],
+            ["version", "date", "contents"],
+            {},
+        ),
         (WorldF0, ["f0", "moraDurations"], ["f0", "moraDurations"], {}),
         (EngineInfo, ["device", "version"], ["device", "version"], {}),
         (ModelValidationError, ["loc", "msg", "type"], ["loc", "msg", "type"], {}),
@@ -331,24 +341,22 @@ def test_openapi_shape(model, properties, required, defaults):
 def test_camel_case_aliases_accept_and_emit_wire_names():
     payload = {
         "speakerName": "テスト話者",
-        "speakerUuid": "00000000-0000-0000-0000-000000000003",
-        "styles": [
-            {"styleName": "標準", "styleId": 1003, "base64Icon": "icon"}
-        ],
+        "speakerUuid": "00000000-0000-4000-8000-000000000001",
+        "styles": [{"styleName": "テスト", "styleId": 1001, "base64Icon": "icon"}],
         "base64Portrait": "portrait",
     }
 
     model = SpeakerMeta.model_validate(payload)
 
     assert model.speaker_name == "テスト話者"
-    assert model.styles[0].style_id == 1003
+    assert model.styles[0].style_id == 1001
     assert model.model_dump(by_alias=True) == {
         **payload,
         "version": "0.0.1",
         "styles": [
             {
-                "styleName": "標準",
-                "styleId": 1003,
+                "styleName": "テスト",
+                "styleId": 1001,
                 "base64Icon": "icon",
                 "base64Portrait": None,
             }
@@ -425,7 +433,9 @@ def test_nested_wire_types_are_the_expected_mora_variants():
         outputSamplingRate=44100,
         outputStereo=False,
     )
-    prosody = Prosody(plain=["テ"], detail=[[{"phoneme": "e", "hira": "て", "accent": 0}]])
+    prosody = Prosody(
+        plain=["テ"], detail=[[{"phoneme": "e", "hira": "て", "accent": 0}]]
+    )
 
     assert isinstance(query.accent_phrases[0].moras[0], UtilMora)
     assert isinstance(prosody.detail[0][0], Mora)

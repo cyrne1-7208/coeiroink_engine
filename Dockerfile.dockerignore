@@ -1,0 +1,26 @@
+# 親ディレクトリをcontextにしても、CoreとEngine以外のモデルや配布アーカイブを送信しない。
+**
+!coeiroink_core/
+!coeiroink_core/**
+!coeiroink_engine/
+!coeiroink_engine/**
+
+# リポジトリ内でも実行環境と生成物はimageへ含めない。
+**/.git/
+**/.venv/
+**/venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/*.egg-info/
+**/build/
+**/dist/
+**/licenses_venv/
+**/speaker_info/
+**/output/
+**/*.7z
+**/*.onnx
+**/*.pth
+**/*.wav
+**/*.zip

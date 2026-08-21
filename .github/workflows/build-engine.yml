@@ -1,0 +1,192 @@
+name: build-engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "依存環境の検証対象。allは全環境を順番に実行します。"
+        type: choice
+        required: true
+        default: linux-cpu
+        options:
+          - linux-cpu
+          - linux-cuda
+          - linux-opencl
+          - windows-cpu
+          - windows-cuda
+          - windows-directml
+          - all
+
+concurrency:
+  group: coeiroink-engine-build-${{ github.ref }}-${{ inputs.target }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package:
+    name: Build platform-independent Engine package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out Engine
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: coeiroink_engine
+          persist-credentials: false
+
+      - name: Check out adjacent Core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cyrne1-7208/coeiroink_core
+          ref: main
+          path: coeiroink_core
+          persist-credentials: false
+
+      - name: Set up uv and Python 3.14
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.12.5
+          python-version: "3.14"
+          activate-environment: true
+          working-directory: coeiroink_engine
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Validate Engine uv.lock
+        working-directory: coeiroink_engine
+        run: uv lock --check
+
+      - name: Install package-build dependencies
+        working-directory: coeiroink_engine
+        run: uv sync --locked --extra cpu --group build --no-dev
+
+      - name: Build Python wheel and source archive once
+        working-directory: coeiroink_engine
+        run: |
+          python -m compileall -q voicevox_engine
+          uv build --wheel --sdist --out-dir dist
+
+      - name: Assemble runnable source server bundle
+        run: |
+          set -euo pipefail
+          bundle_root="${RUNNER_TEMP}/coeiroink-server-oss"
+          mkdir -p "${bundle_root}/coeiroink_engine" "${bundle_root}/coeiroink_core"
+          git -C coeiroink_engine archive HEAD | tar -x -C "${bundle_root}/coeiroink_engine"
+          git -C coeiroink_core archive HEAD | tar -x -C "${bundle_root}/coeiroink_core"
+          tar -czf coeiroink_engine/dist/coeiroink-server-oss-source.tar.gz \
+            -C "${RUNNER_TEMP}" coeiroink-server-oss
+
+      - name: Upload Engine package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coeiroink-engine-package
+          path: coeiroink_engine/dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  select-target:
+    name: Select backend environments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Create the selected matrix
+        id: matrix
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            linux-cpu)
+              matrix='{"include":[{"target":"linux-cpu","os":"ubuntu-24.04","python":"3.14","extra":"cpu"}]}' ;;
+            linux-cuda)
+              matrix='{"include":[{"target":"linux-cuda","os":"ubuntu-24.04","python":"3.14","extra":"cuda"}]}' ;;
+            linux-opencl)
+              matrix='{"include":[{"target":"linux-opencl","os":"ubuntu-24.04","python":"3.14","extra":"opencl"}]}' ;;
+            windows-cpu)
+              matrix='{"include":[{"target":"windows-cpu","os":"windows-2022","python":"3.14","extra":"cpu"}]}' ;;
+            windows-cuda)
+              matrix='{"include":[{"target":"windows-cuda","os":"windows-2022","python":"3.14","extra":"cuda"}]}' ;;
+            windows-directml)
+              matrix='{"include":[{"target":"windows-directml","os":"windows-2022","python":"3.12","extra":"directml"}]}' ;;
+            all)
+              matrix='{"include":[{"target":"linux-cpu","os":"ubuntu-24.04","python":"3.14","extra":"cpu"},{"target":"linux-cuda","os":"ubuntu-24.04","python":"3.14","extra":"cuda"},{"target":"linux-opencl","os":"ubuntu-24.04","python":"3.14","extra":"opencl"},{"target":"windows-cpu","os":"windows-2022","python":"3.14","extra":"cpu"},{"target":"windows-cuda","os":"windows-2022","python":"3.14","extra":"cuda"},{"target":"windows-directml","os":"windows-2022","python":"3.12","extra":"directml"}]}' ;;
+            *)
+              echo "unknown target: $TARGET" >&2
+              exit 2 ;;
+          esac
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  backend-check:
+    name: Check ${{ matrix.target }} dependencies
+    needs: select-target
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.select-target.outputs.matrix) }}
+    steps:
+      - name: Check out Engine
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: coeiroink_engine
+          persist-credentials: false
+
+      - name: Check out adjacent Core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cyrne1-7208/coeiroink_core
+          ref: main
+          path: coeiroink_core
+          persist-credentials: false
+
+      - name: Install OpenCL build headers
+        if: matrix.target == 'linux-opencl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libsqlite3-dev \
+            ocl-icd-opencl-dev \
+            opencl-headers
+
+      - name: Set up uv and target Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.12.5
+          python-version: ${{ matrix.python }}
+          activate-environment: true
+          working-directory: coeiroink_engine
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Validate Engine uv.lock
+        working-directory: coeiroink_engine
+        run: uv lock --check
+
+      - name: Install the locked backend dependencies
+        working-directory: coeiroink_engine
+        run: uv sync --locked --extra "${{ matrix.extra }}" --group build --no-dev
+
+      - name: Check the installed environment
+        working-directory: coeiroink_engine
+        run: |
+          uv pip check
+          python -c "import coeirocore, torch, voicevox_engine; print('Engine import ok; torch', torch.__version__)"
+
+      - name: Import-check DirectML bindings
+        if: matrix.extra == 'directml'
+        working-directory: coeiroink_engine
+        run: python -c "import torch_directml; print('torch-directml import ok')"
+
+      - name: Import-check OpenCL bindings
+        if: matrix.extra == 'opencl'
+        working-directory: coeiroink_engine
+        run: python -c "import pytorch_ocl; print('OpenCL bindings import ok')"

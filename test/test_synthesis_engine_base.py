@@ -1,4 +1,3 @@
-from typing import List, Union
 from unittest import TestCase
 from unittest.mock import Mock
 
@@ -60,7 +59,7 @@ def decode_mock(
     phoneme_size: int,
     f0: numpy.ndarray,
     phoneme: numpy.ndarray,
-    speaker_id: Union[numpy.ndarray, int],
+    speaker_id: numpy.ndarray | int,
 ):
     result = []
     speaker_value = _speaker_value(speaker_id)
@@ -70,8 +69,7 @@ def decode_mock(
         for _ in range(256):
             result.append(
                 float(
-                    f0[i][0]
-                    * (numpy.where(phoneme[i] == 1)[0].item() / phoneme_size)
+                    f0[i][0] * (numpy.where(phoneme[i] == 1)[0].item() / phoneme_size)
                     + speaker_value
                 )
             )
@@ -199,7 +197,7 @@ class TestSynthesisEngineBase(TestCase):
         )
         self.synthesis_engine._synthesis_impl = Mock()
 
-    def create_accent_phrases_test_base(self, text: str, expected: List[AccentPhrase]):
+    def create_accent_phrases_test_base(self, text: str, expected: list[AccentPhrase]):
         actual = self.synthesis_engine.create_accent_phrases(text, 1)
         self.assertEqual(
             expected,
@@ -210,7 +208,7 @@ class TestSynthesisEngineBase(TestCase):
     def create_synthesis_test_base(
         self,
         text: str,
-        expected: List[AccentPhrase],
+        expected: list[AccentPhrase],
         enable_interrogative_upspeak: bool,
     ):
         """音声合成時に疑問文モーラ処理を行っているかどうかを検証
@@ -236,7 +234,9 @@ class TestSynthesisEngineBase(TestCase):
         """
         expected = koreha_arimasuka_base_expected()
         expected[-1].is_interrogative = True
-        self.create_accent_phrases_test_base(text="これはありますか？", expected=expected)
+        self.create_accent_phrases_test_base(
+            text="これはありますか？", expected=expected
+        )
 
     def test_synthesis_interrogative(self):
         expected = koreha_arimasuka_base_expected()
