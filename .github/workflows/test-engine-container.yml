@@ -7,6 +7,15 @@ on:
         description: "build-engine-containerでGHCRへpushした完全なイメージ名"
         required: true
         type: string
+      backend:
+        description: "確認するLinuxバックエンド"
+        required: true
+        type: choice
+        default: cpu
+        options:
+          - cpu
+          - cuda
+          - opencl
 
 concurrency:
   group: coeiroink-engine-container-test-${{ github.ref }}
@@ -14,6 +23,7 @@ concurrency:
 
 permissions:
   contents: read
+  # 非公開設定のGHCRイメージもpullして検証できるようにする。
   packages: read
 
 defaults:
@@ -22,7 +32,7 @@ defaults:
 
 jobs:
   test:
-    name: Test GHCR CPU container
+    name: Test GHCR Linux ${{ inputs.backend }} container
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -45,12 +55,13 @@ jobs:
               exit 2 ;;
           esac
 
-      - name: Start the CPU container and check the HTTP server
+      - name: Start the selected container and check the HTTP server
         env:
           IMAGE: ${{ inputs.image }}
         run: |
           set -euo pipefail
-          container_id="$(docker run --detach --publish 127.0.0.1:50032:50032 "$IMAGE")"
+          # GitHub-hosted標準runnerにはGPUがないため、CUDA/OpenCL imageもCPU deviceでHTTP起動だけ確認する。
+          container_id="$(docker run --detach --env COEIROINK_DEVICE=cpu --publish 127.0.0.1:50032:50032 "$IMAGE")"
           cleanup() {
             local status="$1"
             if [ "$status" -ne 0 ]; then

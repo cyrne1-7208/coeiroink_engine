@@ -26,6 +26,7 @@ concurrency:
 
 permissions:
   contents: read
+  # 指定したworkflow runの成果物を取得するために必要。
   actions: read
 
 defaults:
@@ -96,7 +97,9 @@ jobs:
 
       - name: Install locked runtime dependencies
         working-directory: ${{ runner.temp }}/coeiroink-server-oss/coeiroink_engine
-        run: uv sync --locked --extra "${{ steps.profile.outputs.extra }}" --no-dev
+        env:
+          BACKEND: ${{ steps.profile.outputs.extra }}
+        run: uv sync --locked --extra "$BACKEND" --no-dev
 
       - name: Validate archives and install the built wheel
         working-directory: ${{ runner.temp }}/coeiroink-server-oss/coeiroink_engine

@@ -173,7 +173,9 @@ jobs:
 
       - name: Install the locked backend dependencies
         working-directory: coeiroink_engine
-        run: uv sync --locked --extra "${{ matrix.extra }}" --group build --no-dev
+        env:
+          BACKEND: ${{ matrix.extra }}
+        run: uv sync --locked --extra "$BACKEND" --group build --no-dev
 
       - name: Check the installed environment
         working-directory: coeiroink_engine

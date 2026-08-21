@@ -1,33 +1,46 @@
 # CoreとEngineの両ディレクトリを含む親ディレクトリをビルドコンテキストにする。
 ARG PYTHON_IMAGE=python:3.14-slim-bookworm
 ARG UV_VERSION=0.12.5
+ARG COEIROINK_BACKEND=cpu
 FROM ${PYTHON_IMAGE}
+
+ARG COEIROINK_BACKEND=cpu
 
 COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_PROJECT_ENVIRONMENT=/opt/coeiroink/coeiroink_engine/.venv
+    UV_PROJECT_ENVIRONMENT=/opt/coeiroink/coeiroink_engine/.venv \
+    COEIROINK_BACKEND=${COEIROINK_BACKEND} \
+    COEIROINK_DEVICE=${COEIROINK_BACKEND}
 
 WORKDIR /opt/coeiroink
 
 # pyopenjtalkとPyWorldのビルド、ESPnetの取得、音声出力に必要なLinux依存。
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-        ca-certificates \
-        git \
-        libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
+# OpenCLだけはホスト側のICDを利用するため、コンテナにはloaderのみ入れる。
+RUN set -eux; \
+    apt-get update; \
+    case "$COEIROINK_BACKEND" in \
+        cpu|cuda) \
+            apt-get install -y --no-install-recommends \
+                build-essential ca-certificates git libgomp1 libsndfile1 libsqlite3-dev ;; \
+        opencl) \
+            apt-get install -y --no-install-recommends \
+                build-essential ca-certificates git libgomp1 libsndfile1 libsqlite3-dev \
+                ocl-icd-libopencl1 ocl-icd-opencl-dev opencl-headers ;; \
+        *) \
+            echo "Unsupported Linux container backend: $COEIROINK_BACKEND" >&2; exit 2 ;; \
+    esac; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY coeiroink_core /opt/coeiroink/coeiroink_core
 COPY coeiroink_engine /opt/coeiroink/coeiroink_engine
 
 WORKDIR /opt/coeiroink/coeiroink_engine
 
-# 汎用GPU runtimeを暗黙に持ち込まない再現可能な配布物とするため、DockerはLinux CPU profileを既定に固定する。
-RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.4.1 \
-    uv sync --locked --extra cpu --group build --no-dev \
+# バックエンドごとに依存profileを分離し、同じイメージへ異なるTorch wheelを混在させない。
+RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.1.0 \
+    uv sync --locked --extra "$COEIROINK_BACKEND" --group build --no-dev \
     && torch_cpu_library="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/torch/lib/libtorch_cpu.so" \
     && test -f "$torch_cpu_library" \
     && .venv/bin/patchelf --clear-execstack "$torch_cpu_library" \
@@ -41,4 +54,4 @@ USER coeiroink
 
 EXPOSE 50032
 
-CMD ["uv", "run", "--locked", "--extra", "cpu", "--no-sync", "python", "run.py", "--host", "0.0.0.0", "--speaker_info_dir", "/opt/coeiroink/speaker_info"]
+CMD ["sh", "-c", "exec uv run --locked --extra \"$COEIROINK_BACKEND\" --no-sync python run.py --host 0.0.0.0 --device \"$COEIROINK_DEVICE\" --speaker_info_dir /opt/coeiroink/speaker_info"]

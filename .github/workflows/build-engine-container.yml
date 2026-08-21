@@ -1,10 +1,28 @@
 name: build-engine-container
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "GHCRへ保存するイメージの基礎タグ"
+        required: true
+        type: string
+      push:
+        description: "ビルド後にGHCRへpushする"
+        required: true
+        type: boolean
+      backend:
+        description: "Linux用のバックエンド"
+        required: true
+        type: string
+      core_ref:
+        description: "組み合わせるCoreのブランチ、タグ、またはコミット"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
-        description: "GHCRへ保存するイメージタグ"
+        description: "GHCRへ保存するイメージの基礎タグ"
         required: true
         type: string
       push:
@@ -12,14 +30,27 @@ on:
         required: true
         type: boolean
         default: false
+      backend:
+        description: "Linux用のバックエンド"
+        required: true
+        type: choice
+        default: cpu
+        options:
+          - cpu
+          - cuda
+          - opencl
+      core_ref:
+        description: "組み合わせるCoreのブランチ、タグ、またはコミット"
+        required: true
+        type: string
+        default: main
 
 concurrency:
-  group: coeiroink-engine-container-build-${{ github.ref }}
+  group: coeiroink-engine-container-${{ github.ref }}-${{ inputs.backend }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  packages: write
 
 defaults:
   run:
@@ -27,29 +58,41 @@ defaults:
 
 jobs:
   build:
-    name: Build Linux CPU container
+    name: Build Linux ${{ inputs.backend }} container
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      # 選択したイメージをGHCRへpushする場合に必要。
+      packages: write
     steps:
       - name: Check out Engine
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           path: coeiroink_engine
           persist-credentials: false
 
-      - name: Check out adjacent Core
+      - name: Check out Core
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cyrne1-7208/coeiroink_core
-          ref: main
+          ref: ${{ inputs.core_ref }}
           path: coeiroink_core
           persist-credentials: false
 
-      - name: Validate the Docker build context
+      - name: Validate target and build context
+        env:
+          BACKEND: ${{ inputs.backend }}
         run: |
+          set -euo pipefail
+          case "$BACKEND" in
+            cpu|cuda|opencl) ;;
+            *) echo "Unsupported Linux container backend: $BACKEND" >&2; exit 2 ;;
+          esac
           test -f coeiroink_engine/uv.lock
           test -f coeiroink_engine/Dockerfile
-          test -d coeiroink_core
+          test -f coeiroink_core/uv.lock
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -66,19 +109,22 @@ jobs:
         id: image
         env:
           TAG: ${{ inputs.tag }}
+          BACKEND: ${{ inputs.backend }}
         run: |
           set -euo pipefail
           if [[ ! "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "tag must contain only ASCII letters, digits, '.', '_' or '-'" >&2
+            echo "tag must contain only ASCII letters, digits, '.', '_' or '-': $TAG" >&2
             exit 2
           fi
-          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}:$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}:${TAG}-${BACKEND}" >> "$GITHUB_OUTPUT"
 
-      - name: Build the CPU container without GPU runtime execution
+      - name: Build the selected Linux container
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: coeiroink_engine/Dockerfile
+          build-args: |
+            COEIROINK_BACKEND=${{ inputs.backend }}
           push: ${{ inputs.push }}
           tags: ${{ steps.image.outputs.name }}
           provenance: false

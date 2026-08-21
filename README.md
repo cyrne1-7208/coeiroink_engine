@@ -49,11 +49,14 @@ Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポ�
 Dockerで起動する場合は、CoreとEngineを含む親ディレクトリをビルドコンテキストにしてください。
 
 ```bash
-docker build -f coeiroink_engine/Dockerfile -t coeiroink-engine:cpu .
+docker build --build-arg COEIROINK_BACKEND=cpu \
+  -f coeiroink_engine/Dockerfile -t coeiroink-engine:cpu .
 docker run --rm -p 127.0.0.1:50032:50032 \
   -v /path/to/speaker_info:/opt/coeiroink/speaker_info:ro \
   coeiroink-engine:cpu
 ```
+
+Linux CUDAとOpenCLも同じDockerfileから`COEIROINK_BACKEND=cuda`または`opencl`を指定してビルドできます。CUDAは`--gpus all`、OpenCLはホストのICDとデバイスをコンテナへ渡し、必要に応じて`COEIROINK_DEVICE`を指定してください。Windows CPU・CUDA・DirectMLはWindows用のリリースアーカイブで提供し、Linux用Dockerイメージとは分けて扱います。
 
 ## API
 
