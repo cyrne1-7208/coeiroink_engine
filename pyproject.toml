@@ -245,5 +245,5 @@ multi_line_output = 3
 use_parentheses = true
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py312"
 line-length = 88
