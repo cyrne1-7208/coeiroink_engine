@@ -100,6 +100,10 @@ jobs:
         working-directory: coeiroink_engine
         run: uv sync --locked --extra cpu --group dev
 
+      - name: Check installed dependencies
+        working-directory: coeiroink_engine
+        run: uv pip check
+
       - name: Check linting and formatting
         working-directory: coeiroink_engine
         run: |

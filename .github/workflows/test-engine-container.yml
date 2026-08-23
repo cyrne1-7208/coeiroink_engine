@@ -1,6 +1,40 @@
 name: test-engine-container
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-engine-container.yml"
+      - ".github/workflows/test-engine-container.yml"
+      - "Dockerfile"
+      - "Dockerfile.dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+  pull_request:
+    paths:
+      - ".github/workflows/build-engine-container.yml"
+      - ".github/workflows/test-engine-container.yml"
+      - "Dockerfile"
+      - "Dockerfile.dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_call:
+    inputs:
+      image:
+        description: "検証済みGHCRイメージ。省略時は呼び出し元のソースからビルドする"
+        required: false
+        type: string
+        default: ""
+      backend:
+        description: "確認するLinuxバックエンド"
+        required: false
+        type: string
+        default: cpu
+      core_ref:
+        description: "ソースビルド時に組み合わせるCoreのブランチ、タグ、またはコミット"
+        required: false
+        type: string
+        default: main
   workflow_dispatch:
     inputs:
       image:
@@ -16,9 +50,14 @@ on:
           - cpu
           - cuda
           - opencl
+      core_ref:
+        description: "ソースビルド時に組み合わせるCoreのブランチ、タグ、またはコミット"
+        required: false
+        type: string
+        default: main
 
 concurrency:
-  group: coeiroink-engine-container-test-${{ github.ref }}
+  group: coeiroink-engine-container-test-${{ github.workflow }}-${{ github.ref }}-${{ inputs.backend || 'cpu' }}
   cancel-in-progress: true
 
 permissions:
@@ -32,11 +71,68 @@ defaults:
 
 jobs:
   test:
-    name: Test GHCR Linux ${{ inputs.backend }} container
+    name: Test Linux ${{ inputs.backend || 'cpu' }} container
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
+      - name: Select and validate the test image
+        id: image
+        env:
+          BACKEND: ${{ inputs.backend || 'cpu' }}
+          INPUT_IMAGE: ${{ inputs.image }}
+        run: |
+          set -euo pipefail
+          case "$BACKEND" in
+            cpu|cuda|opencl) ;;
+            *) echo "Unsupported Linux backend: $BACKEND" >&2; exit 2 ;;
+          esac
+
+          if [ -n "$INPUT_IMAGE" ]; then
+            case "$INPUT_IMAGE" in
+              ghcr.io/*) ;;
+              *) echo "Only ghcr.io images are accepted" >&2; exit 2 ;;
+            esac
+            echo "name=$INPUT_IMAGE" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=coeiroink-engine-ci:${GITHUB_SHA}-${BACKEND}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out Engine source
+        if: inputs.image == ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: coeiroink_engine
+          persist-credentials: false
+
+      - name: Check out Core source
+        if: inputs.image == ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cyrne1-7208/coeiroink_core
+          ref: ${{ inputs.core_ref || 'main' }}
+          path: coeiroink_core
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        if: inputs.image == ''
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build the source container
+        if: inputs.image == ''
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: coeiroink_engine/Dockerfile
+          build-args: |
+            COEIROINK_BACKEND=${{ inputs.backend || 'cpu' }}
+          load: true
+          push: false
+          tags: ${{ steps.image.outputs.name }}
+          provenance: false
+          sbom: false
+
       - name: Log in to GHCR only
+        if: inputs.image != ''
         uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ghcr.io
@@ -44,20 +140,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull the selected image
+        if: inputs.image != ''
         env:
-          IMAGE: ${{ inputs.image }}
-        run: |
-          set -euo pipefail
-          case "$IMAGE" in
-            ghcr.io/*) docker pull "$IMAGE" ;;
-            *)
-              echo "Only ghcr.io images are accepted" >&2
-              exit 2 ;;
-          esac
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: docker pull "$IMAGE"
 
       - name: Start the selected container and check the HTTP server
         env:
-          IMAGE: ${{ inputs.image }}
+          BACKEND: ${{ inputs.backend || 'cpu' }}
+          IMAGE: ${{ steps.image.outputs.name }}
         run: |
           set -euo pipefail
           # GitHub-hosted標準runnerにはGPUがないため、CUDA/OpenCL imageもCPU deviceでHTTP起動だけ確認する。
@@ -75,7 +166,7 @@ jobs:
             status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
               http://127.0.0.1:50032/voicevox/version || true)"
             if [ "$status" = 200 ]; then
-              echo "CPU container is ready"
+              echo "$BACKEND container is ready"
               trap - EXIT
               cleanup 0
               exit 0

@@ -242,3 +242,14 @@ jobs:
       push: true
       backend: ${{ matrix.backend }}
       core_ref: ${{ inputs.core_ref }}
+
+  test-linux-cpu-container:
+    name: Test published Linux CPU container
+    needs: publish-linux-containers
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/test-engine-container.yml
+    with:
+      image: ${{ format('ghcr.io/{0}:{1}-cpu', github.repository, inputs.version) }}
+      backend: cpu
