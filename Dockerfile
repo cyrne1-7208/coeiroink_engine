@@ -1,5 +1,5 @@
 # CoreとEngineの両ディレクトリを含む親ディレクトリをビルドコンテキストにする。
-ARG PYTHON_IMAGE=python:3.14-slim-bookworm
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 ARG UV_VERSION=0.12.5
 ARG COEIROINK_BACKEND=cpu
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv

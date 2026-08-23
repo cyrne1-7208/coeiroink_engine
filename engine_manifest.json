@@ -3,7 +3,7 @@
     "name": "COEIROINK Engine",
     "brand_name": "COEIROINK",
     "uuid": "7505c175-3861-4e04-845f-d1032abbbf1f",
-    "version": "0.1.0",
+    "version": "v0.1.1+coeiroink.1.7.3",
     "url": "https://coeiroink.com",
     "command": "run",
     "port": 50032,

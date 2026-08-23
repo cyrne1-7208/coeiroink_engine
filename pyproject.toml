@@ -4,14 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coeiroink-engine"
-version = "0.1.0"
+version = "0.1.1+coeiroink.1.7.3"
 description = "COEIROINK Engine HTTP server"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }
 dependencies = [
-    "coeirocore",
+    "coeirocore==0.1.1+coeiroink.1.7.3",
     "fastapi>=0.141,<0.142",
     "jinja2>=3.1.4,<4",
+    "librosa>=0.11,<1",
     "numpy>=2.3,<2.4",
     "packaging>=24,<27",
     "platformdirs>=4.2,<5",
@@ -19,6 +20,7 @@ dependencies = [
     "pyopenjtalk @ git+https://github.com/r9y9/pyopenjtalk.git@v0.4.1",
     "pyyaml>=6.0.1,<7",
     "requests>=2.32,<3",
+    "resampy>=0.4.3,<1",
     "scipy>=1.16,<2",
     "soundfile>=0.14,<1",
     "starlette>=1.6,<2",
@@ -29,44 +31,31 @@ dependencies = [
 [project.optional-dependencies]
 # EngineのprofileをCoreへ転送し、Coreの実行backendと依存wheelを必ず一致させる。
 cpu = [
-    "coeirocore[cpu]",
-    "espnet @ git+https://github.com/espnet/espnet.git@v.202604-patch1",
+    "coeirocore[cpu]==0.1.1+coeiroink.1.7.3",
+    # root projectでCPU wheelのindexを選ぶため、Coreと同じ組を明示する。
     "torch==2.10.0",
     "torchaudio==2.10.0",
 ]
 cuda = [
-    "coeirocore[cuda]",
-    "espnet @ git+https://github.com/espnet/espnet.git@v.202604-patch1",
+    "coeirocore[cuda]==0.1.1+coeiroink.1.7.3",
+    # root projectでCUDA wheelのindexを選ぶため、Coreと同じ組を明示する。
     "torch==2.10.0",
     "torchaudio==2.10.0",
 ]
 directml = [
-    # torch-directmlが対応するWindows用wheelに合わせ、DirectMLだけPython 3.12とTorch 2.4.1へ制限する。
-    "coeirocore[directml]",
-    "espnet @ git+https://github.com/espnet/espnet.git@v.202604-patch1 ; sys_platform == 'win32' and python_version < '3.13'",
-    "torch==2.4.1; sys_platform == 'win32' and python_version < '3.13'",
-    "torchaudio==2.4.1; sys_platform == 'win32' and python_version < '3.13'",
-    "torch-directml==0.2.5.dev240914; sys_platform == 'win32' and python_version < '3.13'",
+    "coeirocore[directml]==0.1.1+coeiroink.1.7.3",
 ]
 opencl = [
-    # OpenCLはLinuxでCUDAを利用できないGPU向けのPrivateUse1 backendとして個別に導入する。
-    "coeirocore[opencl]",
-    "coeiroink-opencl==0.1.0; sys_platform == 'linux'",
-    "espnet @ git+https://github.com/espnet/espnet.git@v.202604-patch1 ; sys_platform == 'linux'",
-    "pyopencl>=2026.1.2,<2027; sys_platform == 'linux'",
+    "coeirocore[opencl]==0.1.1+coeiroink.1.7.3",
+    # uvのextra別sourceを有効にし、Core内のnative packageとCPU版Torchを同じlockへ固定する。
+    "coeiroink-opencl==0.1.1+coeiroink.1.7.3; sys_platform == 'linux'",
     "torch==2.10.0; sys_platform == 'linux'",
     "torchaudio==2.10.0; sys_platform == 'linux'",
 ]
 
 [dependency-groups]
 build = [
-    "Cython>=3.1,<4",
-    "cmake>=3.31,<4",
-    "ninja>=1.11,<2",
     "patchelf>=0.19,<1; sys_platform == 'linux'",
-    "setuptools>=73,<74",
-    "setuptools-scm>=8,<9",
-    "wheel>=0.45,<1",
 ]
 dev = [
     "httpx2>=2.12,<3",
@@ -103,7 +92,7 @@ conflicts = [
         { extra = "directml" },
         { extra = "opencl" },
     ],
-    # local Coreは別projectなので、Core内の排他関係とEngine/Core間でprofileが食い違う組み合わせもrootから宣言する。
+    # Coreは別projectとしてlockへ入るため、Core側extraの相互排他もroot lockで再宣言する。
     [
         { package = "coeirocore", extra = "cpu" },
         { package = "coeirocore", extra = "cuda" },
@@ -128,6 +117,7 @@ conflicts = [
         { package = "coeirocore", extra = "directml" },
         { package = "coeirocore", extra = "opencl" },
     ],
+    # EngineとCoreで異なるbackend extraが同時に有効になる理論上の組合せも除外し、Torch indexを一意にする。
     [
         { extra = "cpu" },
         { package = "coeirocore", extra = "cuda" },
@@ -211,7 +201,7 @@ coeiroink-opencl = [
 
 [[tool.uv.dependency-metadata]]
 name = "coeiroink-opencl"
-version = "0.1.0"
+version = "0.1.1+coeiroink.1.7.3"
 # backend別TorchはEngineのextraで固定するため、ローカルpackageの重複要件をlock解決へ持ち込まない。
 requires-dist = []
 
@@ -227,22 +217,6 @@ explicit = true
 
 [tool.setuptools.packages.find]
 include = ["voicevox_engine*"]
-
-[tool.black]
-line-length = 88
-target-version = ["py314"]
-
-[tool.isort]
-default_section = "THIRDPARTY"
-ensure_newline_before_comments = true
-force_grid_wrap = 0
-force_single_line = false
-include_trailing_comma = true
-known_first_party = ["voicevox_engine"]
-known_third_party = ["numpy"]
-line_length = 88
-multi_line_output = 3
-use_parentheses = true
 
 [tool.ruff]
 target-version = "py312"

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "リリースするバージョン（例: v0.1.0）"
+        description: "リリースするバージョン（例: v0.1.1+coeiroink.1.7.3）"
         required: true
         type: string
       core_ref:
@@ -29,16 +29,21 @@ jobs:
     name: Validate release inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      container_tag: ${{ steps.version.outputs.container_tag }}
     steps:
       - name: Validate version
+        id: version
         env:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [ "${#VERSION}" -gt 64 ] || [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
-            echo "version must use the vX.Y.Z format: $VERSION" >&2
+          if [ "${#VERSION}" -gt 64 ] || [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\+coeiroink\.1\.7\.3$ ]]; then
+            echo "version must use the vX.Y.Z+coeiroink.1.7.3 format: $VERSION" >&2
             exit 2
           fi
+          # OCI/Docker tagでは'+'を使用できないため、GHCRに渡すときだけ'-'へ置換する。
+          echo "container_tag=${VERSION/+/-}" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.target }}
@@ -52,23 +57,23 @@ jobs:
         include:
           - target: linux-cpu
             os: ubuntu-24.04
-            python: "3.14"
+            python: "3.12"
             extra: cpu
           - target: linux-cuda
             os: ubuntu-24.04
-            python: "3.14"
+            python: "3.12"
             extra: cuda
           - target: linux-opencl
             os: ubuntu-24.04
-            python: "3.14"
+            python: "3.12"
             extra: opencl
           - target: windows-cpu
             os: windows-2022
-            python: "3.14"
+            python: "3.12"
             extra: cpu
           - target: windows-cuda
             os: windows-2022
-            python: "3.14"
+            python: "3.12"
             extra: cuda
           - target: windows-directml
             os: windows-2022
@@ -225,7 +230,7 @@ jobs:
 
   publish-linux-containers:
     name: Publish Linux ${{ matrix.backend }} container
-    needs: [build, publish]
+    needs: [validate-inputs, build, publish]
     if: needs.publish.result == 'success'
     strategy:
       fail-fast: false
@@ -238,18 +243,19 @@ jobs:
       packages: write
     uses: ./.github/workflows/build-engine-container.yml
     with:
-      tag: ${{ inputs.version }}
+      tag: ${{ needs.validate-inputs.outputs.container_tag }}
       push: true
       backend: ${{ matrix.backend }}
       core_ref: ${{ inputs.core_ref }}
+      publish_latest: true
 
   test-linux-cpu-container:
     name: Test published Linux CPU container
-    needs: publish-linux-containers
+    needs: [validate-inputs, publish-linux-containers]
     permissions:
       contents: read
       packages: read
     uses: ./.github/workflows/test-engine-container.yml
     with:
-      image: ${{ format('ghcr.io/{0}:{1}-cpu', github.repository, inputs.version) }}
+      image: ${{ format('ghcr.io/{0}:{1}-cpu', github.repository, needs.validate-inputs.outputs.container_tag) }}
       backend: cpu

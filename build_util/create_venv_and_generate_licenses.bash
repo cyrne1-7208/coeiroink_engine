@@ -13,12 +13,12 @@ engine_dir="$(cd "$script_dir/.." && pwd)"
 core_dir="$(cd "$engine_dir/../coeiroink_core" && pwd)"
 venv_path="$engine_dir/licenses_venv"
 
-python_bin="${PYTHON_BIN:-python3.14}"
+python_bin="${PYTHON_BIN:-python3.12}"
 uv_bin="${UV_BIN:-uv}"
 if [[ "$uv_bin" != /* ]]; then
     uv_bin="$(command -v "$uv_bin")"
 fi
-"$python_bin" -c 'import sys; assert (3, 12) <= sys.version_info[:2] < (3, 15), sys.version'
+"$python_bin" -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
 test -f "$engine_dir/pyproject.toml"
 test -f "$engine_dir/uv.lock"
 test -f "$core_dir/pyproject.toml"
