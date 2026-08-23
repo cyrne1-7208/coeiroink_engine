@@ -17,6 +17,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/coeiroink
 
+RUN useradd --create-home --uid 10001 coeiroink \
+    && install -d -o coeiroink -g coeiroink /opt/coeiroink/speaker_info
+
 # pyopenjtalkとPyWorldのビルド、ESPnetの取得、音声出力に必要なLinux依存。
 # OpenCLだけはホスト側のICDを利用するため、コンテナにはloaderのみ入れる。
 RUN set -eux; \
@@ -34,22 +37,19 @@ RUN set -eux; \
     esac; \
     rm -rf /var/lib/apt/lists/*
 
-COPY coeiroink_core /opt/coeiroink/coeiroink_core
-COPY coeiroink_engine /opt/coeiroink/coeiroink_engine
+COPY --chown=coeiroink:coeiroink coeiroink_core /opt/coeiroink/coeiroink_core
+COPY --chown=coeiroink:coeiroink coeiroink_engine /opt/coeiroink/coeiroink_engine
 
 WORKDIR /opt/coeiroink/coeiroink_engine
 
 # バックエンドごとに依存profileを分離し、同じイメージへ異なるTorch wheelを混在させない。
-RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.1.0 \
+# 公式PythonイメージのC++共有ライブラリ用リンカーはgccのため、pyopenjtalkをlibstdc++へ正しくリンクする。
+RUN CXX=g++ LDCXXSHARED="g++ -shared" \
     uv sync --locked --extra "$COEIROINK_BACKEND" --group build --no-dev \
     && torch_cpu_library="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/torch/lib/libtorch_cpu.so" \
     && test -f "$torch_cpu_library" \
     && .venv/bin/patchelf --clear-execstack "$torch_cpu_library" \
     && .venv/bin/python -c "import importlib.metadata, espnet2, pyopenjtalk, torch; print(f'torch={torch.__version__}'); print(f'espnet={importlib.metadata.version(\"espnet\")}'); print(f'pyopenjtalk={pyopenjtalk.__version__}'); pyopenjtalk.g2p('コンテナ確認')"
-
-RUN useradd --create-home --uid 10001 coeiroink \
-    && mkdir -p /opt/coeiroink/speaker_info \
-    && chown -R coeiroink:coeiroink /opt/coeiroink
 
 USER coeiroink
 
