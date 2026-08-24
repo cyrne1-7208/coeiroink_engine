@@ -255,7 +255,7 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
     assert client.get("/").json() == {"status": "start"}
     assert client.get("/v1/engine_info").json() == {
         "device": "cpu",
-        "version": "v0.1.1+coeiroink.1.7.3",
+        "version": "0.1.2+coeiroink.1.7.3",
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
     assert client.get("/v1/speakers_path_variant").status_code == 200

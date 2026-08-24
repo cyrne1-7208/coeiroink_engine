@@ -219,17 +219,16 @@ def test_v2_routes_use_the_public_core_audio_manager(tmp_path: Path):
 
     assert client.get("/").json() == {"status": "start"}
     assert (
-        client.get("/openapi.json").json()["info"]["version"]
-        == "v0.1.1+coeiroink.1.7.3"
+        client.get("/openapi.json").json()["info"]["version"] == "0.1.2+coeiroink.1.7.3"
     )
-    assert client.get("/voicevox/version").json() == "v0.1.1+coeiroink.1.7.3"
+    assert client.get("/voicevox/version").json() == "0.1.2+coeiroink.1.7.3"
     assert (
         client.get("/voicevox/engine_manifest").json()["version"]
-        == "v0.1.1+coeiroink.1.7.3"
+        == "0.1.2+coeiroink.1.7.3"
     )
     assert client.get("/v1/engine_info").json() == {
         "device": "cpu",
-        "version": "v0.1.1+coeiroink.1.7.3",
+        "version": "0.1.2+coeiroink.1.7.3",
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
 

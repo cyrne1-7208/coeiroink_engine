@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "リリースするバージョン（例: v0.1.1+coeiroink.1.7.3）"
+        description: "リリースするバージョン（例: v0.1.2+coeiroink.1.7.3）"
         required: true
         type: string
       core_ref:
@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       container_tag: ${{ steps.version.outputs.container_tag }}
+      internal_version: ${{ steps.version.outputs.internal_version }}
     steps:
       - name: Validate version
         id: version
@@ -44,6 +45,7 @@ jobs:
           fi
           # OCI/Docker tagでは'+'を使用できないため、GHCRに渡すときだけ'-'へ置換する。
           echo "container_tag=${VERSION/+/-}" >> "$GITHUB_OUTPUT"
+          echo "internal_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.target }}
@@ -94,6 +96,23 @@ jobs:
           ref: ${{ inputs.core_ref }}
           path: coeiroink_core
           persist-credentials: false
+
+      - name: Validate Engine and Core versions
+        env:
+          EXPECTED_VERSION: ${{ needs.validate-inputs.outputs.internal_version }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          expected = os.environ["EXPECTED_VERSION"]
+          for repository in ("coeiroink_engine", "coeiroink_core"):
+              with (Path(repository) / "pyproject.toml").open("rb") as file:
+                  actual = tomllib.load(file)["project"]["version"]
+              if actual != expected:
+                  raise SystemExit(f"{repository} version {actual!r} != {expected!r}")
+          PY
 
       - name: Install OpenCL build dependencies
         if: matrix.target == 'linux-opencl'
@@ -153,53 +172,86 @@ jobs:
           BACKEND: ${{ matrix.extra }}
         run: uv run --locked --extra "$BACKEND" --group dev pytest -q test/test_mock_synthesis_engine.py
 
-      - name: Build wheel and source distribution
-        working-directory: coeiroink_engine
-        run: uv build --wheel --sdist --out-dir dist
-
-      - name: Create target source archive
+      - name: Download the pyopenjtalk dictionary
         working-directory: coeiroink_engine
         env:
-          TARGET: ${{ matrix.target }}
-          VERSION: ${{ inputs.version }}
-          CORE_REF: ${{ inputs.core_ref }}
+          BACKEND: ${{ matrix.extra }}
         run: |
+          set -euo pipefail
+          for attempt in $(seq 1 5); do
+            if uv run --locked --extra "$BACKEND" --group build --group dev python -c \
+              "import pyopenjtalk; pyopenjtalk._lazy_init()"; then
+              dictionary_ready=true
+              break
+            fi
+            echo "Dictionary download attempt $attempt/5 failed" >&2
+            sleep 5
+          done
+          test "${dictionary_ready:-false}" = true
+
+      - name: Install the locked runtime and packaging environment
+        working-directory: coeiroink_engine
+        env:
+          BACKEND: ${{ matrix.extra }}
+        run: |
+          uv sync --locked --extra "$BACKEND" --group build --no-dev
+          uv pip check
+
+      - name: Build the standalone Engine
+        working-directory: coeiroink_engine
+        env:
+          BACKEND: ${{ matrix.extra }}
+        run: |
+          uv run --locked --extra "$BACKEND" --group build --no-dev \
+            pyinstaller --noconfirm --clean run.spec -- --backend "$BACKEND"
+
+      - name: Start and inspect the standalone Engine
+        working-directory: coeiroink_engine
+        env:
+          BACKEND: ${{ matrix.extra }}
+          EXPECTED_VERSION: ${{ needs.validate-inputs.outputs.internal_version }}
+        run: |
+          uv run --locked --extra "$BACKEND" --group build --no-dev python \
+            build_util/check_release_build.py \
+            --dist-dir dist/run \
+            --expected-version "$EXPECTED_VERSION"
+
+      - name: Create split 7-Zip archives
+        working-directory: coeiroink_engine
+        env:
+          PACKAGE_NAME: coeiroink-engine-${{ matrix.target }}-${{ inputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mv dist/run "$TARGET"
+          rm -rf .venv build
+
+          # GitHub Releaseの単一ファイル上限を超えないよう、VOICEVOXと同じ1,900 MB単位で分割する。
+          7z -r -v1900m a "$PACKAGE_NAME.7z" "$TARGET/"
+          ls "$PACKAGE_NAME".7z.* > "$PACKAGE_NAME.7z.txt"
+
           python - <<'PY'
           import os
-          import subprocess
-          import zipfile
           from pathlib import Path
 
-          target = os.environ["TARGET"]
-          version = os.environ["VERSION"]
-          archive = Path("dist") / f"coeiroink-engine-{target}-{version}.zip"
-          root = f"coeiroink-engine-{target}-{version}"
-
-          with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
-              for repository, prefix in ((Path("."), "coeiroink_engine"), (Path("../coeiroink_core"), "coeiroink_core")):
-                  tracked = subprocess.check_output(["git", "-C", str(repository), "ls-files", "-z"]).split(b"\0")
-                  for raw_path in tracked:
-                      if not raw_path:
-                          continue
-                      path = Path(os.fsdecode(raw_path))
-                      source = repository / path
-                      if source.is_file():
-                          output.write(source, f"{root}/{prefix}/{path.as_posix()}")
-              for path in sorted(Path("dist").glob("*")):
-                  if path.is_file() and path != archive:
-                      output.write(path, f"{root}/coeiroink_engine/dist/{path.name}")
-              (Path("dist") / "core-ref.txt").write_text(os.environ.get("CORE_REF", "") + "\n", encoding="utf-8")
-              output.write(Path("dist") / "core-ref.txt", f"{root}/coeiroink_engine/dist/core-ref.txt")
-          (Path("dist") / "core-ref.txt").unlink()
+          package_name = os.environ["PACKAGE_NAME"]
+          limit = 2_000_000_000
+          parts = sorted(Path.cwd().glob(f"{package_name}.7z.[0-9]*"))
+          if not parts:
+              raise SystemExit("No split 7-Zip archive was created")
+          for part in parts:
+              if part.stat().st_size > limit:
+                  raise SystemExit(f"Release asset exceeds 2 GB: {part}")
           PY
 
-      - name: Upload target archive
+      - name: Upload target archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coeiroink-engine-${{ matrix.target }}
-          path: coeiroink_engine/dist/coeiroink-engine-${{ matrix.target }}-${{ inputs.version }}.zip
+          name: coeiroink-engine-${{ matrix.target }}-7z
+          path: coeiroink_engine/coeiroink-engine-${{ matrix.target }}-${{ inputs.version }}.7z.*
           if-no-files-found: error
           retention-days: 3
+          compression-level: 0
 
   publish:
     name: Publish Engine release
@@ -213,7 +265,7 @@ jobs:
       - name: Download all target archives
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: coeiroink-engine-*
+          pattern: coeiroink-engine-*-7z
           path: release-assets
           merge-multiple: true
 
@@ -223,7 +275,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ inputs.version }}
           commit: ${{ github.sha }}
-          artifacts: release-assets/*
+          artifacts: release-assets/*.7z.*
           allowUpdates: true
           replacesArtifacts: true
           artifactErrorsFailBuild: true

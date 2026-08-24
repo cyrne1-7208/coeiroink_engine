@@ -2,8 +2,6 @@
 
 Cyrne1によってフォークされたCOEIROINK Engineです。HTTP API、MYCOEIROINKモデルのメタデータ管理、リクエスト処理を担当し、音声合成は隣接する[coeiroink_core](https://github.com/cyrne1-7208/coeiroink_core)へ委譲します。GUIと歌唱機能は対象外です。
 
-バージョンは`vX.Y.Z+coeiroink.1.7.3`形式で表記し、現在のバージョンは`v0.1.1+coeiroink.1.7.3`です。
-
 ## 対象環境
 
 EngineとCoreを同じ親ディレクトリへ配置し、利用するバックエンドを1つ選択します。
