@@ -6,6 +6,8 @@ from itertools import chain
 
 import pyopenjtalk
 
+from .voicevox_compat.katakana_english import text_to_full_context_labels
+
 
 @dataclass
 class Phoneme:
@@ -520,7 +522,13 @@ class Utterance:
         return [p.label for p in self.phonemes]
 
 
-def extract_full_context_label(text: str):
-    labels = pyopenjtalk.extract_fullcontext(text)
+def extract_full_context_label(text: str, enable_katakana_english: bool = False):
+    """通常はCOEIROINK従来解析を保ち、指定時だけ未知英単語の読みを補う。"""
+
+    labels = (
+        text_to_full_context_labels(text)
+        if enable_katakana_english
+        else pyopenjtalk.extract_fullcontext(text)
+    )
     phonemes = [Phoneme.from_label(label=label) for label in labels]
     return Utterance.from_phonemes(phonemes)

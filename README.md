@@ -44,7 +44,7 @@ MYCOEIROINKのZIPを展開し、モデルフォルダを`/path/to/speaker_info`�
   --device cpu
 ```
 
-Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。モデルは必要になった時点でロードされ、ロード済みモデルは保持されます。明示的なモデル数上限は設けません。
+Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。モデルは必要になった時点でロードされ、別モデルへ切り替える際は現在のモデルを解放して置き換えます。
 
 Dockerで起動する場合は、CoreとEngineを含む親ディレクトリをビルドコンテキストにしてください。
 

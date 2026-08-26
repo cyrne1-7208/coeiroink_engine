@@ -4,7 +4,7 @@ from typing import Literal, cast
 from coeirocore import __version__ as coeirocore_version
 
 from ..utility import engine_root
-from .synthesis_engine import SynthesisEngineBase
+from .synthesis_engine_base import SynthesisEngineBase
 
 Device = Literal["cpu", "cuda", "directml", "opencl"]
 SUPPORTED_DEVICES = ("cpu", "cuda", "directml", "opencl")
@@ -86,13 +86,14 @@ def make_synthesis_engines(
         ) / "speaker_info"
     speaker_info_dir = speaker_info_dir.expanduser().resolve()
 
+    # dev.coreという旧モジュール名は維持するが、ここでは実際のCoreからメタデータとデバイス能力だけを取得する。
     from ..dev.core import metas as mock_metas
     from ..dev.core import supported_devices as mock_supported_devices
-    from ..dev.synthesis_engine import MockSynthesisEngine
+    from .coeiroink_adapter import CoeiroinkVoicevoxAdapter
 
     # デバイス名と番号を分離したままCoreへ渡し、バックエンド自体を利用できない場合はEngine側でCPUへ置き換えない。
     return {
-        coeirocore_version: MockSynthesisEngine(
+        coeirocore_version: CoeiroinkVoicevoxAdapter(
             speakers=mock_metas(speaker_info_dir=speaker_info_dir),
             supported_devices=mock_supported_devices(),
             speaker_info_dir=speaker_info_dir,

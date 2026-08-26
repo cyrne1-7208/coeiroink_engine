@@ -11,6 +11,7 @@ from voicevox_engine.dev.core.mock import supported_devices as core_supported_de
 from voicevox_engine.dev.synthesis_engine import MockSynthesisEngine
 from voicevox_engine.kana_parser import create_kana
 from voicevox_engine.model import AccentPhrase, AudioQuery, Mora, SupportedDevicesInfo
+from voicevox_engine.synthesis_engine import CoeiroinkVoicevoxAdapter
 from voicevox_engine.synthesis_engine.make_synthesis_engines import (
     make_synthesis_engines,
     resolve_device,
@@ -157,11 +158,19 @@ class TestMockSynthesisEngine(TestCase):
             speaker_id=0,
         )
         self.audio_manager.synthesis.assert_called_once()
+        call = self.audio_manager.synthesis.call_args.kwargs
+        self.assertEqual(call["speed_scale"], 1)
+        self.assertEqual(call["output_sampling_rate"], 24000)
+        self.assertIsNone(call["pause_length"])
+        self.assertEqual(call["pause_length_scale"], 1)
         self.assertEqual(wave.shape, (32,))
+
+    def test_legacy_mock_name_is_the_native_adapter(self):
+        self.assertIs(MockSynthesisEngine, CoeiroinkVoicevoxAdapter)
 
     def test_device_is_passed_to_core_audio_manager(self):
         with patch(
-            "voicevox_engine.dev.synthesis_engine.mock.AudioManager"
+            "voicevox_engine.synthesis_engine.coeiroink_adapter.AudioManager"
         ) as audio_manager_class:
             MockSynthesisEngine(
                 speakers="",
@@ -189,7 +198,7 @@ class TestMockSynthesisEngine(TestCase):
                 return_value='{"cpu": true}',
             ),
             patch(
-                "voicevox_engine.dev.synthesis_engine.MockSynthesisEngine",
+                "voicevox_engine.synthesis_engine.coeiroink_adapter.CoeiroinkVoicevoxAdapter",
                 return_value=engine,
             ) as engine_class,
         ):

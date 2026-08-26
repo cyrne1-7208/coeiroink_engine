@@ -344,6 +344,12 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
         ).json()
         is None
     )
+    invalid_algorithm = client.post(
+        "/v1/set_default_processing_algorithm",
+        json={"processingAlgorithm": "unknown"},
+    )
+    assert invalid_algorithm.status_code == 422
+    assert "processing_algorithm" in invalid_algorithm.json()["detail"]
     assert (
         client.post(
             "/v1/set_default_trim_buffer",

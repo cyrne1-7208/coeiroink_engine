@@ -48,7 +48,7 @@
         },
         "adjust_pause_length": {
             "type": "bool",
-            "value": false,
+            "value": true,
             "name": "句読点などの無音時間の調整"
         },
         "interrogative_upspeak": {
@@ -73,12 +73,12 @@
         },
         "return_resource_url": {
             "type": "bool",
-            "value": false,
+            "value": true,
             "name": "キャラクター情報のリソースをURLで返送"
         },
         "apply_katakana_english": {
             "type": "bool",
-            "value": false,
+            "value": true,
             "name": "未知の英単語をカタカナ読みに変換"
         }
     }

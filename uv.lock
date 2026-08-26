@@ -352,6 +352,7 @@ dependencies = [
     { name = "coeirocore" },
     { name = "fastapi" },
     { name = "jinja2" },
+    { name = "kanalizer" },
     { name = "librosa" },
     { name = "numpy" },
     { name = "packaging" },
@@ -413,6 +414,7 @@ requires-dist = [
     { name = "coeiroink-opencl", marker = "sys_platform == 'linux' and extra == 'opencl'", directory = "../coeiroink_core/native/opencl" },
     { name = "fastapi", specifier = ">=0.141,<0.142" },
     { name = "jinja2", specifier = ">=3.1.4,<4" },
+    { name = "kanalizer", specifier = ">=0.1.1,<0.2" },
     { name = "librosa", specifier = ">=0.11,<1" },
     { name = "numpy", specifier = ">=2.3,<2.4" },
     { name = "packaging", specifier = ">=24,<27" },
@@ -962,6 +964,16 @@ wheels = [
 name = "kaldiio"
 version = "2.18.1+coeiroink.guard1"
 source = { directory = "../coeiroink_core/compat/kaldiio" }
+
+[[package]]
+name = "kanalizer"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/ab/17afb904792db4f81b936f291d2c27bd427fc4d6519b152fb491c422814d/kanalizer-0.1.1.tar.gz", hash = "sha256:71e4523a332d1fdc43f0205a22f9cf9356edda7f4f9ff5efb5febcab60674a86", size = 57938, upload-time = "2025-05-21T22:28:28.653Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/82/5c93ae789fa44f3615ee465e36ce39ea4c3973d597a93dfa4c8ba4ff6edf/kanalizer-0.1.1-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:bb86f3fa2cfe4034fa68f3035e3235bb6ee314e1957aac9c0426d651e473709a", size = 4489970, upload-time = "2025-05-21T22:28:22.886Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/1c/69ad29206576664d01876e78d15a74d7f0a59691eabb15af35c9923c44d1/kanalizer-0.1.1-cp39-abi3-win_amd64.whl", hash = "sha256:ced78e0e3bc57ceafa92e008dd42cf65fe5abc02d1e9dbc8846518f6fca59e29", size = 4324435, upload-time = "2025-05-21T22:28:26.747Z" },
+]
 
 [[package]]
 name = "kiwisolver"

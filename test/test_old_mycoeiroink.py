@@ -1,4 +1,5 @@
 import json
+from base64 import b64decode
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -53,6 +54,7 @@ def create_test_client(
     cancellable_engine=None,
     device: str = "cpu",
     duplicate_style: bool = False,
+    disable_mutable_api: bool = False,
 ):
     speaker_info_dir = tmp_path / "speaker_info"
     create_old_mycoeiroink_fixture(speaker_info_dir, folder_name=folder_name)
@@ -97,6 +99,7 @@ def create_test_client(
         speaker_info_dir=speaker_info_dir,
         cancellable_engine=cancellable_engine,
         device=device,
+        disable_mutable_api=disable_mutable_api,
     )
     return TestClient(app), audio_manager
 
@@ -145,6 +148,26 @@ def test_old_mycoeiroink_metadata_endpoints(tmp_path: Path):
     assert len(info["style_infos"][0]["voice_samples"]) == 3
 
 
+def test_speaker_info_enumerates_existing_voice_samples(tmp_path: Path):
+    client, _ = create_test_client(tmp_path)
+    sample_dir = tmp_path / "speaker_info" / SPEAKER_UUID / "voice_samples"
+    (sample_dir / f"{STYLE_ID}_002.wav").unlink()
+    (sample_dir / f"{STYLE_ID}_004.wav").write_bytes(b"sample 4")
+
+    response = client.get(
+        "/voicevox/speaker_info",
+        params={"speaker_uuid": SPEAKER_UUID},
+    )
+
+    assert response.status_code == 200
+    samples = response.json()["style_infos"][0]["voice_samples"]
+    assert [b64decode(value) for value in samples] == [
+        b"sample 1",
+        b"sample 3",
+        b"sample 4",
+    ]
+
+
 def test_speaker_info_supports_non_uuid_folder_name(tmp_path: Path):
     client, _ = create_test_client(tmp_path, folder_name="speaker_ver1.0")
 
@@ -184,7 +207,7 @@ def test_unknown_legacy_style_is_rejected_by_audio_query(tmp_path: Path):
         params={"text": "テストです", "speaker": 999999999},
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 422
     assert response.json() == {
         "detail": "MYCOEIROINK style is not installed: 999999999"
     }

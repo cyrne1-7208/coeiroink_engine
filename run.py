@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-import base64
 import json
 import multiprocessing
 import os
@@ -9,13 +8,11 @@ import sys
 import traceback
 import zipfile
 from contextlib import asynccontextmanager
-from functools import lru_cache
 from io import TextIOWrapper
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryFile
 from typing import Annotated
 
-import requests
 import soundfile
 import uvicorn
 from coeirocore.coeiro_manager import (
@@ -24,7 +21,16 @@ from coeirocore.coeiro_manager import (
     StyleNotFoundError,
     SynthesisError,
 )
-from fastapi import APIRouter, FastAPI, Form, HTTPException, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -57,7 +63,6 @@ from voicevox_engine.metas.metas_store import MetasStore, construct_lookup
 from voicevox_engine.model import (
     AccentPhrase,
     AudioQuery,
-    DownloadableModel,
     MorphableTargetInfo,
     ParseKanaBadRequest,
     ParseKanaError,
@@ -73,9 +78,7 @@ from voicevox_engine.morphing import (
     get_morphable_targets,
     is_synthesis_morphing_permitted,
     synthesis_morphing,
-)
-from voicevox_engine.morphing import (
-    synthesis_morphing_parameter as _synthesis_morphing_parameter,
+    synthesis_morphing_parameter,
 )
 from voicevox_engine.part_of_speech_data import MAX_PRIORITY, MIN_PRIORITY
 from voicevox_engine.preset import Preset, PresetError, PresetManager
@@ -101,13 +104,18 @@ from voicevox_engine.utility import (
     delete_file,
     engine_root,
 )
-
-DOWNLOADABLE_LIBRARY_ERRORS = (
-    OSError,
-    requests.exceptions.RequestException,
-    TypeError,
-    ValueError,
+from voicevox_engine.voicevox_compat.mutable_api import (
+    boolean_from_env as decide_boolean_from_env,
 )
+from voicevox_engine.voicevox_compat.mutable_api import mutability_guard
+from voicevox_engine.voicevox_compat.resources import (
+    ResourceManager,
+    ResourceNotFoundError,
+    add_resource_route,
+    resource_value,
+)
+from voicevox_engine.voicevox_compat.unavailable_apis import add_unavailable_routes
+
 USER_DICTIONARY_ERRORS = (OSError, RuntimeError, TypeError, ValueError, LookupError)
 
 
@@ -123,10 +131,6 @@ def _non_negative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("0以上の整数を指定してください。")
     return parsed
-
-
-def b64encode_str(s):
-    return base64.b64encode(s).decode("utf-8")
 
 
 def set_output_log_utf8() -> None:
@@ -164,6 +168,7 @@ def generate_app(
     speaker_info_dir: Path | None = None,
     cancellable_engine: CancellableEngine | None = None,
     device: str | None = None,
+    disable_mutable_api: bool = False,
 ) -> FastAPI:
     """Coreアダプター群をCOEIROINK v2 APIと`/voicevox`互換APIへ束ねたFastAPIアプリを構築する。"""
 
@@ -210,7 +215,11 @@ def generate_app(
         version=__version__,
         lifespan=lifespan,
     )
-    voicevox_router = APIRouter(prefix="/voicevox")
+    voicevox_router = APIRouter(
+        prefix="/voicevox",
+        generate_unique_id_function=lambda route: route.name,
+    )
+    add_unavailable_routes(voicevox_router)
 
     @voicevox_router.get("/", response_class=HTMLResponse, tags=["その他"])
     def voicevox_portal():
@@ -223,33 +232,6 @@ def generate_app(
         </ul>
         </body></html>
         """
-
-    @voicevox_router.get("/singers", include_in_schema=False)
-    @voicevox_router.get("/singer_info", include_in_schema=False)
-    @voicevox_router.post("/sing_frame_audio_query", include_in_schema=False)
-    @voicevox_router.post("/sing_frame_f0", include_in_schema=False)
-    @voicevox_router.post("/sing_frame_volume", include_in_schema=False)
-    @voicevox_router.post("/frame_synthesis", include_in_schema=False)
-    def unsupported_singing_api():
-        raise HTTPException(
-            status_code=501,
-            detail="COEIROINKは歌唱機能を提供していません。",
-        )
-
-    @voicevox_router.get("/installed_libraries", include_in_schema=False)
-    def unsupported_installed_libraries():
-        raise HTTPException(
-            status_code=501,
-            detail="COEIROINKはVOICEVOX音声ライブラリ管理機能を提供していません。",
-        )
-
-    @voicevox_router.post("/install_library/{library_uuid}", include_in_schema=False)
-    @voicevox_router.post("/uninstall_library/{library_uuid}", include_in_schema=False)
-    def unsupported_library_mutation(library_uuid: str):
-        raise HTTPException(
-            status_code=501,
-            detail="COEIROINKはVOICEVOX音声ライブラリ管理機能を提供していません。",
-        )
 
     @app.exception_handler(StyleNotFoundError)
     async def style_not_found_handler(
@@ -321,8 +303,10 @@ def generate_app(
     speaker_metadata_store = SpeakerMetadataStore(
         speaker_info_dir, metas_store=metas_store
     )
+    resource_manager = ResourceManager(speaker_info_dir)
+    add_resource_route(voicevox_router, resource_manager)
 
-    # COEIROINK v2は既存のMockSynthesisEngineが保持する公開Core AudioManagerを共有し、旧ルートの契約と状態を変えない。
+    # `/v1`と`/voicevox`は同じ公開Core AudioManagerを共有し、互換層に別の推論器を持たせない。
     v2_audio_manager = getattr(
         synthesis_engines[latest_core_version], "audio_manager", None
     )
@@ -341,11 +325,6 @@ def generate_app(
 
     setting_ui_template = Jinja2Templates(directory=engine_root() / "ui_template")
 
-    # キャッシュを有効化
-    # モジュール側でlru_cacheを指定するとキャッシュを制御しにくいため、HTTPサーバ側で指定する
-    # TODO: キャッシュを管理するモジュール側API・HTTP側APIを用意する
-    synthesis_morphing_parameter = lru_cache(maxsize=4)(_synthesis_morphing_parameter)
-
     def get_engine(core_version: str | None) -> SynthesisEngineBase:
         if core_version is None:
             return synthesis_engines[latest_core_version]
@@ -353,15 +332,7 @@ def generate_app(
             return synthesis_engines[core_version]
         raise HTTPException(status_code=422, detail="不明なバージョンです")
 
-    def ensure_supported_audio_query(query: AudioQuery) -> None:
-        if query.pauseLength is not None or query.pauseLengthScale != 1:
-            raise HTTPException(
-                status_code=501,
-                detail=(
-                    "COEIROINK CoreはpauseLengthとpauseLengthScaleによる"
-                    "句読点無音長の調整を提供していません。"
-                ),
-            )
+    verify_mutability_allowed = mutability_guard(disable_mutable_api)
 
     def ensure_legacy_style_available(
         style_id: int, speaker_uuid: str | None = None
@@ -373,13 +344,17 @@ def generate_app(
         except MetadataAmbiguousStyleError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         except MetadataStyleNotFoundError as error:
-            raise StyleNotFoundError(
-                f"MYCOEIROINK style is not installed: {style_id}"
+            raise HTTPException(
+                status_code=422,
+                detail=f"MYCOEIROINK style is not installed: {style_id}",
             ) from error
         if speaker_uuid is not None and installed_speaker_uuid != speaker_uuid:
-            raise StyleNotFoundError(
-                "MYCOEIROINK style is not installed for "
-                f"speakerUuid {speaker_uuid}: {style_id}"
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "MYCOEIROINK style is not installed for "
+                    f"speakerUuid {speaker_uuid}: {style_id}"
+                ),
             )
 
     def require_supported_feature(feature_name: str, display_name: str) -> None:
@@ -407,7 +382,11 @@ def generate_app(
         """
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
-        accent_phrases = engine.create_accent_phrases(text, speaker_id=speaker)
+        accent_phrases = engine.create_accent_phrases(
+            text,
+            speaker_id=speaker,
+            enable_katakana_english=enable_katakana_english,
+        )
         return AudioQuery(
             accent_phrases=accent_phrases,
             speedScale=1,
@@ -456,7 +435,9 @@ def generate_app(
             selected_preset.style_id, selected_preset.speaker_uuid
         )
         accent_phrases = engine.create_accent_phrases(
-            text, speaker_id=selected_preset.style_id
+            text,
+            speaker_id=selected_preset.style_id,
+            enable_katakana_english=enable_katakana_english,
         )
         query = AudioQuery(
             accent_phrases=accent_phrases,
@@ -472,7 +453,6 @@ def generate_app(
             outputStereo=False,
             kana=create_kana(accent_phrases),
         )
-        ensure_supported_audio_query(query)
         return query
 
     @voicevox_router.post(
@@ -517,7 +497,11 @@ def generate_app(
                 accent_phrases=accent_phrases, speaker_id=speaker
             )
 
-        return engine.create_accent_phrases(text, speaker_id=speaker)
+        return engine.create_accent_phrases(
+            text,
+            speaker_id=speaker,
+            enable_katakana_english=enable_katakana_english,
+        )
 
     @voicevox_router.post(
         "/mora_data",
@@ -594,7 +578,6 @@ def generate_app(
         ),
         core_version: str | None = None,
     ):
-        ensure_supported_audio_query(query)
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
         wave = engine.synthesis(
@@ -637,7 +620,6 @@ def generate_app(
         ),
         core_version: str | None = None,
     ):
-        ensure_supported_audio_query(query)
         ensure_legacy_style_available(speaker)
         if cancellable_engine is None:
             raise HTTPException(
@@ -691,8 +673,6 @@ def generate_app(
                 status_code=422,
                 detail="音声合成クエリが1件もありません。",
             )
-        for query in queries:
-            ensure_supported_audio_query(query)
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
         sampling_rate = queries[0].outputSamplingRate
@@ -794,7 +774,6 @@ def generate_app(
         モーフィングの割合は`morph_rate`で指定でき、0.0でベースの話者、1.0でターゲットの話者に近づきます。
         """
         require_supported_feature("synthesis_morphing", "音声モーフィング機能")
-        ensure_supported_audio_query(query)
         engine = get_engine(core_version)
 
         try:
@@ -814,7 +793,6 @@ def generate_app(
                 detail=f"該当する話者(speaker={e.speaker})が見つかりません",
             ) from e
 
-        # 生成したパラメータはキャッシュされる
         morph_param = synthesis_morphing_parameter(
             engine=engine,
             query=query,
@@ -917,7 +895,12 @@ def generate_app(
             raise HTTPException(status_code=422, detail=str(err)) from err
         return presets
 
-    @voicevox_router.post("/add_preset", response_model=int, tags=["その他"])
+    @voicevox_router.post(
+        "/add_preset",
+        response_model=int,
+        tags=["その他"],
+        dependencies=[Depends(verify_mutability_allowed)],
+    )
     def add_preset(preset: Preset):
         """
         新しいプリセットを追加します
@@ -939,7 +922,12 @@ def generate_app(
             raise HTTPException(status_code=422, detail=str(err)) from err
         return id
 
-    @voicevox_router.post("/update_preset", response_model=int, tags=["その他"])
+    @voicevox_router.post(
+        "/update_preset",
+        response_model=int,
+        tags=["その他"],
+        dependencies=[Depends(verify_mutability_allowed)],
+    )
     def update_preset(preset: Preset):
         """
         既存のプリセットを更新します
@@ -961,7 +949,12 @@ def generate_app(
             raise HTTPException(status_code=422, detail=str(err)) from err
         return id
 
-    @voicevox_router.post("/delete_preset", status_code=204, tags=["その他"])
+    @voicevox_router.post(
+        "/delete_preset",
+        status_code=204,
+        tags=["その他"],
+        dependencies=[Depends(verify_mutability_allowed)],
+    )
     def delete_preset(id: int):
         """
         既存のプリセットを削除します
@@ -998,22 +991,26 @@ def generate_app(
 
     @voicevox_router.get("/speaker_info", response_model=SpeakerInfo, tags=["その他"])
     def speaker_info(
+        request: Request,
         speaker_uuid: str,
         resource_format: ResourceFormat = ResourceFormat.BASE64,
         core_version: str | None = None,
     ):
         """
         指定されたspeaker_uuidに関する情報をjson形式で返します。
-        画像や音声はbase64エンコードされたものが返されます。
+        画像や音声はresource_formatで指定した形式で返されます。
 
         Returns
         -------
         ret_data: SpeakerInfo
         """
-        if resource_format != ResourceFormat.BASE64:
-            raise HTTPException(
-                status_code=501,
-                detail="COEIROINKではresource_format=base64のみ対応しています。",
+
+        def resolve_resource(path: Path) -> str:
+            return resource_value(
+                resource_manager,
+                request,
+                resource_format,
+                path,
             )
 
         speakers = json.loads(get_engine(core_version).speakers)
@@ -1027,25 +1024,24 @@ def generate_app(
         speaker_dir = metas_store.speaker_path(speaker_uuid)
         try:
             policy = (speaker_dir / "policy.md").read_text("utf-8")
-            portrait = b64encode_str((speaker_dir / "portrait.png").read_bytes())
+            portrait = resolve_resource(speaker_dir / "portrait.png")
             style_infos = []
             for style in speaker["styles"]:
                 id = style["id"]
-                icon = b64encode_str((speaker_dir / f"icons/{id}.png").read_bytes())
+                icon = resolve_resource(speaker_dir / f"icons/{id}.png")
                 style_portrait_path = speaker_dir / f"portraits/{id}.png"
                 style_portrait = (
-                    b64encode_str(style_portrait_path.read_bytes())
+                    resolve_resource(style_portrait_path)
                     if style_portrait_path.exists()
                     else None
                 )
+                # v2メタデータ境界と同じ列挙規則を使い、サンプル数や番号の欠番を固定値で仮定しない。
                 voice_samples = [
-                    b64encode_str(
-                        (
-                            speaker_dir
-                            / f"voice_samples/{id}_{str(j + 1).zfill(3)}.wav"
-                        ).read_bytes()
+                    resolve_resource(path)
+                    for path in speaker_metadata_store.voice_sample_paths(
+                        speaker_uuid,
+                        id,
                     )
-                    for j in range(3)
                 ]
                 style_infos.append(
                     {
@@ -1055,60 +1051,13 @@ def generate_app(
                         "voice_samples": voice_samples,
                     }
                 )
-        except FileNotFoundError as error:
+        except (FileNotFoundError, ResourceNotFoundError) as error:
             traceback.print_exc()
             raise HTTPException(
                 status_code=500, detail="追加情報が見つかりませんでした"
             ) from error
 
         return {"policy": policy, "portrait": portrait, "style_infos": style_infos}
-
-    @voicevox_router.get(
-        "/downloadable_libraries",
-        response_model=list[DownloadableModel],
-        tags=["その他"],
-        include_in_schema=False,
-    )
-    def downloadable_libraries():
-        """
-        ダウンロード可能なモデル情報を返します。
-
-        Returns
-        -------
-        ret_data: List[DownloadableModel]
-        """
-        try:
-            # APIからダウンロード可能な音声ライブラリを取得する場合
-            if engine_manifest_loader.downloadable_libraries_url:
-                response = requests.get(
-                    engine_manifest_loader.downloadable_libraries_url, timeout=60
-                )
-                ret_data: list[DownloadableModel] = [
-                    DownloadableModel(**d) for d in response.json()
-                ]
-            # ローカルのファイルからダウンロード可能な音声ライブラリを取得する場合
-            elif engine_manifest_loader.downloadable_libraries_path:
-                with open(
-                    engine_manifest_loader.downloadable_libraries_path,
-                    encoding="utf-8",
-                ) as f:
-                    ret_data: list[DownloadableModel] = [
-                        DownloadableModel(**d) for d in json.load(f)
-                    ]
-            else:
-                raise HTTPException(
-                    status_code=501,
-                    detail="ダウンロード可能なVOICEVOX音声ライブラリは提供していません。",
-                )
-        except HTTPException:
-            raise
-        except DOWNLOADABLE_LIBRARY_ERRORS as error:
-            traceback.print_exc()
-            raise HTTPException(
-                status_code=422,
-                detail="ダウンロード可能な音声ライブラリの取得に失敗しました。",
-            ) from error
-        return ret_data
 
     @voicevox_router.post("/initialize_speaker", status_code=204, tags=["その他"])
     def initialize_speaker(
@@ -1159,7 +1108,12 @@ def generate_app(
                 status_code=422, detail="辞書の読み込みに失敗しました。"
             ) from error
 
-    @voicevox_router.post("/user_dict_word", response_model=str, tags=["ユーザー辞書"])
+    @voicevox_router.post(
+        "/user_dict_word",
+        response_model=str,
+        tags=["ユーザー辞書"],
+        dependencies=[Depends(verify_mutability_allowed)],
+    )
     def add_user_dict_word(
         surface: str,
         pronunciation: str,
@@ -1211,7 +1165,10 @@ def generate_app(
             ) from error
 
     @voicevox_router.put(
-        "/user_dict_word/{word_uuid}", status_code=204, tags=["ユーザー辞書"]
+        "/user_dict_word/{word_uuid}",
+        status_code=204,
+        tags=["ユーザー辞書"],
+        dependencies=[Depends(verify_mutability_allowed)],
     )
     def rewrite_user_dict_word(
         surface: str,
@@ -1268,7 +1225,10 @@ def generate_app(
             ) from error
 
     @voicevox_router.delete(
-        "/user_dict_word/{word_uuid}", status_code=204, tags=["ユーザー辞書"]
+        "/user_dict_word/{word_uuid}",
+        status_code=204,
+        tags=["ユーザー辞書"],
+        dependencies=[Depends(verify_mutability_allowed)],
     )
     def delete_user_dict_word(word_uuid: str):
         """
@@ -1291,7 +1251,12 @@ def generate_app(
                 status_code=422, detail="ユーザー辞書の更新に失敗しました。"
             ) from error
 
-    @voicevox_router.post("/import_user_dict", status_code=204, tags=["ユーザー辞書"])
+    @voicevox_router.post(
+        "/import_user_dict",
+        status_code=204,
+        tags=["ユーザー辞書"],
+        dependencies=[Depends(verify_mutability_allowed)],
+    )
     def import_user_dict_words(
         import_dict_data: dict[str, UserDictWord], override: bool
     ):
@@ -1352,15 +1317,20 @@ def generate_app(
             allow_origin = ""
 
         return setting_ui_template.TemplateResponse(
-            "ui.html",
-            {
-                "request": request,
+            request=request,
+            name="ui.html",
+            context={
                 "cors_policy_mode": cors_policy_mode,
                 "allow_origin": allow_origin,
             },
         )
 
-    @voicevox_router.post("/setting", status_code=204, tags=["設定"])
+    @voicevox_router.post(
+        "/setting",
+        status_code=204,
+        tags=["設定"],
+        dependencies=[Depends(verify_mutability_allowed)],
+    )
     def setting_post(
         cors_policy_mode: Annotated[CorsPolicyMode, Form()],
         allow_origin: Annotated[str | None, Form()] = None,
@@ -1461,7 +1431,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--enable_mock",
         action="store_true",
-        help="指定するとVOICEVOX COREを使わずモックで音声合成を行います。",
+        help="旧起動引数との互換用です。現行の合成経路は変更しません。",
     )
     parser.add_argument(
         "--enable_cancellable_synthesis",
@@ -1473,6 +1443,15 @@ if __name__ == "__main__":
         "--load_all_models",
         action="store_true",
         help="指定すると起動時に全ての音声合成モデルを読み込みます。",
+    )
+    parser.add_argument(
+        "--disable_mutable_api",
+        action="store_true",
+        default=decide_boolean_from_env("VV_DISABLE_MUTABLE_API"),
+        help=(
+            "設定・辞書・プリセットを変更するAPIを無効化します。"
+            "未指定時は環境変数VV_DISABLE_MUTABLE_APIの1を有効、0または空文字を無効として扱います。"
+        ),
     )
 
     # 引数へcpu_num_threadsの指定がなければ、環境変数をロールします。
@@ -1593,6 +1572,7 @@ if __name__ == "__main__":
             allow_origin=allow_origin,
             cancellable_engine=cancellable_engine,
             device=args.device,
+            disable_mutable_api=args.disable_mutable_api,
         ),
         host=args.host,
         port=args.port,

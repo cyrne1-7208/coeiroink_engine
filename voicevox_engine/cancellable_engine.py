@@ -231,6 +231,7 @@ def start_synthesis_subprocess(
         use_gpu=getattr(args, "use_gpu", None),
     )
     # キャンセル用ワーカも親プロセスと同じ物理デバイスを選ぶため、両方の番号を引き継ぐ。
+    # キャンセル用プロセスでも通常HTTP経路と同じCOEIROINKアダプターを生成する。
     synthesis_engines = make_synthesis_engines(
         device=device,
         device_index=getattr(args, "device_index", 0),

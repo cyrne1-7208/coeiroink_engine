@@ -34,7 +34,7 @@ def yukarin_sa_forward(length: int, **kwargs: dict[str, Any]) -> np.ndarray:
 def decode_forward(length: int, **kwargs: dict[str, Any]) -> np.ndarray:
     """
     合成音声の波形データをNumPy配列で返します。ただし、常に固定の文言を読み上げます（DUMMY_TEXT）
-    参照→SynthesisEngine のdocstring [Mock]
+    旧モックAPIとのimport互換用であり、現行の本番合成経路からは呼ばれない。
 
     Parameters
     ----------
