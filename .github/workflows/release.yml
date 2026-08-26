@@ -223,7 +223,17 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          mv dist/run "$TARGET"
+          # Windowsでは起動検査直後に実行ファイルのハンドル解放が遅れるため、移動だけ再試行する。
+          for attempt in $(seq 1 10); do
+            if mv dist/run "$TARGET"; then
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then
+              echo "Failed to move dist/run to $TARGET after 10 attempts" >&2
+              exit 1
+            fi
+            sleep 2
+          done
           rm -rf .venv build
 
           # GitHub Releaseの単一ファイル上限を超えないよう、VOICEVOXと同じ1,900 MB単位で分割する。
