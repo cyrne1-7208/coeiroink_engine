@@ -236,6 +236,7 @@ def start_synthesis_subprocess(
         device=device,
         device_index=getattr(args, "device_index", 0),
         opencl_platform_index=getattr(args, "opencl_platform_index", 0),
+        resampler=getattr(args, "resampler", "resampy"),
         voicelib_dirs=args.voicelib_dir,
         voicevox_dir=args.voicevox_dir,
         runtime_dirs=args.runtime_dir,

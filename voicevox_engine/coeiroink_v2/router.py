@@ -820,7 +820,9 @@ def _process_wave(
     if output_sampling_rate != sampling_rate:
         projected_size = math.ceil(current.size * output_sampling_rate / sampling_rate)
         _require_processing_size(projected_size, "resampled wave")
-        resampling = _manager_audio_method(audio_manager, "resampling")
+        resampling = _manager_audio_method(audio_manager, "resample_output")
+        if resampling is None:
+            resampling = _manager_audio_method(audio_manager, "resampling")
         if resampling is not None:
             current = _as_waveform(
                 resampling(current, sampling_rate, output_sampling_rate)

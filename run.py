@@ -1403,6 +1403,13 @@ if __name__ == "__main__":
         help="OpenCLで使用するプラットフォーム番号です。デフォルトは0です。",
     )
     parser.add_argument(
+        "--experimental",
+        action="append",
+        choices=("soxr",),
+        default=[],
+        help="任意機能を明示的に有効化します。複数機能はこのオプションを繰り返し指定します。",
+    )
+    parser.add_argument(
         "--voicevox_dir",
         type=Path,
         default=None,
@@ -1502,6 +1509,8 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    # 公開フラグは実験機能名だけにし、下位層には既存の具体的な実装名を渡す。
+    args.resampler = "soxr-vhq" if "soxr" in args.experimental else "resampy"
 
     try:
         args.device = resolve_device(device=args.device, use_gpu=args.use_gpu)
@@ -1530,6 +1539,7 @@ if __name__ == "__main__":
         device=args.device,
         device_index=args.device_index,
         opencl_platform_index=args.opencl_platform_index,
+        resampler=args.resampler,
         voicelib_dirs=args.voicelib_dir,
         voicevox_dir=args.voicevox_dir,
         runtime_dirs=args.runtime_dir,

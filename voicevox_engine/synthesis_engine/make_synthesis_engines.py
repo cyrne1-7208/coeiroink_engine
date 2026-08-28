@@ -45,6 +45,7 @@ def make_synthesis_engines(
     device: str | None = None,
     device_index: int = 0,
     opencl_platform_index: int = 0,
+    resampler: str = "resampy",
 ) -> dict[str, SynthesisEngineBase]:
     """
     音声ライブラリをロードして、音声合成エンジンを生成
@@ -74,6 +75,8 @@ def make_synthesis_engines(
         Coreで使用するデバイス番号。
     opencl_platform_index: int, optional, default=0
         OpenCLで使用するプラットフォーム番号。
+    resampler: str, optional, default="resampy"
+        出力サンプリングレート変換に使う実装。
     """
     selected_device = resolve_device(device=device, use_gpu=use_gpu)
 
@@ -101,5 +104,6 @@ def make_synthesis_engines(
             device=selected_device,
             device_index=device_index,
             opencl_platform_index=opencl_platform_index,
+            resampler=resampler,
         )
     }

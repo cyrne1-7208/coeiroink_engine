@@ -26,6 +26,7 @@ class CoeiroinkVoicevoxAdapter(SynthesisEngineBase):
         use_gpu: bool | None = None,
         device_index: int = 0,
         opencl_platform_index: int = 0,
+        resampler: str = "resampy",
     ) -> None:
         super().__init__()
 
@@ -47,6 +48,7 @@ class CoeiroinkVoicevoxAdapter(SynthesisEngineBase):
                 use_gpu=None,
                 speaker_info_dir=speaker_info_dir,
                 cpu_num_threads=cpu_num_threads,
+                resampler=resampler,
             )
         )
 

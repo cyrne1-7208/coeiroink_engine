@@ -187,6 +187,7 @@ class TestMockSynthesisEngine(TestCase):
             use_gpu=None,
             speaker_info_dir=Path("speaker_info"),
             cpu_num_threads=None,
+            resampler="resampy",
         )
 
     def test_make_synthesis_engines_passes_complete_device_selection(self):
@@ -209,9 +210,10 @@ class TestMockSynthesisEngine(TestCase):
                 device="opencl",
                 device_index=2,
                 opencl_platform_index=1,
+                resampler="soxr-vhq",
             )
 
-        self.assertEqual(result, {"0.1.2+coeiroink.1.7.3": engine})
+        self.assertEqual(result, {"0.1.3+coeiroink.1.7.3": engine})
         engine_class.assert_called_once_with(
             speakers="[]",
             supported_devices='{"cpu": true}',
@@ -220,6 +222,7 @@ class TestMockSynthesisEngine(TestCase):
             device="opencl",
             device_index=2,
             opencl_platform_index=1,
+            resampler="soxr-vhq",
         )
 
     def test_resolve_device_keeps_new_devices_and_maps_legacy_gpu_flag(self):

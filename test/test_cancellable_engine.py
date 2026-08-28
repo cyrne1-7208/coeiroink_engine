@@ -86,6 +86,7 @@ def test_subprocess_passes_complete_device_selection():
         cpu_num_threads=0,
         speaker_info_dir=Path("speaker_info"),
         enable_mock=True,
+        resampler="soxr-vhq",
     )
 
     with (
@@ -101,6 +102,7 @@ def test_subprocess_passes_complete_device_selection():
         device="opencl",
         device_index=2,
         opencl_platform_index=1,
+        resampler="soxr-vhq",
         voicelib_dirs=[],
         voicevox_dir=None,
         runtime_dirs=[],

@@ -222,9 +222,8 @@ def trim_wave(
 ) -> Waveform:
     """Trim silence while retaining the requested context around both edges.
 
-    The frozen public Core uses ``librosa.effects.trim(top_db=30)``.  The v2
-    trim-buffer values describe how much audio *outside* that detected range
-    is retained; they are not additional samples to discard.
+    Coreと同じRMS判定を使う。trim-buffer値は検出範囲の外側へ残す音声長であり、
+    追加で破棄する長さではない。
     """
 
     wave = _require_waveform(wave)
@@ -240,9 +239,9 @@ def trim_wave(
         maximum=MAX_PAUSE_LENGTH_SECONDS,
     )
     try:
-        import librosa
+        from coeirocore.waveform import detect_non_silent_range
 
-        _, detected_range = librosa.effects.trim(wave, top_db=30)
+        detected_range = detect_non_silent_range(wave, top_db=30)
     except Exception as error:
         raise AudioProcessingError("failed to trim waveform") from error
     start = max(

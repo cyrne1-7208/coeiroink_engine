@@ -87,7 +87,7 @@ conflicts = [[
 
 [[manifest.dependency-metadata]]
 name = "coeiroink-opencl"
-version = "0.1.2+coeiroink.1.7.3"
+version = "0.1.3+coeiroink.1.7.3"
 
 [[package]]
 name = "absl-py"
@@ -266,7 +266,7 @@ wheels = [
 
 [[package]]
 name = "coeirocore"
-version = "0.1.2+coeiroink.1.7.3"
+version = "0.1.3+coeiroink.1.7.3"
 source = { editable = "../coeiroink_core" }
 dependencies = [
     { name = "kaldiio" },
@@ -305,6 +305,9 @@ opencl = [
     { name = "torch", version = "2.10.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'win32'" },
     { name = "torchaudio", version = "2.10.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'win32'" },
 ]
+soxr = [
+    { name = "soxr" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -324,6 +327,7 @@ requires-dist = [
     { name = "pyworld", specifier = ">=0.3.5,<0.4" },
     { name = "pyyaml", specifier = ">=6.0.1,<7" },
     { name = "resampy", specifier = ">=0.4.3,<1" },
+    { name = "soxr", marker = "extra == 'soxr'", specifier = "==1.1.0" },
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'opencl'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "coeirocore", extra = "opencl" } },
     { name = "torch", marker = "sys_platform == 'win32' and extra == 'directml'", specifier = "==2.4.1" },
     { name = "torch", marker = "extra == 'cpu'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "coeirocore", extra = "cpu" } },
@@ -334,7 +338,7 @@ requires-dist = [
     { name = "torchaudio", marker = "extra == 'cpu'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "coeirocore", extra = "cpu" } },
     { name = "torchaudio", marker = "extra == 'cuda'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "coeirocore", extra = "cuda" } },
 ]
-provides-extras = ["cpu", "cuda", "directml", "opencl"]
+provides-extras = ["cpu", "cuda", "directml", "opencl", "soxr"]
 
 [package.metadata.requires-dev]
 build = [{ name = "patchelf", marker = "sys_platform == 'linux'", specifier = ">=0.19,<1" }]
@@ -346,7 +350,7 @@ dev = [
 
 [[package]]
 name = "coeiroink-engine"
-version = "0.1.2+coeiroink.1.7.3"
+version = "0.1.3+coeiroink.1.7.3"
 source = { editable = "." }
 dependencies = [
     { name = "coeirocore" },
@@ -389,6 +393,13 @@ opencl = [
     { name = "torch", version = "2.10.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'win32'" },
     { name = "torchaudio", version = "2.10.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'win32'" },
 ]
+soxr = [
+    { name = "coeirocore", extra = ["soxr"] },
+]
+sudachi = [
+    { name = "sudachidict-full" },
+    { name = "sudachipy" },
+]
 
 [package.dev-dependencies]
 build = [
@@ -411,6 +422,7 @@ requires-dist = [
     { name = "coeirocore", extras = ["cuda"], marker = "extra == 'cuda'", editable = "../coeiroink_core" },
     { name = "coeirocore", extras = ["directml"], marker = "extra == 'directml'", editable = "../coeiroink_core" },
     { name = "coeirocore", extras = ["opencl"], marker = "extra == 'opencl'", editable = "../coeiroink_core" },
+    { name = "coeirocore", extras = ["soxr"], marker = "extra == 'soxr'", editable = "../coeiroink_core" },
     { name = "coeiroink-opencl", marker = "sys_platform == 'linux' and extra == 'opencl'", directory = "../coeiroink_core/native/opencl" },
     { name = "fastapi", specifier = ">=0.141,<0.142" },
     { name = "jinja2", specifier = ">=3.1.4,<4" },
@@ -428,6 +440,8 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.16,<2" },
     { name = "soundfile", specifier = ">=0.14,<1" },
     { name = "starlette", specifier = ">=1.6,<2" },
+    { name = "sudachidict-full", marker = "extra == 'sudachi'", specifier = "==20260723" },
+    { name = "sudachipy", marker = "extra == 'sudachi'", specifier = "==0.6.11" },
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'opencl'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "coeiroink-engine", extra = "opencl" } },
     { name = "torch", marker = "extra == 'cpu'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "coeiroink-engine", extra = "cpu" } },
     { name = "torch", marker = "extra == 'cuda'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "coeiroink-engine", extra = "cuda" } },
@@ -436,7 +450,7 @@ requires-dist = [
     { name = "torchaudio", marker = "extra == 'cuda'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "coeiroink-engine", extra = "cuda" } },
     { name = "uvicorn", specifier = ">=0.52,<0.53" },
 ]
-provides-extras = ["cpu", "cuda", "directml", "opencl"]
+provides-extras = ["cpu", "cuda", "directml", "opencl", "sudachi", "soxr"]
 
 [package.metadata.requires-dev]
 build = [
@@ -452,7 +466,7 @@ licenses = [{ name = "pip-licenses", specifier = ">=5,<6" }]
 
 [[package]]
 name = "coeiroink-opencl"
-version = "0.1.2+coeiroink.1.7.3"
+version = "0.1.3+coeiroink.1.7.3"
 source = { directory = "../coeiroink_core/native/opencl" }
 
 [[package]]
@@ -1999,6 +2013,25 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b5/b4/205b0d5241d934e8add0c38aa924c4f9fb7330834ff11e5444db964ec3f9/starlette-1.6.0.tar.gz", hash = "sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b", size = 2716969, upload-time = "2026-08-08T18:27:57.512Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/cb/6a6a47d5b464bd08695d254f3da6e7986cc70c9fa5d778eda57538edfe56/starlette-1.6.0-py3-none-any.whl", hash = "sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c", size = 75969, upload-time = "2026-08-08T18:27:56.196Z" },
+]
+
+[[package]]
+name = "sudachidict-full"
+version = "20260723"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sudachipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b4/22/039981734bf03722811f21c41af93d813dd2002c07e0681414f37d291649/sudachidict_full-20260723.tar.gz", hash = "sha256:3f14e96420f52d151956f9c5a5a59c623087ffca8754e9cfd4658b4a59047207", size = 9108, upload-time = "2026-07-24T05:40:58.746Z" }
+
+[[package]]
+name = "sudachipy"
+version = "0.6.11"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/34/a52dc020e1ac67ffe2469d22771a850589a1184e0d91d48addd364ee02ba/sudachipy-0.6.11.tar.gz", hash = "sha256:4f03310fd3fc779b3000f49395c939d18a30081632d3cb14488426f7c07cc526", size = 180616, upload-time = "2026-04-13T05:27:26.857Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/ee/f7c20d6e17619c83f5ffa3ed7bd1582174809fd8b396fb9250f24210dd57/sudachipy-0.6.11-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:9d024efea4ff8b5bd0709f1afbb8e8f230ebd4ec83f9cd76f47b0542b7c22e91", size = 1628277, upload-time = "2026-04-13T05:26:44.335Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/43/6c9fcd712bdcbd9968ec20d70504bd33fe1eb9959e611f6e29bb2bce4583/sudachipy-0.6.11-cp312-cp312-win_amd64.whl", hash = "sha256:390352e01d195c15c9a5aa0b2a2270a987baaac64888cc03e164791a7d78fe9f", size = 1326632, upload-time = "2026-04-13T05:26:45.503Z" },
 ]
 
 [[package]]
