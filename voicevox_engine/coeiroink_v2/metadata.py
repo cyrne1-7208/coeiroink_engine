@@ -2,8 +2,8 @@
 
 The helpers in this module deliberately operate on a ``speaker_info``
 directory.  A directory name is not a speaker identity: the identity comes
-from ``metas.json``.  This matters for MYCOEIROINK packages such as
-``rintos_ver1.0`` whose directory name is different from its speaker UUID.
+from ``metas.json``.  This matters when a MYCOEIROINK package directory name
+is different from its speaker UUID.
 
 This module contains no HTTP or download code.  It provides the file-system
 operations that v2 routes can use for speaker metadata and assets.

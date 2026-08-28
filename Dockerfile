@@ -45,10 +45,18 @@ WORKDIR /opt/coeiroink/coeiroink_engine
 # バックエンドごとに依存profileを分離し、同じイメージへ異なるTorch wheelを混在させない。
 # 公式PythonイメージのC++共有ライブラリ用リンカーはgccのため、pyopenjtalkをlibstdc++へ正しくリンクする。
 RUN CXX=g++ LDCXXSHARED="g++ -shared" \
-    uv sync --locked --extra "$COEIROINK_BACKEND" --group build --no-dev \
+    uv sync --locked --extra "$COEIROINK_BACKEND" --no-dev \
+    && uv pip list --format json > /tmp/coeiroink-runtime-packages.json \
+    && CXX=g++ LDCXXSHARED="g++ -shared" \
+        uv sync --locked --extra "$COEIROINK_BACKEND" --group build --group licenses --no-dev \
+    && .venv/bin/python generate_licenses.py \
+        --package-snapshot /tmp/coeiroink-runtime-packages.json \
+        --output-path engine_manifest_assets/dependency_licenses.json \
     && torch_cpu_library="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/torch/lib/libtorch_cpu.so" \
     && test -f "$torch_cpu_library" \
     && .venv/bin/patchelf --clear-execstack "$torch_cpu_library" \
+    && uv sync --locked --extra "$COEIROINK_BACKEND" --no-dev \
+    && rm /tmp/coeiroink-runtime-packages.json \
     && .venv/bin/python -c "import importlib.metadata, espnet2, pyopenjtalk, torch; print(f'torch={torch.__version__}'); print(f'espnet={importlib.metadata.version(\"espnet\")}'); print(f'pyopenjtalk={pyopenjtalk.__version__}'); pyopenjtalk.g2p('コンテナ確認')"
 
 USER coeiroink

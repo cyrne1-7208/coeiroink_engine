@@ -96,7 +96,7 @@ uv run --locked --extra cpu --group dev ruff format --check .
 
 ## ライセンス
 
-LGPL-3.0-onlyです。詳細は[LICENSE](./LICENSE)を参照してください。依存ライセンスの情報は`engine_manifest_assets/dependency_licenses.json`に収録されています。
+LGPL-3.0-onlyです。詳細は[LICENSE](./LICENSE)を参照してください。GPLv3の参照本文と同梱ライブラリのライセンス原文は`licenses/`へ収録しています。配布対象へ入る実行時依存の一覧は、バックエンドごとに`engine_manifest_assets/dependency_licenses.json`へ生成します。
 
 ## 謝辞
 

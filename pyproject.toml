@@ -226,6 +226,9 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
+[tool.setuptools]
+license-files = ["LICENSE", "licenses/GPL-3.0.txt"]
+
 [tool.setuptools.packages.find]
 include = ["voicevox_engine*"]
 

@@ -189,13 +189,19 @@ jobs:
           done
           test "${dictionary_ready:-false}" = true
 
-      - name: Install the locked runtime and packaging environment
+      - name: Capture runtime dependencies and generate licenses
         working-directory: coeiroink_engine
         env:
           BACKEND: ${{ matrix.extra }}
         run: |
-          uv sync --locked --extra "$BACKEND" --group build --no-dev
+          uv sync --locked --extra "$BACKEND" --no-dev
+          uv pip list --format json > runtime-packages.json
+          uv sync --locked --extra "$BACKEND" --group build --group licenses --no-dev
           uv pip check
+          uv run --no-sync python generate_licenses.py \
+            --package-snapshot runtime-packages.json \
+            --output-path engine_manifest_assets/dependency_licenses.json
+          rm runtime-packages.json
 
       - name: Build the standalone Engine
         working-directory: coeiroink_engine
