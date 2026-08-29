@@ -5,8 +5,8 @@
 """
 
 import inspect
-import math
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -69,13 +69,25 @@ from .prosody import (
 from .td_psola import (
     TDPSOLAProcessingError,
     TDPSOLAValidationError,
-    process_td_psola,
+)
+from .wave_processing import (
+    WaveProcessingOptions,
+)
+from .wave_processing import (
+    as_waveform as _as_waveform,
+)
+from .wave_processing import (
+    manager_audio_method as _manager_audio_method,
+)
+from .wave_processing import (
+    normalize_processing_algorithm as _normalize_processing_algorithm,
+)
+from .wave_processing import (
+    process_wave as _process_wave,
 )
 
 CatalogCallback = Callable[[], Any]
 DictionaryCallback = Callable[[DictionaryWords], Any]
-_PROCESSING_ALGORITHM_ALIASES = {"coeiroink": "td-psola"}
-_PROCESSING_ALGORITHMS = frozenset(("td-psola", "world", "resampling"))
 
 # 想定済みの公開APIエラーだけをHTTPへ変換し、未知の例外はASGIまで伝播させてtracebackを残す。
 HANDLED_API_ERRORS = (
@@ -178,28 +190,6 @@ def _as_http_error(error: Exception, default_status: int = 500) -> HTTPException
     if isinstance(error, MetadataError):
         return HTTPException(status_code=500, detail=str(error))
     return HTTPException(status_code=default_status, detail=str(error))
-
-
-def _as_waveform(value: Any) -> np.ndarray:
-    wave = np.asarray(value, dtype=np.float32)
-    if wave.ndim != 1:
-        wave = wave.reshape(-1)
-    if wave.size == 0 or not np.isfinite(wave).all():
-        raise audio_helpers.AudioValidationError(
-            "audio manager returned an invalid waveform"
-        )
-    return wave
-
-
-def _normalize_processing_algorithm(value: str | None) -> str:
-    algorithm = (value or "td-psola").lower()
-    algorithm = _PROCESSING_ALGORITHM_ALIASES.get(algorithm, algorithm)
-    if algorithm not in _PROCESSING_ALGORITHMS:
-        supported = ", ".join(sorted(_PROCESSING_ALGORITHMS))
-        raise audio_helpers.AudioValidationError(
-            f"processing_algorithm must be one of: {supported}"
-        )
-    return algorithm
 
 
 def _prediction_parts(result: Any) -> tuple[np.ndarray, list[int]]:
@@ -500,358 +490,6 @@ def _sampling_rate(audio_manager: Any) -> int:
     return value
 
 
-def _manager_audio_method(audio_manager: Any, name: str) -> Callable[..., Any] | None:
-    method = getattr(audio_manager, name, None)
-    return method if callable(method) else None
-
-
-def _validated_f0(value: Sequence[float]) -> np.ndarray:
-    try:
-        f0 = np.asarray(value, dtype=np.float64)
-    except Exception as error:
-        raise audio_helpers.AudioValidationError(
-            "adjusted_f0 must be numeric"
-        ) from error
-    if f0.ndim != 1 or f0.size == 0 or not np.isfinite(f0).all():
-        raise audio_helpers.AudioValidationError(
-            "adjusted_f0 must be a non-empty finite one-dimensional array"
-        )
-    if np.any(f0 < 0.0):
-        raise audio_helpers.AudioValidationError("adjusted_f0 must not be negative")
-    return f0
-
-
-def _manager_world_f0(
-    audio_manager: Any, wave: np.ndarray, sampling_rate: int
-) -> np.ndarray | None:
-    get_world = _manager_audio_method(audio_manager, "get_world")
-    if get_world is None:
-        return None
-    result = get_world(wave.astype(np.float64), sampling_rate)
-    if not isinstance(result, (tuple, list)) or not result:
-        raise audio_helpers.AudioProcessingError(
-            "audio manager returned an invalid WORLD result"
-        )
-    return _validated_f0(result[0])
-
-
-def _fit_f0_track(track: np.ndarray, size: int) -> np.ndarray:
-    if track.size == size:
-        return track.astype(np.float64, copy=True)
-    positions = np.linspace(0.0, 1.0, track.size)
-    target_positions = np.linspace(0.0, 1.0, size)
-    return np.interp(target_positions, positions, track).astype(np.float64)
-
-
-def _world_process(
-    audio_manager: Any,
-    wave: np.ndarray,
-    sampling_rate: int,
-    pitch_scale: float,
-    intonation_scale: float,
-    adjusted_f0: Sequence[float] | None,
-) -> np.ndarray:
-    """CoreのWORLD処理を使い、必要なら呼出元が指定したF0軌跡を適用する。"""
-
-    if adjusted_f0 is None:
-        pitch = _manager_audio_method(audio_manager, "pitch_intonation")
-        if pitch is not None:
-            return _as_waveform(
-                pitch(wave, sampling_rate, pitch_scale, intonation_scale)
-            )
-
-    get_world = _manager_audio_method(audio_manager, "get_world")
-    if get_world is None:
-        raise audio_helpers.AudioProcessingError(
-            "WORLD processing with adjustedF0 requires get_world"
-        )
-    result = get_world(wave.astype(np.float64), sampling_rate)
-    if not isinstance(result, (tuple, list)) or len(result) < 3:
-        raise audio_helpers.AudioProcessingError(
-            "audio manager returned an invalid WORLD result"
-        )
-    base_f0, spectral_envelope, aperiodicity = result[:3]
-    f0 = (
-        _validated_f0(adjusted_f0)
-        if adjusted_f0 is not None
-        else _validated_f0(base_f0)
-    )
-    f0 = _fit_f0_track(f0, len(np.asarray(base_f0).reshape(-1)))
-    if pitch_scale != 0.0:
-        f0 *= 2.0 ** float(pitch_scale)
-    if intonation_scale != 1.0:
-        # WORLDは無声音をF0=0で表すため、有声音だけへ抑揚を適用して休止や無声子音に音高を作らない。
-        voiced = f0 > 0.0
-        if np.any(voiced):
-            voiced_f0 = f0[voiced]
-            mean = float(np.mean(voiced_f0))
-            f0[voiced] = (voiced_f0 - mean) * float(intonation_scale) + mean
-
-    try:
-        from coeirocore.pyworld_compat import load_pyworld
-
-        pw = load_pyworld()
-
-        processed = pw.synthesize(
-            f0.astype(np.float64),
-            spectral_envelope,
-            aperiodicity,
-            sampling_rate,
-        )
-    except Exception as error:
-        raise audio_helpers.AudioProcessingError(
-            "failed to synthesize WORLD-processed audio"
-        ) from error
-    return _as_waveform(processed)
-
-
-def _processing_number(
-    value: object,
-    name: str,
-    *,
-    minimum: float | None = None,
-    maximum: float | None = None,
-) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float, np.integer, np.floating))
-        or not math.isfinite(float(value))
-    ):
-        raise audio_helpers.AudioValidationError(f"{name} must be a finite number")
-    result = float(value)
-    if minimum is not None and result < minimum:
-        raise audio_helpers.AudioValidationError(
-            f"{name} must be greater than or equal to {minimum}"
-        )
-    if maximum is not None and result > maximum:
-        raise audio_helpers.AudioValidationError(
-            f"{name} must be no greater than {maximum}"
-        )
-    return result
-
-
-def _processing_duration(value: object, name: str) -> float:
-    return _processing_number(
-        value,
-        name,
-        minimum=0.0,
-        maximum=audio_helpers.MAX_PAUSE_LENGTH_SECONDS,
-    )
-
-
-def _processing_sampling_rate(value: object, name: str) -> int:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, np.integer))
-        or int(value) <= 0
-        or int(value) > audio_helpers.MAX_SAMPLING_RATE
-    ):
-        raise audio_helpers.AudioValidationError(
-            f"{name} must be a positive integer no greater than {audio_helpers.MAX_SAMPLING_RATE}"
-        )
-    return int(value)
-
-
-def _require_processing_size(size: int, name: str = "processed wave") -> None:
-    if size <= 0 or size > audio_helpers.MAX_GENERATED_WAVE_SAMPLES:
-        raise audio_helpers.AudioValidationError(
-            f"{name} would exceed the maximum of {audio_helpers.MAX_GENERATED_WAVE_SAMPLES} samples"
-        )
-
-
-def _process_wave(
-    audio_manager: Any,
-    wave: np.ndarray,
-    sampling_rate: int,
-    *,
-    volume_scale: float,
-    pitch_scale: float,
-    intonation_scale: float,
-    pre_phoneme_length: float,
-    post_phoneme_length: float,
-    output_sampling_rate: int,
-    start_trim_buffer: float,
-    end_trim_buffer: float,
-    processing_algorithm: str | None = None,
-    adjusted_f0: Sequence[float] | None = None,
-    sampled_interval_value: int | None = None,
-    pause_length: float | None = None,
-    pause_start_trim_buffer: float | None = None,
-    pause_end_trim_buffer: float | None = None,
-    mora_durations: Sequence[Any] | None = None,
-) -> tuple[np.ndarray, int]:
-    """受け取ったAudioManagerの公開プリミティブを使い、v2の波形後処理を定められた順序で適用する。"""
-
-    current = _as_waveform(wave)
-    _require_processing_size(current.size, "input wave")
-    sampling_rate = _processing_sampling_rate(sampling_rate, "sampling_rate")
-    output_sampling_rate = _processing_sampling_rate(
-        output_sampling_rate, "output_sampling_rate"
-    )
-    volume_scale = _processing_number(volume_scale, "volume_scale", minimum=0.0)
-    pitch_scale = _processing_number(
-        pitch_scale, "pitch_scale", minimum=-32.0, maximum=32.0
-    )
-    intonation_scale = _processing_number(
-        intonation_scale, "intonation_scale", minimum=0.0
-    )
-    pre_phoneme_length = _processing_duration(pre_phoneme_length, "pre_phoneme_length")
-    post_phoneme_length = _processing_duration(
-        post_phoneme_length, "post_phoneme_length"
-    )
-    start_trim_buffer = _processing_duration(start_trim_buffer, "start_trim_buffer")
-    end_trim_buffer = _processing_duration(end_trim_buffer, "end_trim_buffer")
-    pause_start_trim_buffer = _processing_duration(
-        pause_start_trim_buffer if pause_start_trim_buffer is not None else 0.0,
-        "pause_start_trim_buffer",
-    )
-    pause_end_trim_buffer = _processing_duration(
-        pause_end_trim_buffer if pause_end_trim_buffer is not None else 0.0,
-        "pause_end_trim_buffer",
-    )
-    if pause_length is not None:
-        pause_length = _processing_duration(pause_length, "pause_length")
-
-    # 公式リクエスト例の`adjustedF0: []`は、呼出元指定のF0軌跡がないことを表す。
-    if adjusted_f0 is not None and len(adjusted_f0) == 0:
-        adjusted_f0 = None
-    target_f0 = _validated_f0(adjusted_f0) if adjusted_f0 is not None else None
-
-    algorithm = _normalize_processing_algorithm(processing_algorithm)
-
-    # F0軌跡は未トリムのモデル波形を基準にするため、休止長変更や端部トリムより先に音高処理を行う。
-    if pitch_scale != 0.0 or intonation_scale != 1.0 or target_f0 is not None:
-        if algorithm == "world":
-            current = _world_process(
-                audio_manager,
-                current,
-                sampling_rate,
-                pitch_scale,
-                intonation_scale,
-                target_f0,
-            )
-        elif algorithm == "resampling":
-            # 固定倍率のリサンプリングでは時間変化するF0を表現できないため、その成分だけTD-PSOLAで処理して全体の音高差へリサンプリングを適用する。
-            if target_f0 is not None or intonation_scale != 1.0:
-                source_f0 = _manager_world_f0(audio_manager, current, sampling_rate)
-                current = _as_waveform(
-                    process_td_psola(
-                        current,
-                        sampling_rate,
-                        pitch_scale=0.0,
-                        intonation_scale=(
-                            1.0 if target_f0 is not None else intonation_scale
-                        ),
-                        f0=source_f0,
-                        target_f0=target_f0,
-                    )
-                )
-            current = audio_helpers.pitch_shift_resampling(
-                current,
-                sampling_rate,
-                pitch_scale,
-            )
-        else:
-            source_f0 = _manager_world_f0(audio_manager, current, sampling_rate)
-            current = _as_waveform(
-                process_td_psola(
-                    current,
-                    sampling_rate,
-                    pitch_scale=(0.0 if target_f0 is not None else pitch_scale),
-                    intonation_scale=(
-                        1.0 if target_f0 is not None else intonation_scale
-                    ),
-                    f0=source_f0,
-                    target_f0=target_f0,
-                )
-            )
-
-    if pause_length is not None and mora_durations:
-        current = audio_helpers.replace_pause_segments(
-            current,
-            sampling_rate,
-            mora_durations,
-            pause_length=pause_length,
-            pause_start_trim_buffer=pause_start_trim_buffer,
-            pause_end_trim_buffer=pause_end_trim_buffer,
-        )
-    if start_trim_buffer or end_trim_buffer:
-        current = audio_helpers.trim_wave(
-            current,
-            sampling_rate,
-            start_trim_buffer=start_trim_buffer,
-            end_trim_buffer=end_trim_buffer,
-        )
-    else:
-        trim = _manager_audio_method(audio_manager, "trim")
-        if trim is not None:
-            current = _as_waveform(trim(current))
-
-    volume = _manager_audio_method(audio_manager, "volume")
-    if volume_scale != 1.0:
-        current = _as_waveform(
-            volume(current, volume_scale)
-            if volume is not None
-            else current * volume_scale
-        )
-
-    silence = _manager_audio_method(audio_manager, "sil")
-    if pre_phoneme_length != 0.0 or post_phoneme_length != 0.0:
-        projected_size = (
-            current.size
-            + int(sampling_rate * pre_phoneme_length)
-            + int(sampling_rate * post_phoneme_length)
-        )
-        _require_processing_size(projected_size)
-        if silence is not None:
-            current = _as_waveform(
-                silence(
-                    current,
-                    sampling_rate,
-                    pre_phoneme_length,
-                    post_phoneme_length,
-                )
-            )
-        else:
-            pre = np.zeros(int(sampling_rate * pre_phoneme_length), dtype=np.float32)
-            post = np.zeros(int(sampling_rate * post_phoneme_length), dtype=np.float32)
-            current = np.concatenate((pre, current, post)).astype(np.float32)
-
-    if output_sampling_rate != sampling_rate:
-        projected_size = math.ceil(current.size * output_sampling_rate / sampling_rate)
-        _require_processing_size(projected_size, "resampled wave")
-        resampling = _manager_audio_method(audio_manager, "resample_output")
-        if resampling is None:
-            resampling = _manager_audio_method(audio_manager, "resampling")
-        if resampling is not None:
-            current = _as_waveform(
-                resampling(current, sampling_rate, output_sampling_rate)
-            )
-        else:
-            try:
-                import resampy
-
-                current = _as_waveform(
-                    resampy.resample(
-                        current,
-                        sampling_rate,
-                        output_sampling_rate,
-                        filter="kaiser_fast",
-                    )
-                )
-            except Exception as error:
-                raise audio_helpers.AudioProcessingError(
-                    "failed to resample waveform"
-                ) from error
-
-    current = _as_waveform(current)
-    _require_processing_size(current.size)
-
-    # 旧sampling intervalは通信互換性のため受理するが、公開処理器は安全な解析間隔を内部で決める。
-    del sampled_interval_value
-    return current, output_sampling_rate
-
-
 def _catalog_result(
     catalog: Any,
     explicit_callback: CatalogCallback | None,
@@ -961,79 +599,36 @@ def _default_trim_values(
     }
 
 
-def create_v2_router(
-    audio_manager: Any,
-    metadata_store: Any = None,
-    *,
-    speaker_info_dir: str | Path | None = None,
-    catalog: Any = None,
-    dictionary_callback: DictionaryCallback | None = None,
-    download_info_callback: CatalogCallback | None = None,
-    downloadable_speakers_callback: CatalogCallback | None = None,
-    update_info_callback: CatalogCallback | None = None,
-    engine_version: str = __version__,
-    device: str = "cpu",
-    default_processing_algorithm: str = "td-psola",
-    default_trim_buffer: TrimBufferSettings | Mapping[str, Any] | None = None,
-    **compatibility_options: Any,
-) -> APIRouter:
-    """ルートパスに依存しないCOEIROINK v2ルーターを構築する。
+@dataclass(slots=True)
+class _V2RouterContext:
+    """v2ルート群が共有する、解決済みの依存オブジェクトと可変設定。"""
 
-    audio_managerとmetadata_storeは公開実装または同じAPIを持つテストダブルを受け付ける。
-    外部カタログのコールバックは任意で、未指定時の一覧APIは空配列を返す。
-    """
+    audio_manager: Any
+    metadata_store: Any
+    catalog: Any
+    dictionary_callback: DictionaryCallback | None
+    download_info_callback: CatalogCallback | None
+    downloadable_speakers_callback: CatalogCallback | None
+    update_info_callback: CatalogCallback | None
+    engine_version: str
+    device: str
+    settings: dict[str, Any]
 
-    if audio_manager is None:
-        raise ValueError("audio_manager is required")
-
-    if metadata_store is None:
-        metadata_store = compatibility_options.pop("metas_store", None)
-    if metadata_store is None:
-        metadata_store = compatibility_options.pop("speaker_metadata_store", None)
-    if metadata_store is None and speaker_info_dir is not None:
-        metadata_store = SpeakerMetadataStore(Path(speaker_info_dir))
-    elif isinstance(metadata_store, (str, Path)):
-        metadata_store = SpeakerMetadataStore(Path(metadata_store))
-
-    if catalog is None:
-        catalog = OfficialSiteCatalogClient()
-
-    # 短いコールバック名はPython呼出し互換として受け付けるが、HTTP契約には含めない。
-    download_info_callback = download_info_callback or compatibility_options.pop(
-        "download_info", None
-    )
-    downloadable_speakers_callback = (
-        downloadable_speakers_callback
-        or compatibility_options.pop("downloadable_speakers", None)
-    )
-    update_info_callback = update_info_callback or compatibility_options.pop(
-        "update_info", None
-    )
-    if compatibility_options:
-        unknown = ", ".join(sorted(compatibility_options))
-        raise TypeError(f"unknown create_v2_router option(s): {unknown}")
-
-    router = APIRouter()
-    settings = {
-        "processing_algorithm": _normalize_processing_algorithm(
-            default_processing_algorithm
-        ),
-        **_default_trim_values(default_trim_buffer),
-    }
-
-    def metadata_required() -> Any:
-        if metadata_store is None:
+    def metadata_required(self) -> Any:
+        if self.metadata_store is None:
             raise HTTPException(
                 status_code=500, detail="speaker metadata is not configured"
             )
-        return metadata_store
+        return self.metadata_store
 
+    @staticmethod
     def make_wave_response(wave: np.ndarray, sampling_rate: int) -> Response:
         return Response(
             content=audio_helpers.encode_pcm_wav(wave, sampling_rate),
             media_type="audio/wav",
         )
 
+    @staticmethod
     def request_detail(
         param: WavMakingParam | SynthesisParam,
     ) -> tuple[list[str], list[list[Any]]]:
@@ -1048,20 +643,83 @@ def create_v2_router(
         return estimated.plain, ordinary
 
     def predict_request(
+        self,
         param: WavMakingParam | SynthesisParam,
         with_duration: bool = False,
     ) -> tuple[np.ndarray, list[int], list[str], list[list[Any]], int]:
-        plain, detail = request_detail(param)
+        plain, detail = self.request_detail(param)
         wave, frames = _call_prediction(
-            audio_manager,
+            self.audio_manager,
             plain,
             param.speaker_uuid,
             param.style_id,
             param.speed_scale,
             with_duration=with_duration,
         )
-        return wave, frames, plain, detail, _sampling_rate(audio_manager)
+        return wave, frames, plain, detail, _sampling_rate(self.audio_manager)
 
+    def processing_options(
+        self,
+        param: WavProcessingParam | SynthesisParam,
+        mora_durations: Sequence[Any] | None,
+    ) -> WaveProcessingOptions:
+        """リクエスト値を優先し、未指定値だけをサーバー既定値で補う。"""
+
+        start = (
+            param.start_trim_buffer
+            if param.start_trim_buffer is not None
+            else self.settings["start_trim_buffer"]
+        )
+        end = (
+            param.end_trim_buffer
+            if param.end_trim_buffer is not None
+            else self.settings["end_trim_buffer"]
+        )
+        pause_start = (
+            param.pause_start_trim_buffer
+            if param.pause_start_trim_buffer is not None
+            else self.settings["pause_start_trim_buffer"]
+        )
+        pause_end = (
+            param.pause_end_trim_buffer
+            if param.pause_end_trim_buffer is not None
+            else self.settings["pause_end_trim_buffer"]
+        )
+        return WaveProcessingOptions(
+            volume_scale=param.volume_scale,
+            pitch_scale=param.pitch_scale,
+            intonation_scale=param.intonation_scale,
+            pre_phoneme_length=param.pre_phoneme_length,
+            post_phoneme_length=param.post_phoneme_length,
+            output_sampling_rate=param.output_sampling_rate,
+            start_trim_buffer=start,
+            end_trim_buffer=end,
+            processing_algorithm=(
+                param.processing_algorithm or self.settings["processing_algorithm"]
+            ),
+            adjusted_f0=param.adjusted_f0,
+            sampled_interval_value=param.sampled_interval_value,
+            pause_length=param.pause_length,
+            pause_start_trim_buffer=pause_start,
+            pause_end_trim_buffer=pause_end,
+            mora_durations=mora_durations,
+        )
+
+    def process_parameter(
+        self,
+        param: WavProcessingParam,
+        wave: np.ndarray,
+        sampling_rate: int,
+    ) -> tuple[np.ndarray, int]:
+        return _process_wave(
+            self.audio_manager,
+            wave,
+            sampling_rate,
+            self.processing_options(param, param.mora_durations),
+        )
+
+
+def _add_status_routes(router: APIRouter) -> None:
     @router.get(
         "/",
         response_model=Status,
@@ -1070,6 +728,10 @@ def create_v2_router(
     )
     def read_root() -> Status:
         return Status(status="start")
+
+
+def _add_speaker_list_routes(router: APIRouter, context: _V2RouterContext) -> None:
+    metadata_required = context.metadata_required
 
     @router.get(
         "/v1/speakers",
@@ -1100,6 +762,10 @@ def create_v2_router(
             return list(result)
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
+
+
+def _add_prosody_routes(router: APIRouter, context: _V2RouterContext) -> None:
+    audio_manager = context.audio_manager
 
     @router.post(
         "/v1/estimate_prosody",
@@ -1149,6 +815,12 @@ def create_v2_router(
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
 
+
+def _add_prediction_routes(router: APIRouter, context: _V2RouterContext) -> None:
+    audio_manager = context.audio_manager
+    make_wave_response = context.make_wave_response
+    predict_request = context.predict_request
+
     @router.post(
         "/v1/predict",
         response_class=Response,
@@ -1192,54 +864,13 @@ def create_v2_router(
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
 
-    def process_parameter(
-        param: WavProcessingParam,
-        wave: np.ndarray,
-        sampling_rate: int,
-    ) -> tuple[np.ndarray, int]:
-        """リクエスト値を優先し、未指定のトリム・アルゴリズム設定だけをサーバー既定値で補う。"""
 
-        start = (
-            param.start_trim_buffer
-            if param.start_trim_buffer is not None
-            else settings["start_trim_buffer"]
-        )
-        end = (
-            param.end_trim_buffer
-            if param.end_trim_buffer is not None
-            else settings["end_trim_buffer"]
-        )
-        algorithm = param.processing_algorithm or settings["processing_algorithm"]
-        pause_start = (
-            param.pause_start_trim_buffer
-            if param.pause_start_trim_buffer is not None
-            else settings["pause_start_trim_buffer"]
-        )
-        pause_end = (
-            param.pause_end_trim_buffer
-            if param.pause_end_trim_buffer is not None
-            else settings["pause_end_trim_buffer"]
-        )
-        return _process_wave(
-            audio_manager,
-            wave,
-            sampling_rate,
-            volume_scale=param.volume_scale,
-            pitch_scale=param.pitch_scale,
-            intonation_scale=param.intonation_scale,
-            pre_phoneme_length=param.pre_phoneme_length,
-            post_phoneme_length=param.post_phoneme_length,
-            output_sampling_rate=param.output_sampling_rate,
-            start_trim_buffer=start,
-            end_trim_buffer=end,
-            processing_algorithm=algorithm,
-            adjusted_f0=param.adjusted_f0,
-            sampled_interval_value=param.sampled_interval_value,
-            pause_length=param.pause_length,
-            pause_start_trim_buffer=pause_start,
-            pause_end_trim_buffer=pause_end,
-            mora_durations=param.mora_durations,
-        )
+def _add_processing_routes(router: APIRouter, context: _V2RouterContext) -> None:
+    audio_manager = context.audio_manager
+    make_wave_response = context.make_wave_response
+    predict_request = context.predict_request
+    processing_options = context.processing_options
+    process_parameter = context.process_parameter
 
     @router.post(
         "/v1/process",
@@ -1305,50 +936,21 @@ def create_v2_router(
                 if needs_duration
                 else None
             )
-            start = (
-                param.start_trim_buffer
-                if param.start_trim_buffer is not None
-                else settings["start_trim_buffer"]
-            )
-            end = (
-                param.end_trim_buffer
-                if param.end_trim_buffer is not None
-                else settings["end_trim_buffer"]
-            )
-            pause_start = (
-                param.pause_start_trim_buffer
-                if param.pause_start_trim_buffer is not None
-                else settings["pause_start_trim_buffer"]
-            )
-            pause_end = (
-                param.pause_end_trim_buffer
-                if param.pause_end_trim_buffer is not None
-                else settings["pause_end_trim_buffer"]
-            )
             output, output_sampling_rate = _process_wave(
                 audio_manager,
                 wave,
                 sampling_rate,
-                volume_scale=param.volume_scale,
-                pitch_scale=param.pitch_scale,
-                intonation_scale=param.intonation_scale,
-                pre_phoneme_length=param.pre_phoneme_length,
-                post_phoneme_length=param.post_phoneme_length,
-                output_sampling_rate=param.output_sampling_rate,
-                start_trim_buffer=start,
-                end_trim_buffer=end,
-                processing_algorithm=param.processing_algorithm
-                or settings["processing_algorithm"],
-                adjusted_f0=param.adjusted_f0,
-                sampled_interval_value=param.sampled_interval_value,
-                pause_length=param.pause_length,
-                pause_start_trim_buffer=pause_start,
-                pause_end_trim_buffer=pause_end,
-                mora_durations=mora_durations,
+                processing_options(param, mora_durations),
             )
             return make_wave_response(output, output_sampling_rate)
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
+
+
+def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
+    audio_manager = context.audio_manager
+    dictionary_callback = context.dictionary_callback
+    settings = context.settings
 
     @router.post(
         "/v1/set_dictionary",
@@ -1412,6 +1014,15 @@ def create_v2_router(
             pause_end_trim_buffer=param.pause_end_trim_buffer,
         )
 
+
+def _add_catalog_routes(router: APIRouter, context: _V2RouterContext) -> None:
+    catalog = context.catalog
+    download_info_callback = context.download_info_callback
+    downloadable_speakers_callback = context.downloadable_speakers_callback
+    update_info_callback = context.update_info_callback
+    device = context.device
+    engine_version = context.engine_version
+
     @router.get(
         "/v1/download_info",
         response_model=list[DownloadableModel],
@@ -1439,6 +1050,32 @@ def create_v2_router(
             [],
         )
         return list(result)
+
+    @router.get(
+        "/v1/update_info",
+        response_model=list[UpdateInfo],
+        operation_id="get_update_info_v1_update_info_get",
+    )
+    def update_info() -> list[UpdateInfo]:
+        result = _catalog_result(
+            catalog,
+            update_info_callback,
+            ("update_info", "get_update_info"),
+            [],
+        )
+        return list(result)
+
+    @router.get(
+        "/v1/engine_info",
+        response_model=EngineInfo,
+        operation_id="get_engine_info_v1_engine_info_get",
+    )
+    def engine_info() -> EngineInfo:
+        return EngineInfo(device=device, version=engine_version)
+
+
+def _add_metadata_lookup_routes(router: APIRouter, context: _V2RouterContext) -> None:
+    metadata_required = context.metadata_required
 
     @router.get(
         "/v1/speaker_folder_path",
@@ -1514,6 +1151,10 @@ def create_v2_router(
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
 
+
+def _add_speaker_asset_routes(router: APIRouter, context: _V2RouterContext) -> None:
+    metadata_required = context.metadata_required
+
     @router.get(
         "/v1/sample_voice",
         response_class=Response,
@@ -1579,27 +1220,89 @@ def create_v2_router(
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
 
-    @router.get(
-        "/v1/update_info",
-        response_model=list[UpdateInfo],
-        operation_id="get_update_info_v1_update_info_get",
-    )
-    def update_info() -> list[UpdateInfo]:
-        result = _catalog_result(
-            catalog,
-            update_info_callback,
-            ("update_info", "get_update_info"),
-            [],
-        )
-        return list(result)
 
-    @router.get(
-        "/v1/engine_info",
-        response_model=EngineInfo,
-        operation_id="get_engine_info_v1_engine_info_get",
+def create_v2_router(
+    audio_manager: Any,
+    metadata_store: Any = None,
+    *,
+    speaker_info_dir: str | Path | None = None,
+    catalog: Any = None,
+    dictionary_callback: DictionaryCallback | None = None,
+    download_info_callback: CatalogCallback | None = None,
+    downloadable_speakers_callback: CatalogCallback | None = None,
+    update_info_callback: CatalogCallback | None = None,
+    engine_version: str = __version__,
+    device: str = "cpu",
+    default_processing_algorithm: str = "td-psola",
+    default_trim_buffer: TrimBufferSettings | Mapping[str, Any] | None = None,
+    **compatibility_options: Any,
+) -> APIRouter:
+    """ルートパスに依存しないCOEIROINK v2ルーターを構築する。
+
+    audio_managerとmetadata_storeは公開実装または同じAPIを持つテストダブルを受け付ける。
+    外部カタログのコールバックは任意で、未指定時の一覧APIは空配列を返す。
+    """
+
+    if audio_manager is None:
+        raise ValueError("audio_manager is required")
+
+    if metadata_store is None:
+        metadata_store = compatibility_options.pop("metas_store", None)
+    if metadata_store is None:
+        metadata_store = compatibility_options.pop("speaker_metadata_store", None)
+    if metadata_store is None and speaker_info_dir is not None:
+        metadata_store = SpeakerMetadataStore(Path(speaker_info_dir))
+    elif isinstance(metadata_store, (str, Path)):
+        metadata_store = SpeakerMetadataStore(Path(metadata_store))
+
+    if catalog is None:
+        catalog = OfficialSiteCatalogClient()
+
+    # 短いコールバック名はPython呼出し互換として受け付けるが、HTTP契約には含めない。
+    download_info_callback = download_info_callback or compatibility_options.pop(
+        "download_info", None
     )
-    def engine_info() -> EngineInfo:
-        return EngineInfo(device=device, version=engine_version)
+    downloadable_speakers_callback = (
+        downloadable_speakers_callback
+        or compatibility_options.pop("downloadable_speakers", None)
+    )
+    update_info_callback = update_info_callback or compatibility_options.pop(
+        "update_info", None
+    )
+    if compatibility_options:
+        unknown = ", ".join(sorted(compatibility_options))
+        raise TypeError(f"unknown create_v2_router option(s): {unknown}")
+
+    router = APIRouter()
+    settings = {
+        "processing_algorithm": _normalize_processing_algorithm(
+            default_processing_algorithm
+        ),
+        **_default_trim_values(default_trim_buffer),
+    }
+
+    context = _V2RouterContext(
+        audio_manager=audio_manager,
+        metadata_store=metadata_store,
+        catalog=catalog,
+        dictionary_callback=dictionary_callback,
+        download_info_callback=download_info_callback,
+        downloadable_speakers_callback=downloadable_speakers_callback,
+        update_info_callback=update_info_callback,
+        engine_version=engine_version,
+        device=device,
+        settings=settings,
+    )
+    # 各ルート群には必要な依存だけを共有コンテキストから渡す。
+    _add_status_routes(router)
+    _add_speaker_list_routes(router, context)
+    _add_prosody_routes(router, context)
+    _add_prediction_routes(router, context)
+    _add_processing_routes(router, context)
+    _add_settings_routes(router, context)
+    _add_catalog_routes(router, context)
+    _add_metadata_lookup_routes(router, context)
+    _add_speaker_asset_routes(router, context)
 
     return router
 

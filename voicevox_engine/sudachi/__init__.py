@@ -6,8 +6,14 @@ from .analyzer import (
     SudachiMorpheme,
     SudachiUnavailableError,
 )
+from .open_jtalk_dictionary import (
+    OpenJTalkDictionaryError,
+    OpenJTalkDictionaryWarning,
+)
 
 __all__ = [
+    "OpenJTalkDictionaryError",
+    "OpenJTalkDictionaryWarning",
     "SudachiAnalyzer",
     "SudachiError",
     "SudachiMorpheme",

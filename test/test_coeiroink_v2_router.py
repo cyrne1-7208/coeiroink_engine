@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import voicevox_engine.coeiroink_v2.router as router_module
+from voicevox_engine.coeiroink_v2 import wave_processing
 from voicevox_engine.coeiroink_v2.audio import (
     MAX_PAUSE_LENGTH_SECONDS,
     MAX_SAMPLING_RATE,
@@ -567,31 +568,33 @@ def test_v2_process_applies_adjusted_f0_before_pause_replacement_with_fake(
         manager.events.append("pause")
         return current
 
-    monkeypatch.setattr(router_module, "_world_process", fake_world)
+    monkeypatch.setattr(wave_processing, "_world_process", fake_world)
     monkeypatch.setattr(
         router_module.audio_helpers,
         "replace_pause_segments",
         fake_pause,
     )
 
-    result, sampling_rate = router_module._process_wave(
+    result, sampling_rate = wave_processing.process_wave(
         manager,
         wave,
         16000,
-        volume_scale=1.0,
-        pitch_scale=0.0,
-        intonation_scale=1.0,
-        pre_phoneme_length=0.0,
-        post_phoneme_length=0.0,
-        output_sampling_rate=16000,
-        start_trim_buffer=0.0,
-        end_trim_buffer=0.0,
-        processing_algorithm="world",
-        adjusted_f0=[110.0, 120.0],
-        pause_length=0.3,
-        pause_start_trim_buffer=0.0,
-        pause_end_trim_buffer=0.0,
-        mora_durations=_internal_pause_durations(),
+        wave_processing.WaveProcessingOptions(
+            volume_scale=1.0,
+            pitch_scale=0.0,
+            intonation_scale=1.0,
+            pre_phoneme_length=0.0,
+            post_phoneme_length=0.0,
+            output_sampling_rate=16000,
+            start_trim_buffer=0.0,
+            end_trim_buffer=0.0,
+            processing_algorithm="world",
+            adjusted_f0=[110.0, 120.0],
+            pause_length=0.3,
+            pause_start_trim_buffer=0.0,
+            pause_end_trim_buffer=0.0,
+            mora_durations=_internal_pause_durations(),
+        ),
     )
 
     assert sampling_rate == 16000
@@ -618,7 +621,7 @@ def test_world_processing_preserves_unvoiced_f0_frames(monkeypatch):
     manager.get_world = fake_world
     monkeypatch.setattr(load_pyworld(), "synthesize", fake_synthesize)
 
-    result = router_module._world_process(
+    result = wave_processing._world_process(
         manager,
         wave,
         16000,

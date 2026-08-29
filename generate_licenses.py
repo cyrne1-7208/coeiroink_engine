@@ -91,6 +91,17 @@ def _read_url(url: str) -> str:
         return response.read().decode()
 
 
+def _coeirocore_license_text() -> str:
+    """隣接Coreを優先し、単体ビルド時だけ公開リポジトリから本文を取得する。"""
+
+    local_license = Path("../coeiroink_core/LICENSE")
+    if local_license.is_file():
+        return local_license.read_text(encoding="utf-8")
+    return _read_url(
+        "https://raw.githubusercontent.com/cyrne1-7208/coeiroink_core/main/LICENSE"
+    )
+
+
 def _unknown_license_text(name: str, version: str | None) -> str:
     """パッケージメタデータに本文がない既知の依存だけ、一次配布元から補完する。"""
 
@@ -111,24 +122,14 @@ def _unknown_license_text(name: str, version: str | None) -> str:
             ]
         )
     if normalized_name == "coeirocore":
-        local_license = Path("../coeiroink_core/LICENSE")
-        if local_license.is_file():
-            return local_license.read_text(encoding="utf-8")
-        return _read_url(
-            "https://raw.githubusercontent.com/cyrne1-7208/coeiroink_core/main/LICENSE"
-        )
+        return _coeirocore_license_text()
     if normalized_name == "kaldiio" and version is not None:
         # 評価用途に限定された上流kaldiioを公開配布物へ混入させないため、ローカル互換ガード以外は生成時に拒否する。
         if not version.endswith("+coeiroink.guard1"):
             raise LicenseGenerationError(
                 f"Unexpected external kaldiio distribution: {version}"
             )
-        local_license = Path("../coeiroink_core/LICENSE")
-        if local_license.is_file():
-            return local_license.read_text(encoding="utf-8")
-        return _read_url(
-            "https://raw.githubusercontent.com/cyrne1-7208/coeiroink_core/main/LICENSE"
-        )
+        return _coeirocore_license_text()
 
     fixed_urls = {
         "future": "https://raw.githubusercontent.com/PythonCharmers/python-future/master/LICENSE.txt",
@@ -279,9 +280,11 @@ def _combine_legal_documents(documents: list[tuple[str, str]]) -> str:
     return "\n\n".join(f"===== {path} =====\n{text}" for path, text in documents)
 
 
-def _python_package_licenses(
+def _pip_license_rows(
     runtime_packages: dict[str, tuple[str, str]] | None = None,
-) -> list[License]:
+) -> list[dict[str, Any]]:
+    """pip-licensesを実行し、配布対象だけのメタデータ行を返す。"""
+
     command = [
         sys.executable,
         "-m",
@@ -312,6 +315,74 @@ def _python_package_licenses(
     package_rows = json.loads(completed.stdout)
     if not isinstance(package_rows, list):
         raise LicenseGenerationError("pip-licenses returned invalid JSON")
+    return package_rows
+
+
+def _validate_runtime_package(
+    package: dict[str, Any],
+    canonical_name: str,
+    runtime_packages: dict[str, tuple[str, str]] | None,
+) -> None:
+    """ライセンス対象の名前と版が、配布前に保存した依存一覧と一致するか確認する。"""
+
+    if runtime_packages is None:
+        return
+    expected = runtime_packages.get(canonical_name)
+    if expected is None:
+        raise LicenseGenerationError(
+            f"Unexpected package in license output: {package['Name']}"
+        )
+    if expected[1] != package["Version"]:
+        raise LicenseGenerationError(
+            f"Runtime/license version mismatch for {package['Name']}: "
+            f"{expected[1]} != {package['Version']}"
+        )
+
+
+def _package_license(package: dict[str, Any], canonical_name: str) -> License:
+    """一つのPython配布物から表示用ライセンス情報を構築する。"""
+
+    documents = _legal_documents(package["Name"])
+    license_text = (
+        _combine_legal_documents(documents)
+        if documents
+        else _unknown_license_text(package["Name"], package["Version"])
+    )
+    license_name = KNOWN_LICENSE_NAMES.get(canonical_name, package["License"])
+    if not license_name or license_name == UNKNOWN_LICENSE:
+        raise LicenseGenerationError(
+            f"No license identifier provided for {package['Name']} {package['Version']}"
+        )
+    return License(
+        name=package["Name"],
+        version=package["Version"],
+        license=license_name,
+        text=license_text,
+    )
+
+
+def _ensure_all_runtime_packages_generated(
+    runtime_packages: dict[str, tuple[str, str]] | None,
+    generated_packages: set[str],
+) -> None:
+    if runtime_packages is None:
+        return
+    missing_packages = sorted(set(runtime_packages) - generated_packages)
+    if not missing_packages:
+        return
+    details = ", ".join(
+        f"{runtime_packages[name][0]} {runtime_packages[name][1]}"
+        for name in missing_packages
+    )
+    raise LicenseGenerationError(
+        f"No license metadata generated for runtime packages: {details}"
+    )
+
+
+def _python_package_licenses(
+    runtime_packages: dict[str, tuple[str, str]] | None = None,
+) -> list[License]:
+    package_rows = _pip_license_rows(runtime_packages)
 
     licenses: list[License] = []
     seen_package_keys: set[tuple[str, str]] = set()
@@ -323,50 +394,10 @@ def _python_package_licenses(
             continue
         seen_package_keys.add(package_key)
         generated_packages.add(canonical_name)
+        _validate_runtime_package(package, canonical_name, runtime_packages)
+        licenses.append(_package_license(package, canonical_name))
 
-        if runtime_packages is not None:
-            expected = runtime_packages.get(canonical_name)
-            if expected is None:
-                raise LicenseGenerationError(
-                    f"Unexpected package in license output: {package['Name']}"
-                )
-            if expected[1] != package["Version"]:
-                raise LicenseGenerationError(
-                    f"Runtime/license version mismatch for {package['Name']}: "
-                    f"{expected[1]} != {package['Version']}"
-                )
-
-        documents = _legal_documents(package["Name"])
-        if documents:
-            license_text = _combine_legal_documents(documents)
-        else:
-            license_text = _unknown_license_text(package["Name"], package["Version"])
-        license_name = package["License"]
-        if canonical_name in KNOWN_LICENSE_NAMES:
-            license_name = KNOWN_LICENSE_NAMES[canonical_name]
-        if not license_name or license_name == UNKNOWN_LICENSE:
-            raise LicenseGenerationError(
-                f"No license identifier provided for {package['Name']} {package['Version']}"
-            )
-        licenses.append(
-            License(
-                name=package["Name"],
-                version=package["Version"],
-                license=license_name,
-                text=license_text,
-            )
-        )
-
-    if runtime_packages is not None:
-        missing_packages = sorted(set(runtime_packages) - generated_packages)
-        if missing_packages:
-            details = ", ".join(
-                f"{runtime_packages[name][0]} {runtime_packages[name][1]}"
-                for name in missing_packages
-            )
-            raise LicenseGenerationError(
-                f"No license metadata generated for runtime packages: {details}"
-            )
+    _ensure_all_runtime_packages_generated(runtime_packages, generated_packages)
     return licenses
 
 

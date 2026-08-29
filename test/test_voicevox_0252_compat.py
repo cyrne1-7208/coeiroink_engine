@@ -7,6 +7,8 @@ import pytest
 
 import run as engine_run
 from test.test_old_mycoeiroink import SPEAKER_UUID, STYLE_ID, create_test_client
+from voicevox_engine.preset import Preset
+from voicevox_engine.voicevox_compat import router as voicevox_compat_router
 
 LEGACY_VOICEVOX_PATHS = {
     "/accent_phrases",
@@ -79,7 +81,7 @@ def _preset(**overrides):
         "pauseLengthScale": 1,
     }
     values.update(overrides)
-    return engine_run.Preset(**values)
+    return Preset(**values)
 
 
 def test_voicevox_routes_are_prefixed_without_moving_coeiroink_v1(tmp_path: Path):
@@ -244,12 +246,14 @@ def test_multi_synthesis_removes_partial_zip_after_failure(tmp_path: Path, monke
     query = _audio_query(client)
     temporary_dir = tmp_path / "multi-synthesis-temp"
     temporary_dir.mkdir()
-    original_named_temporary_file = engine_run.NamedTemporaryFile
+    original_named_temporary_file = voicevox_compat_router.NamedTemporaryFile
 
     def temporary_file_in_test_dir(**kwargs):
         return original_named_temporary_file(dir=temporary_dir, **kwargs)
 
-    monkeypatch.setattr(engine_run, "NamedTemporaryFile", temporary_file_in_test_dir)
+    monkeypatch.setattr(
+        voicevox_compat_router, "NamedTemporaryFile", temporary_file_in_test_dir
+    )
     audio_manager.synthesis.side_effect = RuntimeError("test synthesis failure")
 
     with pytest.raises(RuntimeError, match="test synthesis failure"):

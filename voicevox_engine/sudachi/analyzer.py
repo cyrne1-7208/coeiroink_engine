@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
+from importlib.resources import as_file, files
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Self
+
+from .open_jtalk_dictionary import compile_open_jtalk_dictionaries
 
 
 class SudachiError(RuntimeError):
@@ -62,17 +69,56 @@ class SudachiAnalyzer:
 
     _MODES = frozenset({"A", "B", "C"})
 
-    def __init__(self, mode: str = "C") -> None:
+    def __init__(
+        self,
+        mode: str = "C",
+        *,
+        open_jtalk_csv_paths: Sequence[Path] = (),
+        open_jtalk_user_dict_path: Path | None = None,
+    ) -> None:
         if mode not in self._MODES:
             raise ValueError(f"mode must be one of A, B, C: {mode!r}")
 
         sudachipy = _load_sudachipy()
         self.mode = mode
         self.dictionary_type = "full"
-        self._dictionary = sudachipy.Dictionary(dict="full")
-        self._tokenizer = self._dictionary.create(
-            mode=getattr(sudachipy.SplitMode, mode)
-        )
+        self._resources = ExitStack()
+        self._dictionary: Any | None = None
+        try:
+            if open_jtalk_csv_paths or open_jtalk_user_dict_path is not None:
+                system_resource = files("sudachidict_full").joinpath(
+                    "resources", "system.dic"
+                )
+                system_dictionary = self._resources.enter_context(
+                    as_file(system_resource)
+                )
+                temporary_directory = TemporaryDirectory(prefix="coeiroink-sudachi-")
+                self._resources.callback(temporary_directory.cleanup)
+                user_dictionaries = compile_open_jtalk_dictionaries(
+                    sudachipy,
+                    system_dictionary=system_dictionary,
+                    output_directory=Path(temporary_directory.name),
+                    csv_paths=open_jtalk_csv_paths,
+                    user_json_path=open_jtalk_user_dict_path,
+                )
+                self._dictionary = sudachipy.Dictionary(
+                    config=sudachipy.Config(
+                        system=str(system_dictionary),
+                        user=[str(path) for path in user_dictionaries],
+                    )
+                )
+            else:
+                self._dictionary = sudachipy.Dictionary(dict="full")
+                user_dictionaries = ()
+            self.open_jtalk_dictionary_count = len(user_dictionaries)
+            self._tokenizer = self._dictionary.create(
+                mode=getattr(sudachipy.SplitMode, mode)
+            )
+        except Exception:
+            if self._dictionary is not None:
+                self._dictionary.close()
+            self._resources.close()
+            raise
 
     def tokenize(self, text: str) -> list[SudachiMorpheme]:
         """入力を解析し、元文字列上の形態素境界と属性を返す。"""
@@ -96,7 +142,13 @@ class SudachiAnalyzer:
 
     def close(self) -> None:
         """mmap辞書を明示的に閉じて保持資源を解放する。"""
-        self._dictionary.close()
+        if self._dictionary is None:
+            return
+        try:
+            self._dictionary.close()
+        finally:
+            self._dictionary = None
+            self._resources.close()
 
     def __enter__(self) -> Self:
         return self
