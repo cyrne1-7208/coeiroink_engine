@@ -4,11 +4,12 @@ HTTPルーターはリクエスト値の解決だけを担当し、このモジ�
 """
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from coeirocore.coeiro_manager import AudioManager
 
 from . import audio as audio_helpers
 from .td_psola import process_td_psola
@@ -60,11 +61,6 @@ def normalize_processing_algorithm(value: str | None) -> str:
     return algorithm
 
 
-def manager_audio_method(audio_manager: Any, name: str) -> Callable[..., Any] | None:
-    method = getattr(audio_manager, name, None)
-    return method if callable(method) else None
-
-
 def _validated_f0(value: Sequence[float]) -> np.ndarray:
     try:
         f0 = np.asarray(value, dtype=np.float64)
@@ -82,12 +78,9 @@ def _validated_f0(value: Sequence[float]) -> np.ndarray:
 
 
 def _manager_world_f0(
-    audio_manager: Any, wave: np.ndarray, sampling_rate: int
-) -> np.ndarray | None:
-    get_world = manager_audio_method(audio_manager, "get_world")
-    if get_world is None:
-        return None
-    result = get_world(wave.astype(np.float64), sampling_rate)
+    audio_manager: AudioManager, wave: np.ndarray, sampling_rate: int
+) -> np.ndarray:
+    result = audio_manager.get_world(wave.astype(np.float64), sampling_rate)
     if not isinstance(result, (tuple, list)) or not result:
         raise audio_helpers.AudioProcessingError(
             "audio manager returned an invalid WORLD result"
@@ -104,7 +97,7 @@ def _fit_f0_track(track: np.ndarray, size: int) -> np.ndarray:
 
 
 def _world_process(
-    audio_manager: Any,
+    audio_manager: AudioManager,
     wave: np.ndarray,
     sampling_rate: int,
     pitch_scale: float,
@@ -114,18 +107,13 @@ def _world_process(
     """CoreのWORLD処理を使い、必要なら呼出元が指定したF0軌跡を適用する。"""
 
     if adjusted_f0 is None:
-        pitch = manager_audio_method(audio_manager, "pitch_intonation")
-        if pitch is not None:
-            return as_waveform(
-                pitch(wave, sampling_rate, pitch_scale, intonation_scale)
+        return as_waveform(
+            audio_manager.pitch_intonation(
+                wave, sampling_rate, pitch_scale, intonation_scale
             )
-
-    get_world = manager_audio_method(audio_manager, "get_world")
-    if get_world is None:
-        raise audio_helpers.AudioProcessingError(
-            "WORLD processing with adjustedF0 requires get_world"
         )
-    result = get_world(wave.astype(np.float64), sampling_rate)
+
+    result = audio_manager.get_world(wave.astype(np.float64), sampling_rate)
     if not isinstance(result, (tuple, list)) or len(result) < 3:
         raise audio_helpers.AudioProcessingError(
             "audio manager returned an invalid WORLD result"
@@ -303,7 +291,7 @@ def _resolve_processing_options(
 
 
 def _apply_pitch_processing(
-    audio_manager: Any,
+    audio_manager: AudioManager,
     wave: np.ndarray,
     sampling_rate: int,
     options: _ResolvedWaveProcessingOptions,
@@ -370,7 +358,7 @@ def _apply_pitch_processing(
 
 
 def _apply_pause_and_trim(
-    audio_manager: Any,
+    audio_manager: AudioManager,
     wave: np.ndarray,
     sampling_rate: int,
     options: _ResolvedWaveProcessingOptions,
@@ -391,23 +379,17 @@ def _apply_pause_and_trim(
             start_trim_buffer=options.start_trim_buffer,
             end_trim_buffer=options.end_trim_buffer,
         )
-    trim = manager_audio_method(audio_manager, "trim")
-    return as_waveform(trim(wave)) if trim is not None else wave
+    return as_waveform(audio_manager.trim(wave))
 
 
 def _apply_volume_and_silence(
-    audio_manager: Any,
+    audio_manager: AudioManager,
     wave: np.ndarray,
     sampling_rate: int,
     options: _ResolvedWaveProcessingOptions,
 ) -> np.ndarray:
-    volume = manager_audio_method(audio_manager, "volume")
     if options.volume_scale != 1.0:
-        wave = as_waveform(
-            volume(wave, options.volume_scale)
-            if volume is not None
-            else wave * options.volume_scale
-        )
+        wave = as_waveform(audio_manager.volume(wave, options.volume_scale))
 
     if options.pre_phoneme_length == 0.0 and options.post_phoneme_length == 0.0:
         return wave
@@ -417,23 +399,18 @@ def _apply_volume_and_silence(
         + int(sampling_rate * options.post_phoneme_length)
     )
     _require_processing_size(projected_size)
-    silence = manager_audio_method(audio_manager, "sil")
-    if silence is not None:
-        return as_waveform(
-            silence(
-                wave,
-                sampling_rate,
-                options.pre_phoneme_length,
-                options.post_phoneme_length,
-            )
+    return as_waveform(
+        audio_manager.sil(
+            wave,
+            sampling_rate,
+            options.pre_phoneme_length,
+            options.post_phoneme_length,
         )
-    pre = np.zeros(int(sampling_rate * options.pre_phoneme_length), dtype=np.float32)
-    post = np.zeros(int(sampling_rate * options.post_phoneme_length), dtype=np.float32)
-    return np.concatenate((pre, wave, post)).astype(np.float32)
+    )
 
 
 def _resample_output(
-    audio_manager: Any,
+    audio_manager: AudioManager,
     wave: np.ndarray,
     sampling_rate: int,
     output_sampling_rate: int,
@@ -442,22 +419,9 @@ def _resample_output(
         return wave
     projected_size = math.ceil(wave.size * output_sampling_rate / sampling_rate)
     _require_processing_size(projected_size, "resampled wave")
-    resampling = manager_audio_method(audio_manager, "resample_output")
-    if resampling is None:
-        resampling = manager_audio_method(audio_manager, "resampling")
-    if resampling is not None:
-        return as_waveform(resampling(wave, sampling_rate, output_sampling_rate))
-
     try:
-        import resampy
-
         return as_waveform(
-            resampy.resample(
-                wave,
-                sampling_rate,
-                output_sampling_rate,
-                filter="kaiser_fast",
-            )
+            audio_manager.resample_output(wave, sampling_rate, output_sampling_rate)
         )
     except Exception as error:
         raise audio_helpers.AudioProcessingError(
@@ -466,7 +430,7 @@ def _resample_output(
 
 
 def process_wave(
-    audio_manager: Any,
+    audio_manager: AudioManager,
     wave: np.ndarray,
     sampling_rate: int,
     options: WaveProcessingOptions,
@@ -498,7 +462,6 @@ def process_wave(
 __all__ = [
     "WaveProcessingOptions",
     "as_waveform",
-    "manager_audio_method",
     "normalize_processing_algorithm",
     "process_wave",
 ]

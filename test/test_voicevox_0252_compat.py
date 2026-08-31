@@ -7,8 +7,15 @@ import pytest
 
 import run as engine_run
 from test.test_old_mycoeiroink import SPEAKER_UUID, STYLE_ID, create_test_client
+from voicevox_engine.engine_manifest import EngineManifestLoader
+from voicevox_engine.katakana_english import (
+    text_to_full_context_labels as current_katakana_english,
+)
 from voicevox_engine.preset import Preset
 from voicevox_engine.voicevox_compat import router as voicevox_compat_router
+from voicevox_engine.voicevox_compat.katakana_english import (
+    text_to_full_context_labels as legacy_katakana_english,
+)
 
 LEGACY_VOICEVOX_PATHS = {
     "/accent_phrases",
@@ -50,6 +57,20 @@ SINGING_PATHS = {
     "/voicevox/sing_frame_volume",
     "/voicevox/frame_synthesis",
 }
+
+
+def test_legacy_katakana_english_import_uses_shared_implementation():
+    assert legacy_katakana_english is current_katakana_english
+
+
+def test_manifest_cache_is_not_mutable_from_callers():
+    root_dir = Path(__file__).parents[1]
+    loader = EngineManifestLoader(root_dir / "engine_manifest.json", root_dir)
+
+    manifest = loader.load_manifest()
+    manifest.supported_features.sing = True
+
+    assert loader.load_manifest().supported_features.sing is False
 
 
 def _audio_query(client):
@@ -186,6 +207,23 @@ def test_audio_query_from_legacy_preset_adds_0252_pause_defaults(
     assert response.status_code == 200
     assert response.json()["pauseLength"] is None
     assert response.json()["pauseLengthScale"] == 1
+
+
+def test_audio_query_from_preset_rejects_duplicate_style_id(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        engine_run.PresetManager, "load_presets", lambda _self: [_preset()]
+    )
+    client, _ = create_test_client(tmp_path, duplicate_style=True)
+
+    response = client.post(
+        "/voicevox/audio_query_from_preset",
+        params={"text": "テストです", "preset_id": 1},
+    )
+
+    assert response.status_code == 422
+    assert "ambiguous" in response.json()["detail"]
 
 
 def test_audio_query_from_preset_preserves_pause_controls(tmp_path: Path, monkeypatch):

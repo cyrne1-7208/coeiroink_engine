@@ -153,5 +153,10 @@ class SudachiAnalyzer:
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+    def __exit__(
+        self,
+        _exc_type: object,
+        _exc_value: object,
+        _traceback: object,
+    ) -> None:
         self.close()

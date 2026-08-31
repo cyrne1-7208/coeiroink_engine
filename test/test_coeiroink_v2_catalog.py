@@ -154,12 +154,12 @@ def test_catalog_methods_use_public_endpoints_and_validate_models(
     assert response.closed
 
 
-def test_short_method_aliases_share_the_same_validated_client() -> None:
+def test_update_info_uses_the_validated_catalog_client() -> None:
     payload = _update_info_payload()
     session = FakeSession(FakeResponse(json.dumps(payload).encode("utf-8")))
     client = CatalogClient(session=session, max_response_bytes=4096)
 
-    result = client.update_info()
+    result = client.get_update_info()
 
     assert result[0].version == "v.2.13.0"
 

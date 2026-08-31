@@ -243,6 +243,8 @@ def start_synthesis_subprocess(
         cpu_num_threads=args.cpu_num_threads,
         speaker_info_dir=getattr(args, "speaker_info_dir", None),
         enable_mock=args.enable_mock,
+        # 各ワーカーで全モデルを複製するとプロセス数に比例してメモリを消費するため、キャンセル経路は要求されたモデルだけを保持する。
+        load_all_models=False,
     )
     assert len(synthesis_engines) != 0, "音声合成エンジンがありません。"
     latest_core_version = max(synthesis_engines, key=_version_key)

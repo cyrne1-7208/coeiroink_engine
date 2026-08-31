@@ -117,11 +117,6 @@ class OfficialSiteCatalogClient:
 
         return self._get_model_list("update-info", UpdateInfo)
 
-    # ルートアダプター向けに短い別名も公開し、明示性が必要な呼出箇所ではget_*名を使えるようにする。
-    download_info = get_download_info
-    downloadable_speakers = get_downloadable_speakers
-    update_info = get_update_info
-
     def _get_model_list(self, endpoint: str, model_type: type[ModelT]) -> list[ModelT]:
         payload = self._get_json(endpoint)
         if not isinstance(payload, list):

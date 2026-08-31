@@ -85,6 +85,7 @@ def create_test_client(
         -0.1, 0.1, 4410, dtype=np.float32
     )
     audio_manager.fs = 44100
+    audio_manager.device = device
     audio_manager.predict.return_value = np.linspace(-0.1, 0.1, 4410, dtype=np.float32)
     engine = MockSynthesisEngine(
         speakers=core_metas,
@@ -95,10 +96,10 @@ def create_test_client(
         synthesis_engines={"0.0.0": engine},
         latest_core_version="0.0.0",
         setting_loader=SettingLoader(tmp_path / "setting.yml"),
+        audio_manager=audio_manager,
         root_dir=Path(__file__).parents[1],
         speaker_info_dir=speaker_info_dir,
         cancellable_engine=cancellable_engine,
-        device=device,
         disable_mutable_api=disable_mutable_api,
     )
     return TestClient(app), audio_manager

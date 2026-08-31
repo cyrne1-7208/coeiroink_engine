@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from coeirocore.coeiro_manager import PredictionResult
 from coeirocore.pyworld_compat import load_pyworld
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -29,7 +30,7 @@ STYLE_ID = 7
 
 class FakeAudioManager:
     fs = 16000
-    hop_length = 2
+    device = "cpu"
 
     def __init__(self):
         self.prediction_calls = []
@@ -57,10 +58,15 @@ class FakeAudioManager:
                 "speaker_uuid": speaker_uuid,
             }
         )
-        return {
-            "wav": np.linspace(-0.25, 0.25, 8, dtype=np.float32),
-            "duration_frames": [1, 2, 1],
-        }
+        return PredictionResult(
+            wav=np.linspace(-0.25, 0.25, 8, dtype=np.float32),
+            duration_frames=[1, 2, 1],
+        )
+
+    @staticmethod
+    def get_hop_length(style_id, speaker_uuid):
+        assert (style_id, speaker_uuid) == (STYLE_ID, SPEAKER_UUID)
+        return 2
 
     @staticmethod
     def get_world(wave, sampling_rate):
@@ -90,7 +96,7 @@ class FakeAudioManager:
         )
 
     @staticmethod
-    def resampling(wave, sampling_rate, output_sampling_rate):
+    def resample_output(wave, sampling_rate, output_sampling_rate):
         return np.repeat(wave, output_sampling_rate // sampling_rate)
 
 
@@ -184,11 +190,9 @@ def _app():
             manager,
             FakeMetadata(),
             dictionary_callback=set_dictionary,
-            catalog={
-                "download_info": [],
-                "downloadable_speakers": [],
-                "update_info": [],
-            },
+            download_info_callback=list,
+            downloadable_speakers_callback=list,
+            update_info_callback=list,
             default_trim_buffer={
                 "startTrimBuffer": 0.0,
                 "endTrimBuffer": 0.0,
@@ -667,7 +671,13 @@ def test_missing_sample_voice_uses_official_error_contract(tmp_path):
     manager = FakeAudioManager()
     missing_app = FastAPI()
     missing_app.include_router(
-        create_v2_router(manager, MissingSampleMetadata(), catalog={})
+        create_v2_router(
+            manager,
+            MissingSampleMetadata(),
+            download_info_callback=list,
+            downloadable_speakers_callback=list,
+            update_info_callback=list,
+        )
     )
     response = TestClient(missing_app).get(
         "/v1/sample_voice",

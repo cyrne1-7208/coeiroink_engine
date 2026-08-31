@@ -23,6 +23,9 @@ from voicevox_engine.coeiroink_v2.metadata import (
 )
 from voicevox_engine.coeiroink_v2.metadata import SpeakerMetadataStore
 from voicevox_engine.coeiroink_v2.metadata import (
+    SpeakerNotFoundError as MetadataSpeakerNotFoundError,
+)
+from voicevox_engine.coeiroink_v2.metadata import (
     StyleNotFoundError as MetadataStyleNotFoundError,
 )
 from voicevox_engine.coeiroink_v2.prosody import clear_prosody_cache
@@ -106,22 +109,22 @@ class VoicevoxRouterDependencies:
         """テキスト解析前に従来形式のスタイルIDを検証する。"""
 
         try:
-            installed_speaker_uuid, _ = self.speaker_metadata_store.find_style(style_id)
+            self.speaker_metadata_store.find_style(style_id, speaker_uuid)
         except MetadataAmbiguousStyleError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
-        except MetadataStyleNotFoundError as error:
-            raise HTTPException(
-                status_code=422,
-                detail=f"MYCOEIROINK style is not installed: {style_id}",
-            ) from error
-        if speaker_uuid is not None and installed_speaker_uuid != speaker_uuid:
-            raise HTTPException(
-                status_code=422,
-                detail=(
+        except (MetadataSpeakerNotFoundError, MetadataStyleNotFoundError) as error:
+            detail = (
+                f"MYCOEIROINK style is not installed: {style_id}"
+                if speaker_uuid is None
+                else (
                     "MYCOEIROINK style is not installed for "
                     f"speakerUuid {speaker_uuid}: {style_id}"
-                ),
+                )
             )
+            raise HTTPException(
+                status_code=422,
+                detail=detail,
+            ) from error
 
     def require_supported_feature(self, feature_name: str, display_name: str) -> None:
         features = self.engine_manifest_loader.load_manifest().supported_features
@@ -224,9 +227,8 @@ def _add_tts_routes(
                 status_code=422, detail="該当するプリセットIDが見つかりません"
             )
 
-        ensure_legacy_style_available(
-            selected_preset.style_id, selected_preset.speaker_uuid
-        )
+        # VOICEVOXのAudioQueryとsynthesisは話者UUIDを運べないため、重複style IDは使えないクエリを返す前に拒否する。
+        ensure_legacy_style_available(selected_preset.style_id)
         accent_phrases = engine.create_accent_phrases(
             text,
             speaker_id=selected_preset.style_id,
@@ -824,12 +826,12 @@ def _add_character_routes(
                 path,
             )
 
-        speakers = json.loads(get_engine(core_version).speakers)
-        for i in range(len(speakers)):
-            if speakers[i]["speaker_uuid"] == speaker_uuid:
-                speaker = speakers[i]
-                break
-        else:
+        speakers = metas_store.load_combined_metas(engine=get_engine(core_version))
+        speaker = next(
+            (item for item in speakers if item.speaker_uuid == speaker_uuid),
+            None,
+        )
+        if speaker is None:
             raise HTTPException(status_code=404, detail="該当する話者が見つかりません")
 
         speaker_dir = metas_store.speaker_path(speaker_uuid)
@@ -837,8 +839,8 @@ def _add_character_routes(
             policy = (speaker_dir / "policy.md").read_text("utf-8")
             portrait = resolve_resource(speaker_dir / "portrait.png")
             style_infos = []
-            for style in speaker["styles"]:
-                id = style["id"]
+            for style in speaker.styles:
+                id = style.id
                 icon = resolve_resource(speaker_dir / f"icons/{id}.png")
                 style_portrait_path = speaker_dir / f"portraits/{id}.png"
                 style_portrait = (

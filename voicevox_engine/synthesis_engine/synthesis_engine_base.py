@@ -3,19 +3,15 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 
-from .. import full_context_label
-from ..full_context_label import extract_full_context_label
 from ..model import AccentPhrase, AudioQuery, Mora
 from ..mora_list import openjtalk_mora2text
+from ..text_analysis import (
+    analyze_text,
+    full_context_label_moras_to_moras,
+    mora_to_text,
+)
 
-
-def mora_to_text(mora: str) -> str:
-    if mora[-1:] in ["A", "I", "U", "E", "O"]:
-        # 無声化母音を小文字に
-        mora = mora[:-1] + mora[-1].lower()
-    if mora in openjtalk_mora2text:
-        return openjtalk_mora2text[mora]
-    return mora
+__all__ = ["SynthesisEngineBase", "full_context_label_moras_to_moras", "mora_to_text"]
 
 
 def adjust_interrogative_accent_phrases(
@@ -58,22 +54,6 @@ def make_interrogative_mora(last_mora: Mora) -> Mora:
         vowel_length=fix_vowel_length,
         pitch=min(last_mora.pitch + adjust_pitch, max_pitch),
     )
-
-
-def full_context_label_moras_to_moras(
-    full_context_moras: list[full_context_label.Mora],
-) -> list[Mora]:
-    return [
-        Mora(
-            text=mora_to_text("".join([p.phoneme for p in mora.phonemes])),
-            consonant=(mora.consonant.phoneme if mora.consonant is not None else None),
-            consonant_length=0 if mora.consonant is not None else None,
-            vowel=mora.vowel.phoneme,
-            vowel_length=0,
-            pitch=0,
-        )
-        for mora in full_context_moras
-    ]
 
 
 class SynthesisEngineBase(metaclass=ABCMeta):
@@ -174,43 +154,11 @@ class SynthesisEngineBase(metaclass=ABCMeta):
     ) -> list[AccentPhrase]:
         """Open JTalkのフルコンテキストラベルをアクセント句へ変換し、継続長と音高を補完する。"""
 
-        if len(text.strip()) == 0:
-            return []
-
-        utterance = extract_full_context_label(
-            text,
-            enable_katakana_english=enable_katakana_english,
-        )
-        if len(utterance.breath_groups) == 0:
-            return []
-
         return self.replace_mora_data(
-            accent_phrases=[
-                AccentPhrase(
-                    moras=full_context_label_moras_to_moras(accent_phrase.moras),
-                    accent=accent_phrase.accent,
-                    pause_mora=(
-                        Mora(
-                            text="、",
-                            consonant=None,
-                            consonant_length=None,
-                            vowel="pau",
-                            vowel_length=0,
-                            pitch=0,
-                        )
-                        if (
-                            i_accent_phrase == len(breath_group.accent_phrases) - 1
-                            and i_breath_group != len(utterance.breath_groups) - 1
-                        )
-                        else None
-                    ),
-                    is_interrogative=accent_phrase.is_interrogative,
-                )
-                for i_breath_group, breath_group in enumerate(utterance.breath_groups)
-                for i_accent_phrase, accent_phrase in enumerate(
-                    breath_group.accent_phrases
-                )
-            ],
+            accent_phrases=analyze_text(
+                text,
+                enable_katakana_english=enable_katakana_english,
+            ),
             speaker_id=speaker_id,
         )
 

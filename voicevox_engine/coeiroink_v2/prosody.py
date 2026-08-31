@@ -16,45 +16,13 @@ from coeirocore.query_manager import query2tokens_prosody
 from ..kana_parser import ParseKanaError, parse_kana
 from ..model import AccentPhrase as EngineAccentPhrase
 from ..model import Mora as EngineMora
-from ..synthesis_engine.synthesis_engine_base import SynthesisEngineBase
+from ..text_analysis import analyze_text
 from .models import Mora as ProsodyMora
 from .models import Prosody
 
 
 class ProsodyError(ValueError):
     """Raised when a v2 prosody request cannot be analysed deterministically."""
-
-
-class _TextAnalysisEngine(SynthesisEngineBase):
-    """No-op Engine frontend that reuses the public text analyser."""
-
-    @property
-    def speakers(self) -> str:
-        return ""
-
-    @property
-    def supported_devices(self) -> str | None:
-        return None
-
-    def replace_phoneme_length(
-        self,
-        accent_phrases: list[EngineAccentPhrase],
-        speaker_id: int,
-    ) -> list[EngineAccentPhrase]:
-        return accent_phrases
-
-    def replace_mora_pitch(
-        self,
-        accent_phrases: list[EngineAccentPhrase],
-        speaker_id: int,
-    ) -> list[EngineAccentPhrase]:
-        return accent_phrases
-
-    def _synthesis_impl(self, query, speaker_id: int):
-        raise NotImplementedError("the prosody adapter does not synthesize audio")
-
-
-_TEXT_ANALYZER = _TextAnalysisEngine()
 
 
 def _require_string(value: object, field_name: str) -> str:
@@ -164,7 +132,7 @@ def _build_prosody(
 def _estimate_prosody_cached(text: str) -> Prosody:
     """Cache the expensive Open JTalk analysis for repeated request text."""
     try:
-        accent_phrases = _TEXT_ANALYZER.create_accent_phrases(text, speaker_id=0)
+        accent_phrases = analyze_text(text)
     except Exception as error:
         raise ProsodyError(f"text analysis failed: {error}") from error
     return _build_prosody(accent_phrases)

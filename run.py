@@ -10,6 +10,7 @@ from pathlib import Path
 
 import uvicorn
 from coeirocore.coeiro_manager import (
+    AudioManager,
     InvalidSynthesisParameterError,
     ModelLoadError,
     StyleNotFoundError,
@@ -42,7 +43,10 @@ from voicevox_engine.setting import (
     SettingLoader,
 )
 from voicevox_engine.synthesis_engine import SynthesisEngineBase, make_synthesis_engines
-from voicevox_engine.synthesis_engine.make_synthesis_engines import resolve_device
+from voicevox_engine.synthesis_engine.make_synthesis_engines import (
+    make_audio_manager,
+    resolve_device,
+)
 from voicevox_engine.user_dict import (
     update_dict,
 )
@@ -199,12 +203,12 @@ def generate_app(
     synthesis_engines: dict[str, SynthesisEngineBase],
     latest_core_version: str,
     setting_loader: SettingLoader,
+    audio_manager: AudioManager,
     root_dir: Path | None = None,
     cors_policy_mode: CorsPolicyMode = CorsPolicyMode.localapps,
     allow_origin: list[str] | None = None,
     speaker_info_dir: Path | None = None,
     cancellable_engine: CancellableEngine | None = None,
-    device: str | None = None,
     disable_mutable_api: bool = False,
 ) -> FastAPI:
     """Coreアダプター群をCOEIROINK v2 APIと`/voicevox`互換APIへ束ねたFastAPIアプリを構築する。"""
@@ -214,13 +218,6 @@ def generate_app(
     if speaker_info_dir is None:
         speaker_info_dir = root_dir / "speaker_info"
     speaker_info_dir = speaker_info_dir.expanduser().resolve()
-    if device is None:
-        device = getattr(synthesis_engines[latest_core_version], "device", None)
-    if device is None:
-        raise ValueError(
-            "音声合成エンジンが選択デバイスを公開していないため起動できません。"
-        )
-    device = resolve_device(device=device)
 
     app = FastAPI(
         title="COEIROINK Server OSS Edition",
@@ -246,22 +243,17 @@ def generate_app(
     )
     resource_manager = ResourceManager(speaker_info_dir)
 
-    # `/v1`と`/voicevox`は同じ公開Core AudioManagerを共有し、互換層に別の推論器を持たせない。
-    v2_audio_manager = getattr(
-        synthesis_engines[latest_core_version], "audio_manager", None
-    )
-    if v2_audio_manager is not None:
-        app.include_router(
-            create_v2_router(
-                audio_manager=v2_audio_manager,
-                metadata_store=speaker_metadata_store,
-                catalog=OfficialSiteCatalogClient(),
-                dictionary_callback=set_coeiroink_dictionary,
-                engine_version=__version__,
-                device=device,
-                default_processing_algorithm="td-psola",
-            )
+    # `/v1`と`/voicevox`はcomposition rootから渡された同じCoreを共有する。
+    app.include_router(
+        create_v2_router(
+            audio_manager=audio_manager,
+            metadata_store=speaker_metadata_store,
+            catalog=OfficialSiteCatalogClient(),
+            dictionary_callback=set_coeiroink_dictionary,
+            engine_version=__version__,
+            default_processing_algorithm="td-psola",
         )
+    )
 
     app.include_router(
         create_voicevox_router(
@@ -468,18 +460,18 @@ if __name__ == "__main__":
         else root_dir / "speaker_info"
     )
 
-    synthesis_engines = make_synthesis_engines(
+    audio_manager = make_audio_manager(
+        speaker_info_dir=speaker_info_dir,
         device=args.device,
         device_index=args.device_index,
         opencl_platform_index=args.opencl_platform_index,
-        resampler=args.resampler,
-        voicelib_dirs=args.voicelib_dir,
-        voicevox_dir=args.voicevox_dir,
-        runtime_dirs=args.runtime_dir,
         cpu_num_threads=cpu_num_threads,
-        speaker_info_dir=speaker_info_dir,
-        enable_mock=args.enable_mock,
+        resampler=args.resampler,
         load_all_models=args.load_all_models,
+    )
+    synthesis_engines = make_synthesis_engines(
+        speaker_info_dir=speaker_info_dir,
+        audio_manager=audio_manager,
     )
     assert len(synthesis_engines) != 0, "音声合成エンジンがありません。"
     latest_core_version = max(synthesis_engines, key=_version_key)
@@ -509,12 +501,12 @@ if __name__ == "__main__":
             synthesis_engines,
             latest_core_version,
             setting_loader,
+            audio_manager,
             root_dir=root_dir,
             speaker_info_dir=speaker_info_dir,
             cors_policy_mode=cors_policy_mode,
             allow_origin=allow_origin,
             cancellable_engine=cancellable_engine,
-            device=args.device,
             disable_mutable_api=args.disable_mutable_api,
         ),
         host=args.host,

@@ -6,7 +6,7 @@ from itertools import chain
 
 import pyopenjtalk
 
-from .voicevox_compat.katakana_english import text_to_full_context_labels
+from .katakana_english import text_to_full_context_labels
 
 
 @dataclass

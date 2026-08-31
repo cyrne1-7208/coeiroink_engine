@@ -13,6 +13,7 @@ from voicevox_engine.kana_parser import create_kana
 from voicevox_engine.model import AccentPhrase, AudioQuery, Mora, SupportedDevicesInfo
 from voicevox_engine.synthesis_engine import CoeiroinkVoicevoxAdapter
 from voicevox_engine.synthesis_engine.make_synthesis_engines import (
+    make_audio_manager,
     make_synthesis_engines,
     resolve_device,
 )
@@ -117,6 +118,8 @@ class TestMockSynthesisEngine(TestCase):
         ]
         self.audio_manager = Mock()
         self.audio_manager.synthesis.return_value = np.zeros(32, dtype=np.float32)
+        self.audio_manager.fs = 44100
+        self.audio_manager.device = "cpu"
         self.engine = MockSynthesisEngine(
             speakers="",
             supported_devices="",
@@ -168,15 +171,16 @@ class TestMockSynthesisEngine(TestCase):
     def test_legacy_mock_name_is_the_native_adapter(self):
         self.assertIs(MockSynthesisEngine, CoeiroinkVoicevoxAdapter)
 
-    def test_device_is_passed_to_core_audio_manager(self):
+    def test_make_audio_manager_passes_complete_device_selection(self):
         with patch(
-            "voicevox_engine.synthesis_engine.coeiroink_adapter.AudioManager"
+            "voicevox_engine.synthesis_engine.make_synthesis_engines.AudioManager"
         ) as audio_manager_class:
-            MockSynthesisEngine(
-                speakers="",
+            make_audio_manager(
+                speaker_info_dir=Path("speaker_info"),
                 device="opencl",
                 device_index=2,
                 opencl_platform_index=1,
+                load_all_models=True,
             )
 
         audio_manager_class.assert_called_once_with(
@@ -185,44 +189,49 @@ class TestMockSynthesisEngine(TestCase):
             device_index=2,
             opencl_platform_index=1,
             use_gpu=None,
-            speaker_info_dir=Path("speaker_info"),
-            cpu_num_threads=None,
+            speaker_info_dir=Path("speaker_info").resolve(),
+            cpu_num_threads=0,
             resampler="resampy",
+            load_all_models=True,
         )
 
     def test_make_synthesis_engines_passes_complete_device_selection(self):
         engine = Mock()
+        audio_manager = Mock()
+        audio_manager.fs = 44100
+        audio_manager.device = "opencl"
+        audio_manager.meta_manager.get_metas_dict.return_value = []
+        capabilities = {
+            DeviceBackend.CPU: SimpleNamespace(available=True),
+            DeviceBackend.CUDA: SimpleNamespace(available=False),
+            DeviceBackend.DIRECTML: SimpleNamespace(available=False),
+            DeviceBackend.OPENCL: SimpleNamespace(available=True),
+        }
         with (
-            patch("voicevox_engine.dev.core.metas", return_value="[]"),
             patch(
-                "voicevox_engine.dev.core.supported_devices",
-                return_value='{"cpu": true}',
+                "voicevox_engine.synthesis_engine.make_synthesis_engines.get_supported_device_capabilities",
+                return_value=capabilities,
             ),
             patch(
-                "voicevox_engine.synthesis_engine.coeiroink_adapter.CoeiroinkVoicevoxAdapter",
+                "voicevox_engine.synthesis_engine.make_synthesis_engines.CoeiroinkVoicevoxAdapter",
                 return_value=engine,
             ) as engine_class,
         ):
             result = make_synthesis_engines(
                 voicelib_dirs=[],
                 runtime_dirs=[],
-                speaker_info_dir=Path("speaker_info"),
-                device="opencl",
-                device_index=2,
-                opencl_platform_index=1,
-                resampler="soxr-vhq",
+                audio_manager=audio_manager,
+                load_all_models=True,
             )
 
         self.assertEqual(result, {"0.1.3+coeiroink.1.7.3": engine})
+        audio_manager.initialize_all_speakers.assert_called_once_with()
         engine_class.assert_called_once_with(
             speakers="[]",
-            supported_devices='{"cpu": true}',
-            speaker_info_dir=Path("speaker_info").resolve(),
-            cpu_num_threads=0,
-            device="opencl",
-            device_index=2,
-            opencl_platform_index=1,
-            resampler="soxr-vhq",
+            supported_devices=(
+                '{"cpu": true, "cuda": false, "dml": false, "opencl": true}'
+            ),
+            audio_manager=audio_manager,
         )
 
     def test_resolve_device_keeps_new_devices_and_maps_legacy_gpu_flag(self):

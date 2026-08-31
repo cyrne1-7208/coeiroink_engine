@@ -118,9 +118,6 @@ def test_speakers_path_variant_uses_physical_folder(metadata_store):
 
 def test_uuid_and_style_id_resolve_independently_of_folder_name(metadata_store):
     assert metadata_store.speaker_path(SECOND_SPEAKER_UUID).name == "speaker_ver1.0"
-    assert metadata_store.lookup_speaker_folder(
-        SECOND_SPEAKER_UUID
-    ) == metadata_store.speaker_path(SECOND_SPEAKER_UUID)
     assert (
         metadata_store.get_style(SECOND_SPEAKER_UUID, SECOND_STYLE_ID).style_name
         == "別スタイル"
@@ -213,9 +210,11 @@ def test_policy_and_license_reading(metadata_store):
 
 
 def test_repeated_listing_has_stable_order(metadata_store):
-    first = [speaker.model_dump(by_alias=True) for speaker in metadata_store.speakers()]
+    first = [
+        speaker.model_dump(by_alias=True) for speaker in metadata_store.list_speakers()
+    ]
     second = [
-        speaker.model_dump(by_alias=True) for speaker in metadata_store.speakers()
+        speaker.model_dump(by_alias=True) for speaker in metadata_store.list_speakers()
     ]
     assert first == second
 

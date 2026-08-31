@@ -4,7 +4,6 @@
 音声合成と波形処理はCoreの公開APIまたはこのパッケージのv2ヘルパーへ委譲する。
 """
 
-import inspect
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +13,7 @@ import numpy as np
 from coeirocore.coeiro_manager import (
     AmbiguousStyleError as CoreAmbiguousStyleError,
 )
-from coeirocore.coeiro_manager import CoeiroCoreError
+from coeirocore.coeiro_manager import AudioManager, CoeiroCoreError
 from coeirocore.coeiro_manager import (
     StyleNotFoundError as CoreStyleNotFoundError,
 )
@@ -77,9 +76,6 @@ from .wave_processing import (
     as_waveform as _as_waveform,
 )
 from .wave_processing import (
-    manager_audio_method as _manager_audio_method,
-)
-from .wave_processing import (
     normalize_processing_algorithm as _normalize_processing_algorithm,
 )
 from .wave_processing import (
@@ -101,53 +97,6 @@ HANDLED_API_ERRORS = (
     TypeError,
     ValueError,
 )
-
-
-def _call_with_supported_kwargs(function: Callable[..., Any], **kwargs: Any) -> Any:
-    """Core実装と最小テストダブルの両方を呼べるよう、関数が受理するキーワード引数だけを渡す。"""
-
-    try:
-        signature = inspect.signature(function)
-    except (TypeError, ValueError):
-        return function(**kwargs)
-
-    parameters = signature.parameters.values()
-    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
-        return function(**kwargs)
-
-    accepted = {
-        parameter.name
-        for parameter in parameters
-        if parameter.kind
-        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-    }
-    return function(
-        **{name: value for name, value in kwargs.items() if name in accepted}
-    )
-
-
-def _attribute_or_call(value: Any, names: Sequence[str], default: Any = None) -> Any:
-    """候補名から最初の属性を取得し、呼出可能なら引数なしで評価する。"""
-
-    for name in names:
-        if not hasattr(value, name):
-            continue
-        candidate = getattr(value, name)
-        return candidate() if callable(candidate) else candidate
-    return default
-
-
-def _metadata_value(store: Any, names: Sequence[str], default: Any = None) -> Any:
-    return _attribute_or_call(store, names, default=default)
-
-
-def _raw_attribute(value: Any, names: Sequence[str], default: Any = None) -> Any:
-    """引数を必要とするメソッド向けに、候補名から属性を呼び出さず取得する。"""
-
-    for name in names:
-        if hasattr(value, name):
-            return getattr(value, name)
-    return default
 
 
 def _model_value(value: Any, *names: str, default: Any = None) -> Any:
@@ -190,33 +139,6 @@ def _as_http_error(error: Exception, default_status: int = 500) -> HTTPException
     if isinstance(error, MetadataError):
         return HTTPException(status_code=500, detail=str(error))
     return HTTPException(status_code=default_status, detail=str(error))
-
-
-def _prediction_parts(result: Any) -> tuple[np.ndarray, list[int]]:
-    """CoreのPredictionResultと、同じ情報を持つ互換オブジェクトを波形・継続長へ分解する。"""
-
-    if isinstance(result, Mapping):
-        wave = result.get("wav")
-        frames = result.get("duration_frames", result.get("durationFrames"))
-    elif isinstance(result, np.ndarray):
-        wave, frames = result, []
-    elif isinstance(result, (tuple, list)) and len(result) == 2:
-        wave, frames = result
-    else:
-        wave = _model_value(result, "wav", "waveform")
-        frames = _model_value(result, "duration_frames", "durationFrames")
-
-    if wave is None:
-        raise RuntimeError("audio manager did not return a waveform")
-    if frames is None:
-        return _as_waveform(wave), []
-    try:
-        duration_frames = [int(frame) for frame in frames]
-    except (TypeError, ValueError) as error:
-        raise RuntimeError("audio manager returned invalid duration frames") from error
-    if any(frame < 0 for frame in duration_frames):
-        raise RuntimeError("audio manager returned a negative duration")
-    return _as_waveform(wave), duration_frames
 
 
 def _mora_phonemes(mora: Any) -> list[str]:
@@ -426,92 +348,62 @@ def _query_to_prosody(query: AudioQuery) -> Prosody:
     )
 
 
-def _hop_length(audio_manager: Any, style_id: int, speaker_uuid: str) -> int:
-    value = _attribute_or_call(
-        audio_manager, ("hop_length", "frame_shift", "samples_per_frame")
+def _hop_length(
+    audio_manager: AudioManager,
+    style_id: int,
+    speaker_uuid: str,
+) -> int:
+    value = audio_manager.get_hop_length(
+        style_id=style_id,
+        speaker_uuid=speaker_uuid,
     )
-    if value is None:
-        getter = getattr(audio_manager, "get_hop_length", None)
-        if getter is not None:
-            value = _call_with_supported_kwargs(
-                getter, style_id=style_id, speaker_uuid=speaker_uuid
-            )
-    if value is None:
-        value = 512
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError("audio manager hop length must be a positive integer")
     return value
 
 
 def _call_prediction(
-    audio_manager: Any,
+    audio_manager: AudioManager,
     tokens: Sequence[str],
     speaker_uuid: str,
     style_id: int,
     speed_scale: float,
     with_duration: bool,
 ) -> tuple[np.ndarray, list[int]]:
-    """継続長が必要な呼出しでは対応メソッドを優先し、通常呼出しでは波形だけのpredictも受け付ける。"""
+    """公開Coreの通常推論または継続長付き推論を呼び分ける。"""
 
-    method_names = (
-        ("predict_with_duration", "predict_with_durations")
-        if with_duration
-        else ("predict", "predict_with_duration", "predict_with_durations")
-    )
-    method = next(
-        (
-            getattr(audio_manager, name)
-            for name in method_names
-            if hasattr(audio_manager, name)
-        ),
-        None,
-    )
-    if method is None:
-        raise RuntimeError("audio manager does not provide prediction")
-    result = _call_with_supported_kwargs(
-        method,
-        text=list(tokens),
-        style_id=style_id,
-        speaker_uuid=speaker_uuid,
-        speed_scale=speed_scale,
-    )
-    wave, frames = _prediction_parts(result)
-    if with_duration and not frames:
+    arguments = {
+        "text": list(tokens),
+        "style_id": style_id,
+        "speaker_uuid": speaker_uuid,
+        "speed_scale": speed_scale,
+    }
+    if not with_duration:
+        return _as_waveform(audio_manager.predict(**arguments)), []
+
+    result = audio_manager.predict_with_duration(**arguments)
+    wave = _as_waveform(result.wav)
+    try:
+        frames = [int(frame) for frame in result.duration_frames]
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("audio manager returned invalid duration frames") from error
+    if not frames:
         raise RuntimeError("audio manager did not return token durations")
+    if any(frame < 0 for frame in frames):
+        raise RuntimeError("audio manager returned a negative duration")
     return wave, frames
 
 
-def _sampling_rate(audio_manager: Any) -> int:
-    value = _attribute_or_call(
-        audio_manager, ("fs", "sampling_rate", "default_sampling_rate"), 44100
-    )
+def _sampling_rate(audio_manager: AudioManager) -> int:
+    value = audio_manager.fs
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError("audio manager sampling rate must be a positive integer")
     return value
 
 
-def _catalog_result(
-    catalog: Any,
-    explicit_callback: CatalogCallback | None,
-    names: Sequence[str],
-    default: Any,
-) -> Any:
-    callback = explicit_callback
-    if callback is None and catalog is not None:
-        if isinstance(catalog, Mapping):
-            for name in names:
-                if name in catalog:
-                    callback = catalog[name]
-                    break
-        else:
-            for name in names:
-                if hasattr(catalog, name):
-                    callback = getattr(catalog, name)
-                    break
-    if callback is None:
-        return default
-    result = callback() if callable(callback) else callback
-    return default if result is None else result
+def _catalog_result(callback: CatalogCallback) -> Any:
+    result = callback()
+    return [] if result is None else result
 
 
 def _public_dictionary_callback(payload: DictionaryWords) -> None:
@@ -522,60 +414,32 @@ def _public_dictionary_callback(payload: DictionaryWords) -> None:
     set_dictionary(payload)
 
 
-def _first_speaker_uuid(store: Any) -> str:
-    uuids = _metadata_value(store, ("speaker_uuids",), default=None)
-    if uuids:
-        return min(str(value) for value in uuids)
-    speakers = _metadata_value(store, ("list_speakers", "speakers"), default=[])
-    if speakers:
-        uuid = _model_value(speakers[0], "speaker_uuid", "speakerUuid")
-        if uuid:
-            return str(uuid)
+def _first_speaker_uuid(store: SpeakerMetadataStore) -> str:
+    if store.speaker_uuids:
+        return store.speaker_uuids[0]
     raise SpeakerNotFoundError("<first>")
 
 
 def _speaker_style(
-    store: Any, speaker_uuid: str | None, style_id: int | None
+    store: SpeakerMetadataStore,
+    speaker_uuid: str | None,
+    style_id: int | None,
 ) -> tuple[str, int]:
     """明示指定、スタイル検索、先頭話者の順にサンプル音声用の話者・スタイルを確定する。"""
 
     if speaker_uuid is not None and style_id is not None:
-        get_style = getattr(store, "get_style", None)
-        if callable(get_style):
-            get_style(speaker_uuid, style_id)
+        store.get_style(speaker_uuid, style_id)
         return speaker_uuid, style_id
 
     if style_id is not None:
-        find_style = getattr(store, "find_style", None)
-        if callable(find_style):
-            found_uuid, style = find_style(style_id, speaker_uuid)
-            return str(found_uuid), int(_model_value(style, "style_id", "styleId"))
-        meta_for_style = getattr(store, "speaker_meta_for_style", None)
-        if callable(meta_for_style):
-            meta = meta_for_style(style_id, speaker_uuid)
-            return str(_model_value(meta, "speaker_uuid", "speakerUuid")), int(
-                _model_value(meta, "style_id", "styleId")
-            )
-        raise StyleNotFoundError(speaker_uuid or "<unspecified>", style_id)
+        found_uuid, style = store.find_style(style_id, speaker_uuid)
+        return found_uuid, style.style_id
 
     resolved_uuid = speaker_uuid or _first_speaker_uuid(store)
-    meta_getter = _raw_attribute(store, ("speaker_meta",), default=None)
-    meta = meta_getter(resolved_uuid) if callable(meta_getter) else None
-    if meta is None:
-        get_speakers = getattr(store, "list_speakers", None)
-        records = get_speakers() if callable(get_speakers) else []
-        meta = next(
-            (
-                record
-                for record in records
-                if _model_value(record, "speaker_uuid", "speakerUuid") == resolved_uuid
-            ),
-            None,
-        )
-    styles = _model_value(meta, "styles", default=[]) if meta is not None else []
+    styles = store.speaker_meta(resolved_uuid).styles
     if not styles:
         raise StyleNotFoundError(resolved_uuid, -1)
-    return resolved_uuid, int(_model_value(styles[0], "style_id", "styleId", "id"))
+    return resolved_uuid, styles[0].style_id
 
 
 def _default_trim_values(
@@ -603,18 +467,17 @@ def _default_trim_values(
 class _V2RouterContext:
     """v2ルート群が共有する、解決済みの依存オブジェクトと可変設定。"""
 
-    audio_manager: Any
-    metadata_store: Any
-    catalog: Any
+    audio_manager: AudioManager
+    metadata_store: SpeakerMetadataStore | None
+    catalog: OfficialSiteCatalogClient
     dictionary_callback: DictionaryCallback | None
     download_info_callback: CatalogCallback | None
     downloadable_speakers_callback: CatalogCallback | None
     update_info_callback: CatalogCallback | None
     engine_version: str
-    device: str
     settings: dict[str, Any]
 
-    def metadata_required(self) -> Any:
+    def metadata_required(self) -> SpeakerMetadataStore:
         if self.metadata_store is None:
             raise HTTPException(
                 status_code=500, detail="speaker metadata is not configured"
@@ -741,8 +604,7 @@ def _add_speaker_list_routes(router: APIRouter, context: _V2RouterContext) -> No
     def get_speakers() -> list[SpeakerMeta]:
         store = metadata_required()
         try:
-            result = _metadata_value(store, ("list_speakers", "speakers"), default=[])
-            return list(result)
+            return store.list_speakers()
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
 
@@ -754,12 +616,7 @@ def _add_speaker_list_routes(router: APIRouter, context: _V2RouterContext) -> No
     def get_speakers_path_variant() -> list[SpeakerMetaPathVariant]:
         store = metadata_required()
         try:
-            result = _metadata_value(
-                store,
-                ("list_speakers_path_variant", "speakers_path_variant"),
-                default=[],
-            )
-            return list(result)
+            return store.list_speakers_path_variant()
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
 
@@ -797,12 +654,7 @@ def _add_prosody_routes(router: APIRouter, context: _V2RouterContext) -> None:
     def estimate_f0(param: WavWithDuration) -> WorldF0:
         try:
             wave, sampling_rate = audio_helpers.decode_pcm_wav_base64(param.wav_base64)
-            get_world = _manager_audio_method(audio_manager, "get_world")
-            if get_world is None:
-                return audio_helpers.prepare_world_f0(
-                    wave, sampling_rate, param.mora_durations
-                )
-            f0, _, _ = get_world(wave.astype(np.float64), sampling_rate)
+            f0, _, _ = audio_manager.get_world(wave.astype(np.float64), sampling_rate)
             f0_array = np.asarray(f0, dtype=np.float32).reshape(-1)
             if not np.isfinite(f0_array).all():
                 raise audio_helpers.AudioProcessingError(
@@ -948,7 +800,6 @@ def _add_processing_routes(router: APIRouter, context: _V2RouterContext) -> None
 
 
 def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
-    audio_manager = context.audio_manager
     dictionary_callback = context.dictionary_callback
     settings = context.settings
 
@@ -963,18 +814,8 @@ def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
     )
     def set_dictionary(words: DictionaryWords) -> dict[str, Any]:
         try:
-            callback = (
-                dictionary_callback
-                or _manager_audio_method(audio_manager, "set_dictionary")
-                or _public_dictionary_callback
-            )
-            if callback is not None:
-                _call_with_supported_kwargs(
-                    callback,
-                    payload=words,
-                    words=words,
-                    dictionary_words=words,
-                )
+            callback = dictionary_callback or _public_dictionary_callback
+            callback(words)
             clear_prosody_cache()
             return {}
         except HANDLED_API_ERRORS as error:
@@ -1020,7 +861,6 @@ def _add_catalog_routes(router: APIRouter, context: _V2RouterContext) -> None:
     download_info_callback = context.download_info_callback
     downloadable_speakers_callback = context.downloadable_speakers_callback
     update_info_callback = context.update_info_callback
-    device = context.device
     engine_version = context.engine_version
 
     @router.get(
@@ -1029,12 +869,8 @@ def _add_catalog_routes(router: APIRouter, context: _V2RouterContext) -> None:
         operation_id="get_download_info_v1_download_info_get",
     )
     def download_info() -> list[DownloadableModel]:
-        result = _catalog_result(
-            catalog,
-            download_info_callback,
-            ("download_info", "download_infos", "get_download_info"),
-            [],
-        )
+        callback = download_info_callback or catalog.get_download_info
+        result = _catalog_result(callback)
         return list(result)
 
     @router.get(
@@ -1043,12 +879,8 @@ def _add_catalog_routes(router: APIRouter, context: _V2RouterContext) -> None:
         operation_id="get_downloadable_speakers_v1_downloadable_speakers_get",
     )
     def downloadable_speakers() -> list[DownloadableSpeaker]:
-        result = _catalog_result(
-            catalog,
-            downloadable_speakers_callback,
-            ("downloadable_speakers", "get_downloadable_speakers"),
-            [],
-        )
+        callback = downloadable_speakers_callback or catalog.get_downloadable_speakers
+        result = _catalog_result(callback)
         return list(result)
 
     @router.get(
@@ -1057,12 +889,8 @@ def _add_catalog_routes(router: APIRouter, context: _V2RouterContext) -> None:
         operation_id="get_update_info_v1_update_info_get",
     )
     def update_info() -> list[UpdateInfo]:
-        result = _catalog_result(
-            catalog,
-            update_info_callback,
-            ("update_info", "get_update_info"),
-            [],
-        )
+        callback = update_info_callback or catalog.get_update_info
+        result = _catalog_result(callback)
         return list(result)
 
     @router.get(
@@ -1071,7 +899,10 @@ def _add_catalog_routes(router: APIRouter, context: _V2RouterContext) -> None:
         operation_id="get_engine_info_v1_engine_info_get",
     )
     def engine_info() -> EngineInfo:
-        return EngineInfo(device=device, version=engine_version)
+        return EngineInfo(
+            device=context.audio_manager.device,
+            version=engine_version,
+        )
 
 
 def _add_metadata_lookup_routes(router: APIRouter, context: _V2RouterContext) -> None:
@@ -1089,12 +920,7 @@ def _add_metadata_lookup_routes(router: APIRouter, context: _V2RouterContext) ->
             return SpeakerFolderPath(speakerFolderPath="None")
         try:
             store = metadata_required()
-            path_getter = _raw_attribute(
-                store, ("speaker_path", "lookup_speaker_folder"), default=None
-            )
-            path = path_getter(speaker_uuid) if callable(path_getter) else path_getter
-            if path is None:
-                raise SpeakerNotFoundError(speaker_uuid)
+            path = store.speaker_path(speaker_uuid)
             return SpeakerFolderPath(speakerFolderPath=str(path))
         except SpeakerNotFoundError:
             return SpeakerFolderPath(speakerFolderPath="None")
@@ -1130,17 +956,7 @@ def _add_metadata_lookup_routes(router: APIRouter, context: _V2RouterContext) ->
             )
         try:
             store = metadata_required()
-            result_getter = _raw_attribute(
-                store,
-                ("style_id_to_speaker_meta", "speaker_meta_for_style"),
-                default=None,
-            )
-            result = (
-                result_getter(style_id) if callable(result_getter) else result_getter
-            )
-            if result is None:
-                raise StyleNotFoundError("<unspecified>", style_id)
-            return result
+            return store.style_id_to_speaker_meta(style_id)
         except (StyleNotFoundError, AmbiguousStyleError):
             return SpeakerMetaForTextBox(
                 speakerUuid="None",
@@ -1179,14 +995,9 @@ def _add_speaker_asset_routes(router: APIRouter, context: _V2RouterContext) -> N
                 store, speaker_uuid, style_id
             )
             resolved_index = 0 if index is None else index
-            read_sample = getattr(store, "read_sample_voice", None)
-            if callable(read_sample):
-                content = read_sample(resolved_uuid, resolved_style, resolved_index)
-            else:
-                path = store.sample_voice_path(
-                    resolved_uuid, resolved_style, resolved_index
-                )
-                content = Path(path).read_bytes()
+            content = store.read_sample_voice(
+                resolved_uuid, resolved_style, resolved_index
+            )
             return Response(content=content, media_type="audio/wav")
         except MetadataAssetNotFoundError as error:
             raise HTTPException(
@@ -1206,36 +1017,24 @@ def _add_speaker_asset_routes(router: APIRouter, context: _V2RouterContext) -> N
         try:
             store = metadata_required()
             resolved_uuid = speaker_uuid or _first_speaker_uuid(store)
-            result_getter = _raw_attribute(
-                store, ("speaker_policy", "read_policy_license"), default=None
-            )
-            result = (
-                result_getter(resolved_uuid)
-                if callable(result_getter)
-                else result_getter
-            )
-            if result is None:
-                raise MetadataError("speaker policy is not configured")
-            return result
+            return store.speaker_policy(resolved_uuid)
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error
 
 
 def create_v2_router(
-    audio_manager: Any,
-    metadata_store: Any = None,
+    audio_manager: AudioManager,
+    metadata_store: SpeakerMetadataStore | str | Path | None = None,
     *,
     speaker_info_dir: str | Path | None = None,
-    catalog: Any = None,
+    catalog: OfficialSiteCatalogClient | None = None,
     dictionary_callback: DictionaryCallback | None = None,
     download_info_callback: CatalogCallback | None = None,
     downloadable_speakers_callback: CatalogCallback | None = None,
     update_info_callback: CatalogCallback | None = None,
     engine_version: str = __version__,
-    device: str = "cpu",
     default_processing_algorithm: str = "td-psola",
     default_trim_buffer: TrimBufferSettings | Mapping[str, Any] | None = None,
-    **compatibility_options: Any,
 ) -> APIRouter:
     """ルートパスに依存しないCOEIROINK v2ルーターを構築する。
 
@@ -1246,10 +1045,6 @@ def create_v2_router(
     if audio_manager is None:
         raise ValueError("audio_manager is required")
 
-    if metadata_store is None:
-        metadata_store = compatibility_options.pop("metas_store", None)
-    if metadata_store is None:
-        metadata_store = compatibility_options.pop("speaker_metadata_store", None)
     if metadata_store is None and speaker_info_dir is not None:
         metadata_store = SpeakerMetadataStore(Path(speaker_info_dir))
     elif isinstance(metadata_store, (str, Path)):
@@ -1257,21 +1052,6 @@ def create_v2_router(
 
     if catalog is None:
         catalog = OfficialSiteCatalogClient()
-
-    # 短いコールバック名はPython呼出し互換として受け付けるが、HTTP契約には含めない。
-    download_info_callback = download_info_callback or compatibility_options.pop(
-        "download_info", None
-    )
-    downloadable_speakers_callback = (
-        downloadable_speakers_callback
-        or compatibility_options.pop("downloadable_speakers", None)
-    )
-    update_info_callback = update_info_callback or compatibility_options.pop(
-        "update_info", None
-    )
-    if compatibility_options:
-        unknown = ", ".join(sorted(compatibility_options))
-        raise TypeError(f"unknown create_v2_router option(s): {unknown}")
 
     router = APIRouter()
     settings = {
@@ -1290,7 +1070,6 @@ def create_v2_router(
         downloadable_speakers_callback=downloadable_speakers_callback,
         update_info_callback=update_info_callback,
         engine_version=engine_version,
-        device=device,
         settings=settings,
     )
     # 各ルート群には必要な依存だけを共有コンテキストから渡す。

@@ -74,7 +74,7 @@ def test_worker_is_not_added_twice_when_finalizers_race():
     engine.start_new_proc.assert_not_called()
 
 
-def test_subprocess_passes_complete_device_selection():
+def test_subprocess_passes_device_without_preloading_every_model():
     args = argparse.Namespace(
         device="opencl",
         use_gpu=None,
@@ -87,6 +87,7 @@ def test_subprocess_passes_complete_device_selection():
         speaker_info_dir=Path("speaker_info"),
         enable_mock=True,
         resampler="soxr-vhq",
+        load_all_models=True,
     )
 
     with (
@@ -109,6 +110,7 @@ def test_subprocess_passes_complete_device_selection():
         cpu_num_threads=0,
         speaker_info_dir=Path("speaker_info"),
         enable_mock=True,
+        load_all_models=False,
     )
 
 

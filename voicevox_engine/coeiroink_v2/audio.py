@@ -214,6 +214,65 @@ def _core_audio_manager() -> Any:
     return AudioManager
 
 
+class _CompatibilityWaveProcessor:
+    """旧Python APIから、モデルを生成せずCoreの波形プリミティブだけを利用する。"""
+
+    @staticmethod
+    def get_world(wave: np.ndarray, sampling_rate: int):
+        return _core_audio_manager().get_world(wave, sampling_rate)
+
+    @staticmethod
+    def trim(wave: np.ndarray) -> np.ndarray:
+        return _core_audio_manager().trim(wave)
+
+    @staticmethod
+    def volume(wave: np.ndarray, volume_scale: float) -> np.ndarray:
+        return _core_audio_manager().volume(wave, volume_scale)
+
+    @staticmethod
+    def pitch_intonation(
+        wave: np.ndarray,
+        sampling_rate: int,
+        pitch_scale: float,
+        intonation_scale: float,
+    ) -> np.ndarray:
+        return _core_audio_manager().pitch_intonation(
+            wave,
+            sampling_rate,
+            pitch_scale,
+            intonation_scale,
+        )
+
+    @staticmethod
+    def sil(
+        wave: np.ndarray,
+        sampling_rate: int,
+        pre_phoneme_length: float,
+        post_phoneme_length: float,
+    ) -> np.ndarray:
+        return _core_audio_manager().sil(
+            wave,
+            sampling_rate,
+            pre_phoneme_length,
+            post_phoneme_length,
+        )
+
+    @staticmethod
+    def resample_output(
+        wave: np.ndarray,
+        sampling_rate: int,
+        output_sampling_rate: int,
+    ) -> np.ndarray:
+        return _core_audio_manager().resampling(
+            wave,
+            sampling_rate,
+            output_sampling_rate,
+        )
+
+
+_COMPATIBILITY_WAVE_PROCESSOR = _CompatibilityWaveProcessor()
+
+
 def trim_wave(
     wave: np.ndarray,
     sampling_rate: int,
@@ -423,104 +482,30 @@ def process_wave(
     start_trim_buffer: float = 0.0,
     end_trim_buffer: float = 0.0,
 ) -> tuple[Waveform, int]:
-    """Apply deterministic v2 waveform processing and return ``(wave, rate)``.
+    """旧Python APIの引数を、現行の一元化された波形後処理へ変換する。"""
 
-    The operation order matches the public Core ``AudioManager.synthesis``
-    post-processing order: buffered trim, volume, WORLD pitch/intonation,
-    pre/post silence, then resampling.  Identity operations are skipped so an
-    unchanged waveform remains sample-identical.
-    """
+    from .wave_processing import WaveProcessingOptions
+    from .wave_processing import process_wave as process_current_wave
 
-    current = _require_waveform(wave)
-    _require_bounded_waveform_size(current.size)
-    sampling_rate = _require_sampling_rate(sampling_rate, "sampling_rate")
-    volume_scale = _validate_scale(volume_scale, "volume_scale", minimum=0.0)
-    pitch_scale = _validate_scale(pitch_scale, "pitch_scale")
-    intonation_scale = _validate_scale(
-        intonation_scale, "intonation_scale", minimum=0.0
+    resolved_output_rate = (
+        sampling_rate if output_sampling_rate is None else output_sampling_rate
     )
-    pre_phoneme_length = _validate_duration(
-        pre_phoneme_length,
-        "pre_phoneme_length",
-        maximum=MAX_PAUSE_LENGTH_SECONDS,
-    )
-    post_phoneme_length = _validate_duration(
-        post_phoneme_length,
-        "post_phoneme_length",
-        maximum=MAX_PAUSE_LENGTH_SECONDS,
-    )
-    start_trim_buffer = _validate_duration(
-        start_trim_buffer,
-        "start_trim_buffer",
-        maximum=MAX_PAUSE_LENGTH_SECONDS,
-    )
-    end_trim_buffer = _validate_duration(
-        end_trim_buffer,
-        "end_trim_buffer",
-        maximum=MAX_PAUSE_LENGTH_SECONDS,
-    )
-    if output_sampling_rate is None:
-        output_sampling_rate = sampling_rate
-    output_sampling_rate = _require_sampling_rate(
-        output_sampling_rate, "output_sampling_rate"
-    )
-
-    current = trim_wave(
-        current,
+    return process_current_wave(
+        _COMPATIBILITY_WAVE_PROCESSOR,
+        wave,
         sampling_rate,
-        start_trim_buffer=start_trim_buffer,
-        end_trim_buffer=end_trim_buffer,
+        WaveProcessingOptions(
+            volume_scale=volume_scale,
+            pitch_scale=pitch_scale,
+            intonation_scale=intonation_scale,
+            pre_phoneme_length=pre_phoneme_length,
+            post_phoneme_length=post_phoneme_length,
+            output_sampling_rate=resolved_output_rate,
+            start_trim_buffer=start_trim_buffer,
+            end_trim_buffer=end_trim_buffer,
+            processing_algorithm="world",
+        ),
     )
-
-    core_audio_manager = None
-    if (
-        volume_scale != 1.0
-        or pitch_scale != 0.0
-        or intonation_scale != 1.0
-        or pre_phoneme_length != 0.0
-        or post_phoneme_length != 0.0
-        or output_sampling_rate != sampling_rate
-    ):
-        core_audio_manager = _core_audio_manager()
-    try:
-        if volume_scale != 1.0:
-            current = core_audio_manager.volume(current, volume_scale)
-        if (pitch_scale != 0.0 or intonation_scale != 1.0) and current.size:
-            current = core_audio_manager.pitch_intonation(
-                current,
-                sampling_rate,
-                pitch_scale,
-                intonation_scale,
-            )
-        if pre_phoneme_length != 0.0 or post_phoneme_length != 0.0:
-            projected_size = (
-                current.size
-                + int(sampling_rate * pre_phoneme_length)
-                + int(sampling_rate * post_phoneme_length)
-            )
-            _require_bounded_waveform_size(projected_size, "processed wave")
-            current = core_audio_manager.sil(
-                current,
-                sampling_rate,
-                pre_phoneme_length,
-                post_phoneme_length,
-            )
-        if output_sampling_rate != sampling_rate and current.size:
-            projected_size = math.ceil(
-                current.size * output_sampling_rate / sampling_rate
-            )
-            _require_bounded_waveform_size(projected_size, "resampled wave")
-            current = core_audio_manager.resampling(
-                current, sampling_rate, output_sampling_rate
-            )
-    except Exception as error:
-        raise AudioProcessingError("failed to process waveform") from error
-
-    current = np.asarray(current, dtype=np.float32).reshape(-1)
-    _require_bounded_waveform_size(current.size, "processed wave")
-    if not np.isfinite(current).all():
-        raise AudioProcessingError("waveform processing produced non-finite samples")
-    return current.copy(), output_sampling_rate
 
 
 def process_wav(
@@ -528,13 +513,16 @@ def process_wav(
     sampling_rate: int | None = None,
     **processing: Any,
 ) -> bytes:
-    """Decode, process, and re-encode a PCM WAV payload."""
+    """旧Python APIとしてPCM WAVをデコードし、現行処理後に再エンコードする。"""
 
     wave, input_sampling_rate = decode_pcm_wav(
-        wav_bytes, expected_sampling_rate=sampling_rate
+        wav_bytes,
+        expected_sampling_rate=sampling_rate,
     )
     output_wave, output_sampling_rate = process_wave(
-        wave, input_sampling_rate, **processing
+        wave,
+        input_sampling_rate,
+        **processing,
     )
     return encode_pcm_wav(output_wave, output_sampling_rate)
 
