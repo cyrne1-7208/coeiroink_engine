@@ -177,7 +177,9 @@ def _rebuild_and_apply(
         if persist_json and user_dict_path.is_file()
         else None
     )
-    had_compiled_dict = compiled_dict_path.is_file()
+    previous_compiled_dict = (
+        compiled_dict_path.read_bytes() if compiled_dict_path.is_file() else None
+    )
     temporary_source_path: Path | None = None
     temporary_compiled_path: Path | None = None
     try:
@@ -235,23 +237,39 @@ def _rebuild_and_apply(
             raise RuntimeError("辞書のコンパイル時にエラーが発生しました。")
 
         try:
-            # Open JTalk解析と共有するロック下で候補辞書を先に適用し、使用可能と確認できた辞書だけをJSONと本番辞書へ反映する。
+            # 候補辞書を検証後に一度解放し、WindowsでもOpen JTalkが開いているファイルを置換しないようにする。
             _set_user_dict(temporary_compiled_path.resolve(strict=True))
+            _reset_user_dict()
+            os.replace(temporary_compiled_path, compiled_dict_path)
+            _set_user_dict(compiled_dict_path.resolve(strict=True))
             if persist_json:
                 _write_json_atomic(
                     _serialize_user_dict(user_dict),
                     user_dict_path,
                 )
-            os.replace(temporary_compiled_path, compiled_dict_path)
         except Exception as update_error:
             rollback_errors: list[Exception] = []
+            try:
+                _reset_user_dict()
+            except Exception as rollback_error:  # noqa: BLE001
+                rollback_errors.append(rollback_error)
+            try:
+                if previous_compiled_dict is None:
+                    _remove_file(compiled_dict_path)
+                else:
+                    _write_bytes_atomic(previous_compiled_dict, compiled_dict_path)
+            except Exception as rollback_error:  # noqa: BLE001
+                rollback_errors.append(rollback_error)
             if persist_json:
                 try:
                     _restore_user_dict_json(user_dict_path, previous_user_dict_json)
                 except Exception as rollback_error:  # noqa: BLE001
                     rollback_errors.append(rollback_error)
             try:
-                _restore_openjtalk_dict(compiled_dict_path, had_compiled_dict)
+                _restore_openjtalk_dict(
+                    compiled_dict_path,
+                    previous_compiled_dict is not None,
+                )
             except Exception as rollback_error:  # noqa: BLE001
                 rollback_errors.append(rollback_error)
             if rollback_errors:

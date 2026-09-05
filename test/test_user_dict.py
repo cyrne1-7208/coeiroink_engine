@@ -426,6 +426,54 @@ class TestUserDict(TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(len(read_dict(user_dict_path)), 2)
 
+    def test_compiled_dictionary_is_released_before_replace(self):
+        user_dict_path = self.tmp_dir_path / "windows_replace.json"
+        compiled_dict_path = self.tmp_dir_path / "windows_replace.dic"
+        locked_path: Path | None = None
+        real_replace = os.replace
+
+        def compile_dictionary(_source_path: Path, compiled_path: Path):
+            compiled_path.write_bytes(b"compiled")
+
+        def apply_dictionary(path: Path):
+            nonlocal locked_path
+            locked_path = Path(path)
+
+        def reset_dictionary():
+            nonlocal locked_path
+            locked_path = None
+
+        def replace_unlocked(source: str | os.PathLike, target: str | os.PathLike):
+            if locked_path in (Path(source), Path(target)):
+                raise PermissionError("dictionary is still open")
+            real_replace(source, target)
+
+        with (
+            patch(
+                "voicevox_engine.user_dict._create_user_dict",
+                side_effect=compile_dictionary,
+            ),
+            patch(
+                "voicevox_engine.user_dict._set_user_dict",
+                side_effect=apply_dictionary,
+            ),
+            patch(
+                "voicevox_engine.user_dict._reset_user_dict",
+                side_effect=reset_dictionary,
+            ),
+            patch(
+                "voicevox_engine.user_dict.os.replace",
+                side_effect=replace_unlocked,
+            ),
+        ):
+            update_dict(
+                user_dict_path=user_dict_path,
+                compiled_dict_path=compiled_dict_path,
+            )
+
+        self.assertEqual(compiled_dict_path.read_bytes(), b"compiled")
+        self.assertEqual(locked_path, compiled_dict_path.resolve())
+
     def test_compile_failure_keeps_previous_state(self):
         user_dict_path = self.tmp_dir_path / "compile_failure.json"
         compiled_dict_path = self.tmp_dir_path / "compile_failure.dic"
