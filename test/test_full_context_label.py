@@ -15,8 +15,7 @@ class TestBasePhonemes(TestCase):
     def setUp(self):
         super().setUp()
         # pyopenjtalk.extract_fullcontext("こんにちは、ヒホです。")の結果
-        # 出来る限りテスト内で他のライブラリに依存しないため、
-        # またテスト内容を透明化するために、テストケースを生成している
+        # できる限り外部ライブラリへ依存せず期待値を確認できるよう、テストケースをここで定義する。
         self.test_case_hello_hiho = [
             # sil (無音)
             "xx^xx-sil+k=o/A:xx+xx+xx/B:xx-xx_xx/C:xx_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"

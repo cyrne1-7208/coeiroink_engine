@@ -13,17 +13,22 @@ import numpy as np
 from coeirocore.coeiro_manager import (
     AmbiguousStyleError as CoreAmbiguousStyleError,
 )
-from coeirocore.coeiro_manager import AudioManager, CoeiroCoreError
+from coeirocore.coeiro_manager import (
+    AudioManager,
+    CoeiroCoreError,
+    InvalidSynthesisParameterError,
+)
 from coeirocore.coeiro_manager import (
     StyleNotFoundError as CoreStyleNotFoundError,
 )
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse, Response
 
 from voicevox_engine import __version__
 
 from . import audio as audio_helpers
 from .catalog import OfficialSiteCatalogClient
+from .dictionary import DictionaryError
 from .duration import DurationConversionError, convert_duration
 from .metadata import (
     AmbiguousStyleError,
@@ -85,17 +90,24 @@ from .wave_processing import (
 CatalogCallback = Callable[[], Any]
 DictionaryCallback = Callable[[DictionaryWords], Any]
 
+
+def _allow_mutation() -> None:
+    """単独利用されるv2ルーターでは従来どおり変更APIを許可する。"""
+
+
 # 想定済みの公開APIエラーだけをHTTPへ変換し、未知の例外はASGIまで伝播させてtracebackを残す。
 HANDLED_API_ERRORS = (
     HTTPException,
     CoeiroCoreError,
     MetadataError,
     OSError,
+    audio_helpers.AudioValidationError,
     audio_helpers.AudioProcessingError,
+    ProsodyError,
+    DurationConversionError,
+    DictionaryError,
     TDPSOLAProcessingError,
     TDPSOLAValidationError,
-    TypeError,
-    ValueError,
 )
 
 
@@ -131,8 +143,8 @@ def _as_http_error(error: Exception, default_status: int = 500) -> HTTPException
             audio_helpers.AudioValidationError,
             ProsodyError,
             DurationConversionError,
-            ValueError,
-            TypeError,
+            DictionaryError,
+            InvalidSynthesisParameterError,
         ),
     ):
         return HTTPException(status_code=422, detail=str(error))
@@ -476,6 +488,7 @@ class _V2RouterContext:
     update_info_callback: CatalogCallback | None
     engine_version: str
     settings: dict[str, Any]
+    verify_mutability_allowed: Callable[[], Any]
 
     def metadata_required(self) -> SpeakerMetadataStore:
         if self.metadata_store is None:
@@ -802,6 +815,7 @@ def _add_processing_routes(router: APIRouter, context: _V2RouterContext) -> None
 def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
     dictionary_callback = context.dictionary_callback
     settings = context.settings
+    verify_mutability_allowed = context.verify_mutability_allowed
 
     @router.post(
         "/v1/set_dictionary",
@@ -811,6 +825,7 @@ def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
             200: {"content": {"application/json": {"schema": {}}}},
             422: {"model": HTTPValidationError},
         },
+        dependencies=[Depends(verify_mutability_allowed)],
     )
     def set_dictionary(words: DictionaryWords) -> dict[str, Any]:
         try:
@@ -829,8 +844,11 @@ def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
             200: {"content": {"application/json": {"schema": {}}}},
             422: {"model": HTTPValidationError},
         },
+        dependencies=[Depends(verify_mutability_allowed)],
     )
     def set_default_processing_algorithm(param: AlgorithmSettings) -> None:
+        """稼働中の既定波形処理アルゴリズムを変更する。設定は再起動後に引き継がれない。"""
+
         try:
             settings["processing_algorithm"] = _normalize_processing_algorithm(
                 param.processing_algorithm
@@ -846,8 +864,11 @@ def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
             200: {"content": {"application/json": {"schema": {}}}},
             422: {"model": HTTPValidationError},
         },
+        dependencies=[Depends(verify_mutability_allowed)],
     )
     def set_default_trim_buffer(param: TrimBufferSettings) -> None:
+        """稼働中の既定トリム範囲を変更する。設定は再起動後に引き継がれない。"""
+
         settings.update(
             start_trim_buffer=param.start_trim_buffer,
             end_trim_buffer=param.end_trim_buffer,
@@ -987,7 +1008,7 @@ def _add_speaker_asset_routes(router: APIRouter, context: _V2RouterContext) -> N
     def sample_voice(
         speaker_uuid: str | None = Query(None, alias="speakerUuid"),
         style_id: int | None = Query(None, alias="styleId"),
-        index: int | None = Query(None),
+        index: int | None = Query(None, ge=0),
     ) -> Response:
         try:
             store = metadata_required()
@@ -1035,6 +1056,7 @@ def create_v2_router(
     engine_version: str = __version__,
     default_processing_algorithm: str = "td-psola",
     default_trim_buffer: TrimBufferSettings | Mapping[str, Any] | None = None,
+    verify_mutability_allowed: Callable[[], Any] = _allow_mutation,
 ) -> APIRouter:
     """ルートパスに依存しないCOEIROINK v2ルーターを構築する。
 
@@ -1071,6 +1093,7 @@ def create_v2_router(
         update_info_callback=update_info_callback,
         engine_version=engine_version,
         settings=settings,
+        verify_mutability_allowed=verify_mutability_allowed,
     )
     # 各ルート群には必要な依存だけを共有コンテキストから渡す。
     _add_status_routes(router)

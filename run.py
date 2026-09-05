@@ -80,17 +80,30 @@ def _non_negative_int(value: str) -> int:
     return parsed
 
 
+def _model_cache_limit(value: str) -> int | None:
+    """モデル保持数、または上限なしを表すallを解析する。"""
+
+    if value.lower() == "all":
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "正の整数またはallを指定してください。"
+        ) from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("正の整数またはallを指定してください。")
+    return parsed
+
+
 def set_output_log_utf8() -> None:
-    """
-    stdout/stderrのエンコーディングをUTF-8に切り替える関数
-    """
+    """stdout/stderrのエンコーディングをUTF-8に切り替える。"""
     # コンソールがない環境だとNone https://docs.python.org/ja/3/library/sys.html#sys.__stdin__
     if sys.stdout is not None:
         # 必ずしもreconfigure()が実装されているとは限らない
         try:
             sys.stdout.reconfigure(encoding="utf-8")
         except AttributeError:
-            # バッファを全て出力する
             sys.stdout.flush()
             sys.stdout = TextIOWrapper(
                 sys.stdout.buffer, encoding="utf-8", errors="backslashreplace"
@@ -129,6 +142,8 @@ def _create_lifespan(cancellable_engine: CancellableEngine | None):
                     # lifespan終了時に自分で取り消した監視タスクの完了通知なので、異常終了として扱わない。
                     pass
                 cancellable_disconnection_task = None
+            if cancellable_engine is not None:
+                await cancellable_engine.shutdown_async()
 
     return lifespan
 
@@ -242,6 +257,7 @@ def generate_app(
         speaker_info_dir, metas_store=metas_store
     )
     resource_manager = ResourceManager(speaker_info_dir)
+    verify_mutability_allowed = mutability_guard(disable_mutable_api)
 
     # `/v1`と`/voicevox`はcomposition rootから渡された同じCoreを共有する。
     app.include_router(
@@ -252,6 +268,7 @@ def generate_app(
             dictionary_callback=set_coeiroink_dictionary,
             engine_version=__version__,
             default_processing_algorithm="td-psola",
+            verify_mutability_allowed=verify_mutability_allowed,
         )
     )
 
@@ -267,7 +284,7 @@ def generate_app(
                 resource_manager=resource_manager,
                 setting_loader=setting_loader,
                 cancellable_engine=cancellable_engine,
-                verify_mutability_allowed=mutability_guard(disable_mutable_api),
+                verify_mutability_allowed=verify_mutability_allowed,
             )
         )
     )
@@ -288,7 +305,7 @@ if __name__ == "__main__":
 
     default_cors_policy_mode = CorsPolicyMode.localapps
 
-    parser = argparse.ArgumentParser(description="VOICEVOX のエンジンです。")
+    parser = argparse.ArgumentParser(description="COEIROINKのエンジンです。")
     parser.add_argument(
         "--host",
         type=str,
@@ -330,15 +347,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--experimental",
         action="append",
-        choices=("soxr",),
+        choices=("generator-only", "soxr"),
         default=[],
-        help="任意機能を明示的に有効化します。複数機能はこのオプションを繰り返し指定します。",
+        help="任意機能を明示的に有効化します。複数の機能を有効化する場合は、このオプションを繰り返し指定します。",
     )
     parser.add_argument(
         "--voicevox_dir",
         type=Path,
         default=None,
-        help="VOICEVOXのディレクトリパスです。",
+        help="設定ファイル、マニフェスト、speaker_infoを探索する基準ディレクトリです。",
     )
     parser.add_argument(
         "--speaker_info_dir",
@@ -351,14 +368,14 @@ if __name__ == "__main__":
         type=Path,
         default=None,
         action="append",
-        help="VOICEVOX COREのディレクトリパスです。",
+        help="旧起動引数との互換用です。Python版coeiroink_coreでは使用しません。",
     )
     parser.add_argument(
         "--runtime_dir",
         type=Path,
         default=None,
         action="append",
-        help="VOICEVOX COREで使用するライブラリのディレクトリパスです。",
+        help="旧起動引数との互換用です。Python版coeiroink_coreでは使用しません。",
     )
     parser.add_argument(
         "--enable_mock",
@@ -372,9 +389,16 @@ if __name__ == "__main__":
     )
     parser.add_argument("--init_processes", type=int, default=2)
     parser.add_argument(
-        "--load_all_models",
-        action="store_true",
-        help="指定すると起動時に全ての音声合成モデルを読み込みます。",
+        "--max-loaded-models",
+        nargs="?",
+        const=None,
+        default=1,
+        type=_model_cache_limit,
+        metavar="N|all",
+        help=(
+            "直近に使った音声合成モデルの保持上限です。"
+            "値を省略するかallを指定すると、起動時に全モデルを読み込みます。デフォルトは1です。"
+        ),
     )
     parser.add_argument(
         "--disable_mutable_api",
@@ -386,9 +410,6 @@ if __name__ == "__main__":
         ),
     )
 
-    # 引数へcpu_num_threadsの指定がなければ、環境変数をロールします。
-    # 環境変数にもない場合は、Noneのままとします。
-    # VV_CPU_NUM_THREADSが空文字列でなく数値でもない場合、エラー終了します。
     parser.add_argument(
         "--cpu_num_threads",
         type=int,
@@ -414,9 +435,9 @@ if __name__ == "__main__":
         choices=list(CorsPolicyMode),
         default=None,
         help=(
-            "CORSの許可モード。allまたはlocalappsが指定できます。allはすべてを許可します。"
+            "CORSの許可モードです。allまたはlocalappsが指定できます。allはすべてを許可します。"
             "localappsはオリジン間リソース共有ポリシーを、app://.とlocalhost関連に限定します。"
-            "その他のオリジンはallow_originオプションで追加できます。デフォルトはlocalapps。"
+            "その他のオリジンはallow_originオプションで追加できます。デフォルトはlocalappsです。"
         ),
     )
 
@@ -436,6 +457,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     # 公開フラグは実験機能名だけにし、下位層には既存の具体的な実装名を渡す。
     args.resampler = "soxr-vhq" if "soxr" in args.experimental else "resampy"
+    args.generator_only = "generator-only" in args.experimental
 
     try:
         args.device = resolve_device(device=args.device, use_gpu=args.use_gpu)
@@ -467,7 +489,8 @@ if __name__ == "__main__":
         opencl_platform_index=args.opencl_platform_index,
         cpu_num_threads=cpu_num_threads,
         resampler=args.resampler,
-        load_all_models=args.load_all_models,
+        max_loaded_models=args.max_loaded_models,
+        generator_only=args.generator_only,
     )
     synthesis_engines = make_synthesis_engines(
         speaker_info_dir=speaker_info_dir,

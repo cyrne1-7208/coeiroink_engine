@@ -57,7 +57,8 @@ def make_audio_manager(
     opencl_platform_index: int = 0,
     cpu_num_threads: int | None = None,
     resampler: str = "resampy",
-    load_all_models: bool = False,
+    max_loaded_models: int | None = 1,
+    generator_only: bool = False,
 ) -> AudioManager:
     """起動設定を正規化し、ネイティブAPIと互換APIが共有するCoreを生成する。"""
 
@@ -71,7 +72,8 @@ def make_audio_manager(
         speaker_info_dir=speaker_info_dir.expanduser().resolve(),
         cpu_num_threads=0 if cpu_num_threads in (None, 0) else cpu_num_threads,
         resampler=resampler,
-        load_all_models=load_all_models,
+        max_loaded_models=max_loaded_models,
+        generator_only=generator_only,
     )
 
 
@@ -105,7 +107,8 @@ def make_synthesis_engines(
     runtime_dirs: list[Path] | None = None,
     cpu_num_threads: int | None = None,
     enable_mock: bool = True,
-    load_all_models: bool = False,
+    max_loaded_models: int | None = 1,
+    generator_only: bool = False,
     speaker_info_dir: Path | None = None,
     device: str | None = None,
     device_index: int = 0,
@@ -114,7 +117,7 @@ def make_synthesis_engines(
     audio_manager: AudioManager | None = None,
 ) -> dict[str, SynthesisEngineBase]:
     """
-    音声ライブラリをロードして、音声合成エンジンを生成
+    音声ライブラリをロードして、音声合成エンジンを生成する
 
     Parameters
     ----------
@@ -127,12 +130,14 @@ def make_synthesis_engines(
     runtime_dirs: List[Path], optional, default=None
         旧Engineとの呼び出し互換性のために受け取る。Python版Coreでは使用しない。
     cpu_num_threads: int, optional, default=None
-        音声ライブラリが、推論に用いるCPUスレッド数を設定する
-        Noneのとき、ライブラリ側の挙動により論理コア数の半分か、物理コア数が指定される
+        音声ライブラリが推論に用いるCPUスレッド数を設定する
+        Noneのとき、ライブラリ側の挙動により論理コア数の半分、または物理コア数が指定される
     enable_mock: bool, optional, default=True
         旧Engineとの呼び出し互換性のために受け取る。
-    load_all_models: bool, optional, default=False
-        全MYCOEIROINKモデルを起動時に読み込み、モデル切替後も保持する。
+    max_loaded_models: int | None, optional, default=1
+        直近に使ったMYCOEIROINKモデルの保持上限。Noneでは全モデルを起動時に読み込む。
+    generator_only: bool, optional, default=False
+        VITSの推論用generatorだけを読み込む実験機能。
     speaker_info_dir: Path, optional, default=None
         MYCOEIROINKを展開したspeaker_infoディレクトリ
     device: str, optional, default=None
@@ -156,9 +161,10 @@ def make_synthesis_engines(
             opencl_platform_index=opencl_platform_index,
             cpu_num_threads=cpu_num_threads,
             resampler=resampler,
-            load_all_models=load_all_models,
+            max_loaded_models=max_loaded_models,
+            generator_only=generator_only,
         )
-    elif load_all_models:
+    elif max_loaded_models is None:
         audio_manager.initialize_all_speakers()
 
     # VOICEVOX互換層には生成済みCoreだけを渡し、デバイス初期化やモデル管理を持たせない。

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from coeirocore.coeiro_manager import PredictionResult
+from coeirocore.coeiro_manager import InvalidSynthesisParameterError, PredictionResult
 from coeirocore.pyworld_compat import load_pyworld
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -686,3 +686,47 @@ def test_missing_sample_voice_uses_official_error_contract(tmp_path):
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Sample voice file not found"}
+
+
+def test_sample_voice_rejects_negative_index() -> None:
+    app, _, _ = _app()
+
+    response = TestClient(app).get(
+        "/v1/sample_voice",
+        params={
+            "speakerUuid": SPEAKER_UUID,
+            "styleId": STYLE_ID,
+            "index": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_unexpected_value_error_is_not_reported_as_request_validation() -> None:
+    app, manager, _ = _app()
+
+    def fail_prediction(*args, **kwargs):
+        raise ValueError("implementation defect")
+
+    manager.predict = fail_prediction
+
+    with pytest.raises(ValueError, match="implementation defect"):
+        TestClient(app).post("/v1/predict", json=_making_payload())
+
+
+def test_core_parameter_error_is_reported_as_request_validation() -> None:
+    app, manager, _ = _app()
+
+    def reject_parameter(*args, **kwargs):
+        raise InvalidSynthesisParameterError("speed_scale must be positive")
+
+    manager.predict = reject_parameter
+
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/v1/predict",
+        json=_making_payload(),
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "speed_scale must be positive"}

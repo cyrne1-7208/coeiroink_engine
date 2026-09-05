@@ -42,11 +42,15 @@ class CoeiroinkVoicevoxAdapter(SynthesisEngineBase):
     def replace_phoneme_length(
         self, accent_phrases: list[AccentPhrase], speaker_id: int
     ) -> list[AccentPhrase]:
+        """Coreに独立した音素長推論APIがないため、互換入力を変更せず返す。"""
+
         return accent_phrases
 
     def replace_mora_pitch(
         self, accent_phrases: list[AccentPhrase], speaker_id: int
     ) -> list[AccentPhrase]:
+        """Coreに独立したモーラ音高推論APIがないため、互換入力を変更せず返す。"""
+
         return accent_phrases
 
     def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool) -> None:

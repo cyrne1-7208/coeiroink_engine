@@ -13,7 +13,7 @@ from voicevox_engine.model import UserDictWord
 from voicevox_engine.user_dict import (
     compiled_dict_path as default_compiled_dict_path,
 )
-from voicevox_engine.user_dict import create_word, update_dict, write_to_json
+from voicevox_engine.user_dict import create_word, replace_user_dict
 from voicevox_engine.user_dict import default_dict_path as bundled_dict_path
 from voicevox_engine.user_dict import user_dict_path as default_user_dict_path
 
@@ -63,7 +63,7 @@ def build_user_dictionary(
             raise DictionaryError(
                 f"numMoras does not match yomi at index {index}: {item.num_moras} != {record.mora_count}"
             )
-        # v2は単語UUIDを受け取らないため、同じ辞書内容から毎回同じ公開Engine形式を作れるよう内容ベースのUUIDを生成する。
+        # v2は単語UUIDを受け取らないため、出現順と単語内容から決定論的なUUIDを生成する。並び順が変わればUUIDも変わる。
         stable_key = (
             f"{index}\0{item.word}\0{item.yomi}\0{item.accent}\0{item.num_moras}"
         )
@@ -85,8 +85,8 @@ def set_dictionary(
     source_default = Path(default_dict_path or bundled_dict_path)
     records = build_user_dictionary(payload)
     try:
-        write_to_json(records, target_json)
-        update_dict(
+        replace_user_dict(
+            records,
             default_dict_path=source_default,
             user_dict_path=target_json,
             compiled_dict_path=target_compiled,

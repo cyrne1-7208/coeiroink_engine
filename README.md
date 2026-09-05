@@ -44,7 +44,9 @@ MYCOEIROINKのZIPを展開し、モデルフォルダを`/path/to/speaker_info`�
   --device cpu
 ```
 
-Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。モデルは必要になった時点でロードされ、別モデルへ切り替える際は現在のモデルを解放して置き換えます。
+Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。モデルは必要になった時点でロードされ、既定では直近の1モデルを保持します。`--max-loaded-models 3`のような数値指定では直近の指定数をLRU保持し、`--max-loaded-models`または`--max-loaded-models all`では全モデルを起動時に読み込みます。利用可能メモリが不足する場合は指定値にかかわらず古いモデルから解放するため、全件が収まらない環境では`all`でも一部モデルが要求時の再ロードになります。
+
+実験的なgenerator-onlyローダーは`--experimental generator-only`で有効化できます。VITSの推論に不要な学習用重みを最初から読み込まないため、通常の合成処理や出力を変えずにモデルロード時のピークメモリを抑えます。
 
 Dockerで起動する場合は、CoreとEngineを含む親ディレクトリをビルドコンテキストにしてください。
 

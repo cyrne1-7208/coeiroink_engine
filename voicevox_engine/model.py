@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from .metas.metas import Speaker, SpeakerInfo
 
+_MAX_OUTPUT_SAMPLING_RATE = 384_000
+_MAX_SILENCE_SECONDS = 60.0
+
 
 class Mora(BaseModel):
     """
@@ -38,8 +41,11 @@ class AccentPhrase(BaseModel):
 
     moras: list[Mora] = Field(title="モーラのリスト")
     accent: int = Field(title="アクセント箇所")
-    pause_mora: Mora | None = Field(default=None, title="後ろに無音を付けるかどうか")
-    is_interrogative: bool = Field(default=False, title="疑問系かどうか")
+    pause_mora: Mora | None = Field(
+        default=None,
+        title="アクセント句末尾の無音モーラ。付けない場合はnull",
+    )
+    is_interrogative: bool = Field(default=False, title="疑問形かどうか")
 
     def __hash__(self):
         items = [
@@ -59,14 +65,36 @@ class AudioQuery(BaseModel):
     pitchScale: float = Field(title="全体の音高")
     intonationScale: float = Field(title="全体の抑揚")
     volumeScale: float = Field(title="全体の音量")
-    prePhonemeLength: float = Field(title="音声の前の無音時間")
-    postPhonemeLength: float = Field(title="音声の後の無音時間")
+    prePhonemeLength: float = Field(
+        ge=0,
+        le=_MAX_SILENCE_SECONDS,
+        allow_inf_nan=False,
+        title="音声の前の無音時間",
+    )
+    postPhonemeLength: float = Field(
+        ge=0,
+        le=_MAX_SILENCE_SECONDS,
+        allow_inf_nan=False,
+        title="音声の後の無音時間",
+    )
     pauseLength: float | None = Field(
         default=None,
+        ge=0,
+        le=_MAX_SILENCE_SECONDS,
+        allow_inf_nan=False,
         title="句読点などの無音時間。nullのときは無視される",
     )
-    pauseLengthScale: float = Field(default=1, title="句読点などの無音時間（倍率）")
-    outputSamplingRate: int = Field(title="音声データの出力サンプリングレート")
+    pauseLengthScale: float = Field(
+        default=1,
+        ge=0,
+        allow_inf_nan=False,
+        title="句読点などの無音時間（倍率）",
+    )
+    outputSamplingRate: int = Field(
+        gt=0,
+        le=_MAX_OUTPUT_SAMPLING_RATE,
+        title="音声データの出力サンプリングレート",
+    )
     outputStereo: bool = Field(title="音声データをステレオ出力するか否か")
     kana: str | None = Field(
         default=None,
@@ -88,7 +116,7 @@ class ParseKanaErrorCode(Enum):
     ACCENT_NOTFOUND = "アクセントを指定していないアクセント句があります: {text}"
     EMPTY_PHRASE = "{position}番目のアクセント句が空白です"
     INTERROGATION_MARK_NOT_AT_END = "アクセント句末以外に「？」は置けません: {text}"
-    INFINITE_LOOP = "処理時に無限ループになってしまいました...バグ報告をお願いします。"
+    INFINITE_LOOP = "処理時に無限ループが発生しました。バグ報告をお願いします。"
 
 
 class ParseKanaError(Exception):
@@ -116,9 +144,7 @@ class ParseKanaBadRequest(BaseModel):
 
 
 class MorphableTargetInfo(BaseModel):
-    is_morphable: bool = Field(title="指定した話者に対してモーフィングの可否")
-    # FIXME: add reason property
-    # reason: Optional[str] = Field(title="is_morphableがfalseである場合、その理由")
+    is_morphable: bool = Field(title="指定した話者に対するモーフィングの可否")
 
 
 class ResourceFormat(str, Enum):
@@ -148,7 +174,7 @@ class DownloadInfo(BaseModel):
     ダウンロード話者情報（ローカルの情報が付与されたもの）
     """
 
-    downloadable_model: DownloadableModel = Field(title="ダンロードモデル情報")
+    downloadable_model: DownloadableModel = Field(title="ダウンロードモデル情報")
     current_version: str = Field(title="現在のバージョン")
     character_exists: bool = Field(
         title="このキャラクターのライブラリがローカルに存在するか"
@@ -228,7 +254,6 @@ class UserDictWord(BaseModel):
 
         values = info.data
         if "pronunciation" not in values or "accent_type" not in values:
-            # 適切な場所でエラーを出すようにする
             return mora_count
 
         if mora_count is None:
@@ -248,7 +273,7 @@ class UserDictWord(BaseModel):
 
         if not 0 <= values["accent_type"] <= mora_count:
             raise ValueError(
-                "誤ったアクセント型です({})。 expect: 0 <= accent_type <= {}".format(
+                "アクセント型の値が不正です ({})。期待値: 0 <= accent_type <= {}".format(
                     values["accent_type"], mora_count
                 )
             )
@@ -273,7 +298,7 @@ class PartOfSpeechDetail(BaseModel):
 
 class WordTypes(str, Enum):
     """
-    fastapiでword_type引数を検証する時に使用するクラス
+    FastAPIでword_type引数を検証する時に使用するクラス
     """
 
     PROPER_NOUN = "PROPER_NOUN"
@@ -304,7 +329,7 @@ class SupportedFeaturesInfo(BaseModel):
     support_adjusting_intonation_scale: bool = Field(title="抑揚が調整可能かどうか")
     support_adjusting_volume_scale: bool = Field(title="音量が調整可能かどうか")
     support_adjusting_silence_scale: bool = Field(
-        title="前後の無音時間が調節可能かどうか"
+        title="前後の無音時間が調整可能かどうか"
     )
     support_interrogative_upspeak: bool = Field(
         title="疑似疑問文に対応しているかどうか"

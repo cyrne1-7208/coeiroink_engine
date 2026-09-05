@@ -44,12 +44,9 @@ def test_set_dictionary_replaces_then_compiles(tmp_path: Path):
     bundled = tmp_path / "default.csv"
     bundled.write_text("", encoding="utf-8")
 
-    with (
-        patch("voicevox_engine.coeiroink_v2.dictionary.write_to_json") as write,
-        patch(
-            "voicevox_engine.coeiroink_v2.dictionary.update_dict"
-        ) as compile_dictionary,
-    ):
+    with patch(
+        "voicevox_engine.coeiroink_v2.dictionary.replace_user_dict"
+    ) as replace_dictionary:
         set_dictionary(
             _payload(),
             user_dict_path=user_json,
@@ -57,10 +54,10 @@ def test_set_dictionary_replaces_then_compiles(tmp_path: Path):
             default_dict_path=bundled,
         )
 
-    records, target = write.call_args.args
+    records = replace_dictionary.call_args.args[0]
     assert len(records) == 1
-    assert target == user_json
-    compile_dictionary.assert_called_once_with(
+    replace_dictionary.assert_called_once_with(
+        records,
         default_dict_path=bundled,
         user_dict_path=user_json,
         compiled_dict_path=compiled,

@@ -1,6 +1,8 @@
 import base64
+import importlib
 import io
 from unittest import TestCase
+from unittest.mock import patch
 
 import numpy as np
 import numpy.testing
@@ -8,6 +10,8 @@ import soundfile
 from scipy.signal import resample
 
 from voicevox_engine.utility import ConnectBase64WavesException, connect_base64_waves
+
+connect_module = importlib.import_module("voicevox_engine.utility.connect_base64_waves")
 
 
 def generate_sine_wave_ndarray(
@@ -125,3 +129,31 @@ class TestConnectBase64Waves(TestCase):
 
         self.assertEqual(wave_x2_ref.shape, wave_x2.shape)
         self.assertTrue((wave_x2_ref == wave_x2).all())
+
+    def test_rejects_more_than_two_channels(self):
+        wave = np.zeros((8, 3), dtype=np.float32)
+        encoded = encode_base64(encode_bytes(wave, samplerate=1000))
+
+        with self.assertRaises(ConnectBase64WavesException):
+            connect_base64_waves([encoded])
+
+    def test_rejects_aggregate_decoded_byte_limit(self):
+        encoded = generate_sine_wave_base64(seconds=0.1, samplerate=1000, frequency=10)
+
+        with (
+            patch.object(connect_module, "MAX_CONNECTED_WAVE_BYTES", 8),
+            self.assertRaises(ConnectBase64WavesException),
+        ):
+            connect_base64_waves([encoded])
+
+    def test_rejects_projected_resampling_size(self):
+        low_rate = generate_sine_wave_base64(seconds=1, samplerate=1000, frequency=10)
+        high_rate = generate_sine_wave_base64(
+            seconds=0.1, samplerate=24000, frequency=10
+        )
+
+        with (
+            patch.object(connect_module, "MAX_CONNECTED_WAVE_SAMPLES", 10_000),
+            self.assertRaises(ConnectBase64WavesException),
+        ):
+            connect_base64_waves([low_rate, high_rate])

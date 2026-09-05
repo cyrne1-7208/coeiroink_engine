@@ -5,6 +5,8 @@ import re
 import kanalizer
 import pyopenjtalk
 
+from .user_dict import mutex_openjtalk_dict
+
 _FULLWIDTH_ASCII = str.maketrans(
     "".join(chr(0xFF01 + index) for index in range(94)),
     "".join(chr(0x21 + index) for index in range(94)),
@@ -97,18 +99,21 @@ def text_to_full_context_labels(text: str) -> list[str]:
 
     if not text.strip():
         return []
-    features = [
-        _unknown_english_feature(item) for item in pyopenjtalk.run_frontend(text)
-    ]
-    features = [
-        feature
-        for index, feature in enumerate(features)
-        if not (
-            feature.get("string") == "　"
-            and feature.get("pron") == "、"
-            and 0 < index < len(features) - 1
-            and _is_alphabet_feature(features[index - 1])
-            and _is_alphabet_feature(features[index + 1])
-        )
-    ]
-    return pyopenjtalk.make_label(features)
+    # run_frontendとmake_labelの間で辞書を切り替えず、一つの解析として扱う。
+    with mutex_openjtalk_dict:
+        features = [
+            _unknown_english_feature(item) for item in pyopenjtalk.run_frontend(text)
+        ]
+        # Open JTalkが英単語間の全角空白を読点として解析した場合だけ除去し、不要な休止を防ぐ。
+        features = [
+            feature
+            for index, feature in enumerate(features)
+            if not (
+                feature.get("string") == "　"
+                and feature.get("pron") == "、"
+                and 0 < index < len(features) - 1
+                and _is_alphabet_feature(features[index - 1])
+                and _is_alphabet_feature(features[index + 1])
+            )
+        ]
+        return pyopenjtalk.make_label(features)

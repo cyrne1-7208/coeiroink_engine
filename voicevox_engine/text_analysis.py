@@ -10,7 +10,7 @@ from .mora_list import openjtalk_mora2text
 
 def mora_to_text(mora: str) -> str:
     if mora[-1:] in ["A", "I", "U", "E", "O"]:
-        # 無声化母音は辞書検索時だけ小文字へ正規化する。
+        # 無声化母音でも表記を引けるよう、辞書検索時だけ小文字へ正規化する。
         mora = mora[:-1] + mora[-1].lower()
     return openjtalk_mora2text.get(mora, mora)
 

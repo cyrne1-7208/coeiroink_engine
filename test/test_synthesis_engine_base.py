@@ -14,7 +14,6 @@ def _speaker_value(speaker_id):
 def yukarin_s_mock(length: int, phoneme_list: numpy.ndarray, speaker_id: numpy.ndarray):
     result = []
     speaker_value = _speaker_value(speaker_id)
-    # mockとしての適当な処理、特に意味はない
     for i in range(length):
         result.append(round(float(phoneme_list[i] * 0.0625 + speaker_value), 2))
     return numpy.array(result)
@@ -32,7 +31,6 @@ def yukarin_sa_mock(
 ):
     result = []
     speaker_value = _speaker_value(speaker_id)
-    # mockとしての適当な処理、特に意味はない
     for i in range(length):
         result.append(
             round(
@@ -63,9 +61,8 @@ def decode_mock(
 ):
     result = []
     speaker_value = _speaker_value(speaker_id)
-    # mockとしての適当な処理、特に意味はない
     for i in range(length):
-        # decode forwardはデータサイズがlengthの256倍になるのでとりあえず256回データをresultに入れる
+        # 実際のデコーダーと同じく、1フレームから256サンプルを生成する。
         for _ in range(256):
             result.append(
                 float(
@@ -211,7 +208,7 @@ class TestSynthesisEngineBase(TestCase):
         expected: list[AccentPhrase],
         enable_interrogative_upspeak: bool,
     ):
-        """音声合成時に疑問文モーラ処理を行っているかどうかを検証
+        """音声合成時に疑問文モーラ処理を行っているかを検証する。
         (https://github.com/VOICEVOX/voicevox_engine/issues/272#issuecomment-1022610866)
         """
         accent_phrases = self.synthesis_engine.create_accent_phrases(text, 1)
@@ -229,7 +226,7 @@ class TestSynthesisEngineBase(TestCase):
         )
 
     def test_create_accent_phrases(self):
-        """accent_phrasesの作成時では疑問文モーラ処理を行わない
+        """accent_phrasesの作成時には疑問文モーラ処理を行わないことを検証する。
         (https://github.com/VOICEVOX/voicevox_engine/issues/272#issuecomment-1022610866)
         """
         expected = koreha_arimasuka_base_expected()

@@ -2,7 +2,7 @@
 <html lang="ja">
     <head>
         <meta charset="utf-8" />
-        <title>VOICEVOX Engine 設定</title>
+        <title>COEIROINK Engine 設定</title>
         <link
             rel="shortcut icon"
             href="https://voicevox.hiroshiba.jp/favicon-32x32.png"
@@ -25,7 +25,7 @@
         <div class="container p-3">
             <form method="post">
                 <div class="alert alert-warning" role="alert">
-                    設定の変更の更新にはエンジンの再起動が必要です。
+                    設定の変更を反映するにはエンジンの再起動が必要です。
                 </div>
 
                 <div class="mb-3">
@@ -43,13 +43,13 @@
                     </select>
                     <div class="form-text">
                         <p class="mb-1">
-                            allまたはlocalappsを指定。allはすべてを許可します。
+                            allまたはlocalappsを指定します。allはすべてを許可します。
                         </p>
                         <p class="mb-1">
                             localappsはオリジン間リソース共有ポリシーを、app://.とlocalhost関連に限定します。
                         </p>
                         <p>
-                            その他のオリジンはallow_originオプションで追加できます。デフォルトはlocalapps。
+                            その他のオリジンはallow_originオプションで追加できます。デフォルトはlocalappsです。
                         </p>
                     </div>
                 </div>
@@ -63,7 +63,7 @@
                         value="{{ allow_origin }}"
                     />
                     <div class="form-text">
-                        許可するオリジンを指定します。複数指定する場合は、直後にスペースで区切って追加できます。
+                        許可するオリジンを指定します。複数指定する場合はスペースで区切って入力します。
                     </div>
                 </div>
 

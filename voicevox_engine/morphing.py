@@ -12,8 +12,6 @@ from .metas.metas_store import construct_lookup
 from .model import AudioQuery, MorphableTargetInfo, SpeakerNotFoundError
 from .synthesis_engine import SynthesisEngine
 
-pw = load_pyworld()
-
 
 # FIXME: ndarray type hint, https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/blob/2b64f86197573497c685c785c6e0e743f407b63e/pyworld/pyworld.pyx#L398
 @dataclass(frozen=True)
@@ -31,6 +29,7 @@ def create_morphing_parameter(
     target_wave: np.ndarray,
     fs: float,
 ) -> MorphingParameter:
+    pw = load_pyworld()
     frame_period = 1.0
     base_f0, base_time_axis = pw.harvest(base_wave, fs, frame_period=frame_period)
     base_spectrogram = pw.cheaptrick(base_wave, base_f0, base_time_axis, fs)
@@ -108,21 +107,18 @@ def is_synthesis_morphing_permitted(
         target_speaker_info.supported_features.permitted_synthesis_morphing
     )
 
-    # 禁止されている場合はFalse
     if (
         base_speaker_morphing_info == SpeakerSupportPermittedSynthesisMorphing.NOTHING
         or target_speaker_morphing_info
         == SpeakerSupportPermittedSynthesisMorphing.NOTHING
     ):
         return False
-    # 同一話者のみの場合は同一話者判定
     if (
         base_speaker_morphing_info == SpeakerSupportPermittedSynthesisMorphing.SELF_ONLY
         or target_speaker_morphing_info
         == SpeakerSupportPermittedSynthesisMorphing.SELF_ONLY
     ):
         return base_speaker_uuid == target_speaker_uuid
-    # 念のため許可されているかチェック
     return (
         base_speaker_morphing_info == SpeakerSupportPermittedSynthesisMorphing.ALL
         and target_speaker_morphing_info == SpeakerSupportPermittedSynthesisMorphing.ALL
@@ -134,11 +130,16 @@ def synthesis_morphing_parameter(
     query: AudioQuery,
     base_speaker: int,
     target_speaker: int,
-    enable_interrogative_upspeak: bool = True,
+    enable_interrogative_upspeak: bool = False,
 ) -> MorphingParameter:
+    """両話者のモノラル合成結果をWORLDで解析し、モーフィング用パラメーターを作る。
+
+    入力クエリは複製するため変更されない。WORLD解析のため、`outputStereo`の指定にかかわらず内部合成はモノラルで行う。
+    """
+
     query = deepcopy(query)
 
-    # WORLDに掛けるため合成はモノラルで行う
+    # WORLDで解析するため合成はモノラルで行う。
     query.outputStereo = False
 
     base_wave = engine.synthesis(
@@ -184,12 +185,13 @@ def synthesis_morphing(
     Raises
     -------
     ValueError
-        morph_rate ∈ [0, 1]
+        morph_rate ∉ [0, 1]
     """
 
     if morph_rate < 0.0 or morph_rate > 1.0:
         raise ValueError("morph_rateは0.0から1.0の範囲で指定してください")
 
+    pw = load_pyworld()
     morph_spectrogram = (
         morph_param.base_spectrogram * (1.0 - morph_rate)
         + morph_param.target_spectrogram * morph_rate

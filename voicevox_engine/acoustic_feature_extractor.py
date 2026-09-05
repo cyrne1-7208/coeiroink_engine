@@ -19,7 +19,7 @@ class BasePhoneme:
     num_phoneme : int
         音素リストの要素数
     space_phoneme : str
-        読点に値する音素
+        読点に相当する音素
     """
 
     phoneme_list: Sequence[str]
@@ -67,19 +67,19 @@ class BasePhoneme:
         音素継続期間を取得する
         Returns
         -------
-        duration : int
-            音素継続期間を返す
+        duration : float
+            音素継続期間（秒）を返す
         """
         return self.end - self.start
 
     @property
     def onehot(self):
-        """
-        phoneme listの長さ分の0埋め配列のうち、phoneme id番目がTrue(1)の配列を返す
+        """自身の音素IDの位置だけが`True`である、全音素数分の一次元配列を返す。
+
         Returns
         -------
-        onehot : numpu.ndarray
-            関数内で変更された配列を返す
+        onehot : numpy.ndarray
+            bool型のone-hot配列
         """
         array = numpy.zeros(self.num_phoneme, dtype=bool)
         array[self.phoneme_id] = True
@@ -174,7 +174,7 @@ class JvsPhoneme(BasePhoneme):
     num_phoneme : int
         音素リストの要素数
     space_phoneme : str
-        読点に値する音素
+        読点に相当する音素
     """
 
     phoneme_list = (
@@ -224,7 +224,7 @@ class JvsPhoneme(BasePhoneme):
     @classmethod
     def convert(cls, phonemes: list[JvsPhoneme]) -> list[JvsPhoneme]:
         """
-        最初と最後のsil(silent)をspace_phoneme(pau)に置き換え(変換)する
+        最初と最後のsil(silent)をspace_phoneme(pau)に変換する
         Parameters
         ----------
         phonemes : List[JvsPhoneme]
@@ -253,7 +253,7 @@ class OjtPhoneme(BasePhoneme):
     num_phoneme : int
         音素リストの要素数
     space_phoneme : str
-        読点に値する音素
+        読点に相当する音素
     """
 
     phoneme_list = (
@@ -309,7 +309,7 @@ class OjtPhoneme(BasePhoneme):
     @classmethod
     def convert(cls, phonemes: list[OjtPhoneme]):
         """
-        最初と最後のsil(silent)をspace_phoneme(pau)に置き換え(変換)する
+        最初と最後のsil(silent)をspace_phoneme(pau)に変換する
         Parameters
         ----------
         phonemes : List[OjtPhoneme]

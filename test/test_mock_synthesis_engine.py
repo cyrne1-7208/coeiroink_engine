@@ -180,7 +180,8 @@ class TestMockSynthesisEngine(TestCase):
                 device="opencl",
                 device_index=2,
                 opencl_platform_index=1,
-                load_all_models=True,
+                max_loaded_models=3,
+                generator_only=True,
             )
 
         audio_manager_class.assert_called_once_with(
@@ -192,7 +193,8 @@ class TestMockSynthesisEngine(TestCase):
             speaker_info_dir=Path("speaker_info").resolve(),
             cpu_num_threads=0,
             resampler="resampy",
-            load_all_models=True,
+            max_loaded_models=3,
+            generator_only=True,
         )
 
     def test_make_synthesis_engines_passes_complete_device_selection(self):
@@ -221,7 +223,7 @@ class TestMockSynthesisEngine(TestCase):
                 voicelib_dirs=[],
                 runtime_dirs=[],
                 audio_manager=audio_manager,
-                load_all_models=True,
+                max_loaded_models=None,
             )
 
         self.assertEqual(result, {"0.1.3+coeiroink.1.7.3": engine})

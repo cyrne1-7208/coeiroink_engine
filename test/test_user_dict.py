@@ -1,8 +1,11 @@
 import json
+import os
+import threading
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from pyopenjtalk import g2p
@@ -18,6 +21,7 @@ from voicevox_engine.user_dict import (
     reset_user_dict,
     rewrite_word,
     update_dict,
+    write_to_json,
 )
 
 # jsonとして保存される正しい形式の辞書データ
@@ -301,7 +305,7 @@ class TestUserDict(TestCase):
             json.dumps(valid_dict_dict_json, ensure_ascii=False), encoding="utf-8"
         )
         self.assertRaises(
-            AssertionError,
+            ValueError,
             import_user_dict,
             {
                 "aab7dda2-0d97-43c8-8cb7-3f440dab9b4e": invalid_accent_associative_rule_word
@@ -354,3 +358,213 @@ class TestUserDict(TestCase):
         )
 
         self.assertEqual(g2p(text=test_text, kana=True), success_pronunciation)
+
+    def test_write_to_json_uses_atomic_replace_in_target_directory(self):
+        user_dict_path = self.tmp_dir_path / "nested" / "user_dict.json"
+        user_dict_path.parent.mkdir()
+
+        with patch("voicevox_engine.user_dict.os.replace", wraps=os.replace) as replace:
+            write_to_json(
+                {"b1affe2a-d5f0-4050-926c-f28e0c1d9a98": import_word},
+                user_dict_path,
+            )
+
+        source_path, target_path = replace.call_args.args
+        self.assertEqual(Path(source_path).parent, user_dict_path.parent)
+        self.assertEqual(Path(target_path), user_dict_path)
+        self.assertEqual(
+            read_dict(user_dict_path),
+            {"b1affe2a-d5f0-4050-926c-f28e0c1d9a98": import_word},
+        )
+        self.assertEqual(list(user_dict_path.parent.iterdir()), [user_dict_path])
+
+    def test_concurrent_apply_keeps_both_words(self):
+        user_dict_path = self.tmp_dir_path / "concurrent.json"
+        compiled_dict_path = self.tmp_dir_path / "concurrent.dic"
+        barrier = threading.Barrier(2)
+        errors: list[BaseException] = []
+
+        def compile_dictionary(_source_path: Path, compiled_path: Path):
+            compiled_path.write_bytes(b"compiled")
+
+        def apply_dictionary(_compiled_path: Path):
+            pass
+
+        def add_word(surface: str):
+            try:
+                barrier.wait(timeout=5)
+                apply_word(
+                    surface=surface,
+                    pronunciation="テスト",
+                    accent_type=1,
+                    user_dict_path=user_dict_path,
+                    compiled_dict_path=compiled_dict_path,
+                )
+            except Exception as error:  # noqa: BLE001
+                errors.append(error)
+
+        with (
+            patch(
+                "voicevox_engine.user_dict._create_user_dict",
+                side_effect=compile_dictionary,
+            ),
+            patch(
+                "voicevox_engine.user_dict._set_user_dict",
+                side_effect=apply_dictionary,
+            ),
+        ):
+            threads = [
+                threading.Thread(target=add_word, args=("同時追加一",)),
+                threading.Thread(target=add_word, args=("同時追加二",)),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+                self.assertFalse(thread.is_alive())
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(read_dict(user_dict_path)), 2)
+
+    def test_compile_failure_keeps_previous_state(self):
+        user_dict_path = self.tmp_dir_path / "compile_failure.json"
+        compiled_dict_path = self.tmp_dir_path / "compile_failure.dic"
+        previous_json = json.dumps(valid_dict_dict_json, ensure_ascii=False).encode()
+        user_dict_path.write_bytes(previous_json)
+        compiled_dict_path.write_bytes(b"previous")
+
+        with (
+            patch(
+                "voicevox_engine.user_dict._create_user_dict",
+                side_effect=RuntimeError("compile failed"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            apply_word(
+                surface="追加語",
+                pronunciation="ツイカゴ",
+                accent_type=1,
+                user_dict_path=user_dict_path,
+                compiled_dict_path=compiled_dict_path,
+            )
+
+        self.assertEqual(user_dict_path.read_bytes(), previous_json)
+        self.assertEqual(compiled_dict_path.read_bytes(), b"previous")
+
+    def test_apply_failure_rolls_back_persistent_state(self):
+        user_dict_path = self.tmp_dir_path / "apply_failure.json"
+        compiled_dict_path = self.tmp_dir_path / "apply_failure.dic"
+        previous_json = json.dumps(valid_dict_dict_json, ensure_ascii=False).encode()
+        user_dict_path.write_bytes(previous_json)
+        compiled_dict_path.write_bytes(b"previous")
+        apply_count = 0
+
+        def compile_dictionary(_source_path: Path, compiled_path: Path):
+            compiled_path.write_bytes(b"new")
+
+        def apply_dictionary(_compiled_path: Path):
+            nonlocal apply_count
+            apply_count += 1
+            if apply_count == 1:
+                raise RuntimeError("apply failed")
+
+        with (
+            patch(
+                "voicevox_engine.user_dict._create_user_dict",
+                side_effect=compile_dictionary,
+            ),
+            patch(
+                "voicevox_engine.user_dict._set_user_dict",
+                side_effect=apply_dictionary,
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            apply_word(
+                surface="追加語",
+                pronunciation="ツイカゴ",
+                accent_type=1,
+                user_dict_path=user_dict_path,
+                compiled_dict_path=compiled_dict_path,
+            )
+
+        self.assertEqual(apply_count, 2)
+        self.assertEqual(user_dict_path.read_bytes(), previous_json)
+        self.assertEqual(compiled_dict_path.read_bytes(), b"previous")
+
+    def test_persistence_failure_rolls_back_json_and_openjtalk(self):
+        user_dict_path = self.tmp_dir_path / "json_failure.json"
+        compiled_dict_path = self.tmp_dir_path / "json_failure.dic"
+        previous_json = json.dumps(valid_dict_dict_json, ensure_ascii=False).encode()
+        user_dict_path.write_bytes(previous_json)
+        compiled_dict_path.write_bytes(b"previous")
+        real_replace = os.replace
+        failed = False
+
+        def replace_once(source: str | os.PathLike, target: str | os.PathLike):
+            nonlocal failed
+            if Path(target) == user_dict_path and not failed:
+                failed = True
+                raise OSError("json replace failed")
+            real_replace(source, target)
+
+        def compile_dictionary(_source_path: Path, compiled_path: Path):
+            compiled_path.write_bytes(b"new")
+
+        with (
+            patch(
+                "voicevox_engine.user_dict._create_user_dict",
+                side_effect=compile_dictionary,
+            ),
+            patch("voicevox_engine.user_dict._set_user_dict"),
+            patch("voicevox_engine.user_dict.os.replace", side_effect=replace_once),
+            self.assertRaises(OSError),
+        ):
+            apply_word(
+                surface="追加語",
+                pronunciation="ツイカゴ",
+                accent_type=1,
+                user_dict_path=user_dict_path,
+                compiled_dict_path=compiled_dict_path,
+            )
+
+        self.assertEqual(user_dict_path.read_bytes(), previous_json)
+        self.assertEqual(compiled_dict_path.read_bytes(), b"previous")
+
+    def test_compiled_persistence_failure_rolls_back_json_and_openjtalk(self):
+        user_dict_path = self.tmp_dir_path / "compiled_failure.json"
+        compiled_dict_path = self.tmp_dir_path / "compiled_failure.dic"
+        previous_json = json.dumps(valid_dict_dict_json, ensure_ascii=False).encode()
+        user_dict_path.write_bytes(previous_json)
+        compiled_dict_path.write_bytes(b"previous")
+        real_replace = os.replace
+        failed = False
+
+        def replace_once(source: str | os.PathLike, target: str | os.PathLike):
+            nonlocal failed
+            if Path(target) == compiled_dict_path and not failed:
+                failed = True
+                raise OSError("compiled replace failed")
+            real_replace(source, target)
+
+        def compile_dictionary(_source_path: Path, compiled_path: Path):
+            compiled_path.write_bytes(b"new")
+
+        with (
+            patch(
+                "voicevox_engine.user_dict._create_user_dict",
+                side_effect=compile_dictionary,
+            ),
+            patch("voicevox_engine.user_dict._set_user_dict"),
+            patch("voicevox_engine.user_dict.os.replace", side_effect=replace_once),
+            self.assertRaises(OSError),
+        ):
+            apply_word(
+                surface="追加語",
+                pronunciation="ツイカゴ",
+                accent_type=1,
+                user_dict_path=user_dict_path,
+                compiled_dict_path=compiled_dict_path,
+            )
+
+        self.assertEqual(user_dict_path.read_bytes(), previous_json)
+        self.assertEqual(compiled_dict_path.read_bytes(), b"previous")

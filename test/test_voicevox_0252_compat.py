@@ -3,6 +3,7 @@ import threading
 from pathlib import Path
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 
 import run as engine_run
@@ -162,6 +163,33 @@ def test_audio_query_matches_voicevox_0252_defaults_and_legacy_body(tmp_path: Pa
     assert response.content.startswith(b"RIFF")
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("outputSamplingRate", 384_001),
+        ("prePhonemeLength", 60.001),
+        ("postPhonemeLength", 60.001),
+        ("pauseLength", 60.001),
+    ],
+)
+def test_voicevox_audio_query_rejects_allocation_heavy_numeric_values(
+    tmp_path: Path, field: str, value: float
+):
+    client, audio_manager = create_test_client(tmp_path)
+    query = _audio_query(client)
+    audio_manager.synthesis.reset_mock()
+    query[field] = value
+
+    response = client.post(
+        "/voicevox/synthesis",
+        params={"speaker": STYLE_ID},
+        json=query,
+    )
+
+    assert response.status_code == 422
+    audio_manager.synthesis.assert_not_called()
+
+
 def test_katakana_english_parameter_changes_only_unknown_english_reading(
     tmp_path: Path,
 ):
@@ -304,6 +332,36 @@ def test_multi_synthesis_removes_partial_zip_after_failure(tmp_path: Path, monke
     assert list(temporary_dir.iterdir()) == []
 
 
+def test_wave_response_removes_temporary_file_after_write_failure(
+    tmp_path: Path, monkeypatch
+):
+    temporary_dir = tmp_path / "wave-response-temp"
+    temporary_dir.mkdir()
+    original_named_temporary_file = voicevox_compat_router.NamedTemporaryFile
+
+    def temporary_file_in_test_dir(**kwargs):
+        return original_named_temporary_file(dir=temporary_dir, **kwargs)
+
+    def fail_write(*_args, **_kwargs):
+        raise RuntimeError("write failed")
+
+    monkeypatch.setattr(
+        voicevox_compat_router, "NamedTemporaryFile", temporary_file_in_test_dir
+    )
+    monkeypatch.setattr(
+        voicevox_compat_router.soundfile,
+        "write",
+        fail_write,
+    )
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        voicevox_compat_router._wave_file_response(
+            np.zeros(8, dtype=np.float32), 16_000
+        )
+
+    assert list(temporary_dir.iterdir()) == []
+
+
 def test_disabled_cancellable_synthesis_returns_explicit_404(tmp_path: Path):
     client, _ = create_test_client(tmp_path)
     query = _audio_query(client)
@@ -353,6 +411,7 @@ def test_cancellable_disconnection_monitor_follows_app_lifespan(tmp_path: Path):
         def __init__(self):
             self.started = threading.Event()
             self.stopped = threading.Event()
+            self.shutdown = threading.Event()
 
         async def catch_disconnection(self):
             self.started.set()
@@ -360,6 +419,9 @@ def test_cancellable_disconnection_monitor_follows_app_lifespan(tmp_path: Path):
                 await asyncio.Event().wait()
             finally:
                 self.stopped.set()
+
+        async def shutdown_async(self):
+            self.shutdown.set()
 
     cancellable_engine = MonitoringCancellableEngine()
     client, _ = create_test_client(
@@ -371,6 +433,7 @@ def test_cancellable_disconnection_monitor_follows_app_lifespan(tmp_path: Path):
         assert cancellable_engine.started.wait(timeout=1)
 
     assert cancellable_engine.stopped.wait(timeout=1)
+    assert cancellable_engine.shutdown.wait(timeout=1)
 
 
 @pytest.mark.parametrize(
@@ -465,6 +528,29 @@ def test_manifest_disabled_morphing_returns_501(tmp_path: Path):
     audio_manager.synthesis.assert_not_called()
 
 
+def test_manifest_disabled_interrogative_upspeak_is_not_enabled_implicitly(
+    tmp_path: Path,
+):
+    client, audio_manager = create_test_client(tmp_path)
+    query = _audio_query(client)
+    audio_manager.synthesis.reset_mock()
+
+    default_response = client.post(
+        "/voicevox/synthesis",
+        params={"speaker": STYLE_ID},
+        json=query,
+    )
+    explicit_response = client.post(
+        "/voicevox/synthesis",
+        params={"speaker": STYLE_ID, "enable_interrogative_upspeak": True},
+        json=query,
+    )
+
+    assert default_response.status_code == 200
+    assert explicit_response.status_code == 501
+    assert audio_manager.synthesis.call_count == 1
+
+
 def test_validate_kana_matches_voicevox_0252_contract(tmp_path: Path):
     client, _ = create_test_client(tmp_path)
 
@@ -548,6 +634,23 @@ def test_disable_mutable_api_returns_403_before_mutation(
     client, _ = create_test_client(tmp_path, disable_mutable_api=True)
 
     response = client.request(method, path)
+
+    assert response.status_code == 403
+    assert "無効化" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/set_dictionary",
+        "/v1/set_default_processing_algorithm",
+        "/v1/set_default_trim_buffer",
+    ],
+)
+def test_disable_mutable_api_also_guards_native_routes(tmp_path: Path, path: str):
+    client, _ = create_test_client(tmp_path, disable_mutable_api=True)
+
+    response = client.post(path)
 
     assert response.status_code == 403
     assert "無効化" in response.json()["detail"]

@@ -7,13 +7,14 @@ from itertools import chain
 import pyopenjtalk
 
 from .katakana_english import text_to_full_context_labels
+from .user_dict import mutex_openjtalk_dict
 
 
 @dataclass
 class Phoneme:
     """
     音素(母音・子音)クラス、音素の元となるcontextを保持する
-    音素には、母音や子音以外にも無音(silent/pause)も含まれる
+    音素には、母音や子音のほかに無音(silent/pause)も含まれる
 
     Attributes
     ----------
@@ -38,8 +39,7 @@ class Phoneme:
             Phonemeクラスを返す
         """
 
-        # フルコンテキストラベルの仕様は、
-        # http://hts.sp.nitech.ac.jp/?Download の HTS-2.3のJapanese tar.bz2 (126 MB)をダウンロードして、data/lab_format.pdfを見るとリストが見つかります。
+        # フルコンテキストラベルの仕様は、http://hts.sp.nitech.ac.jp/?Download のHTS-2.3 Japanese tar.bz2に含まれるdata/lab_format.pdfを参照。
         contexts = re.search(
             r"^(?P<p1>.+?)\^(?P<p2>.+?)\-(?P<p3>.+?)\+(?P<p4>.+?)\=(?P<p5>.+?)"
             r"/A\:(?P<a1>.+?)\+(?P<a2>.+?)\+(?P<a3>.+?)"
@@ -63,7 +63,7 @@ class Phoneme:
         pyopenjtalk.extract_fullcontextで得られるラベルと等しい
         Returns
         -------
-        lebel: str
+        label: str
             ラベルを返す
         """
         return (
@@ -97,7 +97,7 @@ class Phoneme:
         音素がポーズ(無音、silent/pause)であるかを返す
         Returns
         -------
-        is_pose : bool
+        is_pause : bool
             音素がポーズ(無音、silent/pause)であるか(True)否か(False)
         """
         return self.contexts["f1"] == "xx"
@@ -171,7 +171,7 @@ class AccentPhrase:
     Attributes
     ----------
     moras : List[Mora]
-        音韻のリスト
+        モーラのリスト
     accent : int
         アクセント
     """
@@ -264,17 +264,17 @@ class AccentPhrase:
 
     def merge(self, accent_phrase: AccentPhrase):
         """
-        AccentPhraseを合成する
-        (このクラスが保持するmorasの後ろに、引数として渡されたAccentPhraseのmorasを合成する)
+        AccentPhraseを結合する
+        (このクラスが保持するmorasの後ろに、引数として渡されたAccentPhraseのmorasを結合する)
         Parameters
         ----------
         accent_phrase : AccentPhrase
-            合成したいAccentPhraseを渡す
+            結合対象のAccentPhrase
 
         Returns
         -------
         accent_phrase : AccentPhrase
-            合成されたAccentPhraseを返す
+            結合後のAccentPhrase
         """
         return AccentPhrase(
             moras=self.moras + accent_phrase.moras,
@@ -287,7 +287,7 @@ class AccentPhrase:
 class BreathGroup:
     """
     発声の区切りクラス
-    アクセントの異なるアクセント句を複数保持する
+    呼気段落（ポーズ間の区間）に含まれる複数のアクセント句を保持する
     Attributes
     ----------
     accent_phrases : List[AccentPhrase]
@@ -525,10 +525,12 @@ class Utterance:
 def extract_full_context_label(text: str, enable_katakana_english: bool = False):
     """通常はCOEIROINK従来解析を保ち、指定時だけ未知英単語の読みを補う。"""
 
-    labels = (
-        text_to_full_context_labels(text)
-        if enable_katakana_english
-        else pyopenjtalk.extract_fullcontext(text)
-    )
+    # 辞書の再構築・切替とOpen JTalk解析を同時に走らせない。
+    with mutex_openjtalk_dict:
+        labels = (
+            text_to_full_context_labels(text)
+            if enable_katakana_english
+            else pyopenjtalk.extract_fullcontext(text)
+        )
     phonemes = [Phoneme.from_label(label=label) for label in labels]
     return Utterance.from_phonemes(phonemes)

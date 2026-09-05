@@ -1,6 +1,6 @@
 import importlib
 import json
-import shutil
+import os
 import threading
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 from .model import UserDictWord, WordTypes
 from .part_of_speech_data import MAX_PRIORITY, MIN_PRIORITY, part_of_speech_data
-from .utility import delete_file, engine_root, get_save_dir, mutex_wrapper
+from .utility import engine_root, get_save_dir
 
 root_dir = engine_root()
 save_dir = get_save_dir()
@@ -25,8 +25,10 @@ user_dict_path = save_dir / "user_dict.json"
 compiled_dict_path = save_dir / "user.dic"
 
 
-mutex_user_dict = threading.Lock()
-mutex_openjtalk_dict = threading.Lock()
+# 更新処理はOpen JTalkの切替を先にロックし、その内側でJSONのread-modify-writeを行う。
+# RLockにして公開関数の組み合わせからも同じロックを安全に再利用できるようにする。
+mutex_user_dict = threading.RLock()
+mutex_openjtalk_dict = threading.RLock()
 
 
 def _create_user_dict(source_path: Path, compiled_path: Path) -> None:
@@ -39,8 +41,7 @@ def _set_user_dict(compiled_path: Path) -> None:
     pyopenjtalk.update_global_jtalk_with_user_dict(str(compiled_path))
 
 
-def reset_user_dict() -> None:
-    """ユーザー辞書更新後のpyopenjtalkを既定辞書へ戻す。"""
+def _reset_user_dict() -> None:
     if hasattr(pyopenjtalk, "unset_user_dict"):
         pyopenjtalk.unset_user_dict()
     else:
@@ -48,8 +49,60 @@ def reset_user_dict() -> None:
         importlib.reload(pyopenjtalk)
 
 
-@mutex_wrapper(mutex_user_dict)
-def write_to_json(user_dict: dict[str, UserDictWord], user_dict_path: Path):
+def reset_user_dict() -> None:
+    """ユーザー辞書更新後のpyopenjtalkを既定辞書へ戻す。"""
+    with mutex_openjtalk_dict:
+        _reset_user_dict()
+
+
+def _remove_file(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _write_json_atomic(user_dict_json: str, user_dict_path: Path) -> None:
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            encoding="utf-8",
+            mode="w",
+            delete=False,
+            dir=user_dict_path.parent,
+            prefix=f".{user_dict_path.name}.",
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(user_dict_json)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        # 同じディレクトリ内で置換するため、読み手には旧JSONか新JSONだけが見える。
+        os.replace(temporary_path, user_dict_path)
+    finally:
+        if temporary_path is not None:
+            _remove_file(temporary_path)
+
+
+def _write_bytes_atomic(content: bytes, path: Path) -> None:
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="wb",
+            delete=False,
+            dir=path.parent,
+            prefix=f".{path.name}.",
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            _remove_file(temporary_path)
+
+
+def _serialize_user_dict(user_dict: dict[str, UserDictWord]) -> str:
     converted_user_dict = {}
     for word_uuid, word in user_dict.items():
         word_dict = word.model_dump()
@@ -58,38 +111,94 @@ def write_to_json(user_dict: dict[str, UserDictWord], user_dict_path: Path):
         )
         del word_dict["priority"]
         converted_user_dict[word_uuid] = word_dict
-    # 予めjsonに変換できることを確かめる
-    user_dict_json = json.dumps(converted_user_dict, ensure_ascii=False)
-    user_dict_path.write_text(user_dict_json, encoding="utf-8")
+    return json.dumps(converted_user_dict, ensure_ascii=False)
 
 
-@mutex_wrapper(mutex_openjtalk_dict)
-def update_dict(
-    default_dict_path: Path = default_dict_path,
-    user_dict_path: Path = user_dict_path,
-    compiled_dict_path: Path = compiled_dict_path,
-):
-    """既定辞書とユーザー辞書を一時領域でコンパイルし、成功後に実運用辞書へ置換して適用する。"""
+def write_to_json(user_dict: dict[str, UserDictWord], user_dict_path: Path) -> None:
+    with mutex_openjtalk_dict, mutex_user_dict:
+        _write_json_atomic(
+            _serialize_user_dict(user_dict),
+            Path(user_dict_path),
+        )
 
+
+def _read_dict(user_dict_path: Path) -> dict[str, UserDictWord]:
+    if not user_dict_path.is_file():
+        return {}
+    with user_dict_path.open(encoding="utf-8") as f:
+        result = {}
+        for word_uuid, word in json.load(f).items():
+            # 0.12以前の辞書は固有名詞のcontext_idがハードコードされており保存データに含まれないため、cost2priority変換用に固有名詞のcontext_idを補完する。
+            if word.get("context_id") is None:
+                word["context_id"] = part_of_speech_data[
+                    WordTypes.PROPER_NOUN
+                ].context_id
+            word["priority"] = cost2priority(word["context_id"], word["cost"])
+            del word["cost"]
+            result[str(UUID(word_uuid))] = UserDictWord(**word)
+
+    return result
+
+
+def read_dict(user_dict_path: Path = user_dict_path) -> dict[str, UserDictWord]:
+    with mutex_user_dict:
+        return _read_dict(Path(user_dict_path))
+
+
+def _restore_openjtalk_dict(compiled_dict_path: Path, had_compiled_dict: bool) -> None:
+    if had_compiled_dict:
+        _set_user_dict(compiled_dict_path.resolve(strict=True))
+    else:
+        _reset_user_dict()
+
+
+def _restore_user_dict_json(
+    user_dict_path: Path, previous_user_dict_json: bytes | None
+) -> None:
+    if previous_user_dict_json is None:
+        _remove_file(user_dict_path)
+    else:
+        _write_bytes_atomic(previous_user_dict_json, user_dict_path)
+
+
+def _rebuild_and_apply(
+    user_dict: dict[str, UserDictWord],
+    default_dict_path: Path,
+    user_dict_path: Path,
+    compiled_dict_path: Path,
+    persist_json: bool,
+) -> None:
+    """候補辞書をコンパイルし、Open JTalk・JSON・コンパイル済み辞書を一貫して更新する。
+
+    いずれかの適用に失敗した場合は、永続データとOpen JTalkを更新前の状態へ戻す。
+    """
+    previous_user_dict_json = (
+        user_dict_path.read_bytes()
+        if persist_json and user_dict_path.is_file()
+        else None
+    )
+    had_compiled_dict = compiled_dict_path.is_file()
     temporary_source_path: Path | None = None
     temporary_compiled_path: Path | None = None
     try:
         with NamedTemporaryFile(
-            encoding="utf-8", mode="w", delete=False, dir=save_dir
-        ) as f:
-            temporary_source_path = Path(f.name).resolve()
+            encoding="utf-8",
+            mode="w",
+            delete=False,
+            dir=compiled_dict_path.parent,
+            prefix=".coeiroink-user-dict-source-",
+        ) as source_file:
+            temporary_source_path = Path(source_file.name)
             if not default_dict_path.is_file():
                 raise FileNotFoundError(
                     f"default dictionary was not found: {default_dict_path}"
                 )
             default_dict = default_dict_path.read_text(encoding="utf-8")
-            if default_dict == default_dict.rstrip():
+            if not default_dict.endswith("\n"):
                 default_dict += "\n"
-            f.write(default_dict)
-            user_dict = read_dict(user_dict_path=user_dict_path)
-            for word_uuid in user_dict:
-                word = user_dict[word_uuid]
-                f.write(
+            source_file.write(default_dict)
+            for word in user_dict.values():
+                source_file.write(
                     (
                         "{surface},{context_id},{context_id},{cost},{part_of_speech},"
                         + "{part_of_speech_detail_1},{part_of_speech_detail_2},"
@@ -114,46 +223,86 @@ def update_dict(
                         accent_associative_rule=word.accent_associative_rule,
                     )
                 )
-        with NamedTemporaryFile(delete=False, dir=save_dir) as compiled_file:
-            temporary_compiled_path = Path(compiled_file.name).resolve()
+        with NamedTemporaryFile(
+            mode="wb",
+            delete=False,
+            dir=compiled_dict_path.parent,
+            prefix=".coeiroink-user-dict-compiled-",
+        ) as compiled_file:
+            temporary_compiled_path = Path(compiled_file.name)
         _create_user_dict(temporary_source_path, temporary_compiled_path)
-        if temporary_source_path.is_file():
-            delete_file(str(temporary_source_path))
         if not temporary_compiled_path.is_file():
             raise RuntimeError("辞書のコンパイル時にエラーが発生しました。")
-        reset_user_dict()
+
         try:
-            # 保存先が別ドライブでも更新できるよう、同一ファイルシステムを前提とするPath.replaceは使わない。
-            shutil.move(temporary_compiled_path, compiled_dict_path)
-        finally:
-            if compiled_dict_path.is_file():
-                _set_user_dict(compiled_dict_path.resolve(strict=True))
+            # Open JTalk解析と共有するロック下で候補辞書を先に適用し、使用可能と確認できた辞書だけをJSONと本番辞書へ反映する。
+            _set_user_dict(temporary_compiled_path.resolve(strict=True))
+            if persist_json:
+                _write_json_atomic(
+                    _serialize_user_dict(user_dict),
+                    user_dict_path,
+                )
+            os.replace(temporary_compiled_path, compiled_dict_path)
+        except Exception as update_error:
+            rollback_errors: list[Exception] = []
+            if persist_json:
+                try:
+                    _restore_user_dict_json(user_dict_path, previous_user_dict_json)
+                except Exception as rollback_error:  # noqa: BLE001
+                    rollback_errors.append(rollback_error)
+            try:
+                _restore_openjtalk_dict(compiled_dict_path, had_compiled_dict)
+            except Exception as rollback_error:  # noqa: BLE001
+                rollback_errors.append(rollback_error)
+            if rollback_errors:
+                raise RuntimeError(
+                    "辞書更新に失敗し、更新前の状態へ復元できませんでした。"
+                ) from ExceptionGroup(
+                    "辞書更新とロールバックで発生したエラー",
+                    [update_error, *rollback_errors],
+                )
+            raise
     finally:
-        if temporary_source_path is not None and temporary_source_path.exists():
-            delete_file(str(temporary_source_path))
-        if temporary_compiled_path is not None and temporary_compiled_path.exists():
-            delete_file(str(temporary_compiled_path))
+        if temporary_source_path is not None:
+            _remove_file(temporary_source_path)
+        if temporary_compiled_path is not None:
+            _remove_file(temporary_compiled_path)
 
 
-@mutex_wrapper(mutex_user_dict)
-def read_dict(user_dict_path: Path = user_dict_path) -> dict[str, UserDictWord]:
-    if not user_dict_path.is_file():
-        return {}
-    with user_dict_path.open(encoding="utf-8") as f:
-        result = {}
-        for word_uuid, word in json.load(f).items():
-            # cost2priorityで変換を行う際にcontext_idが必要となるが、
-            # 0.12以前の辞書は、context_idがハードコーディングされていたためにユーザー辞書内に保管されていない
-            # ハードコーディングされていたcontext_idは固有名詞を意味するものなので、固有名詞のcontext_idを補完する
-            if word.get("context_id") is None:
-                word["context_id"] = part_of_speech_data[
-                    WordTypes.PROPER_NOUN
-                ].context_id
-            word["priority"] = cost2priority(word["context_id"], word["cost"])
-            del word["cost"]
-            result[str(UUID(word_uuid))] = UserDictWord(**word)
+def update_dict(
+    default_dict_path: Path = default_dict_path,
+    user_dict_path: Path = user_dict_path,
+    compiled_dict_path: Path = compiled_dict_path,
+) -> None:
+    """既定辞書とユーザー辞書を再構築し、成功後にOpen JTalkへ適用する。"""
+    with mutex_openjtalk_dict, mutex_user_dict:
+        user_dict_path = Path(user_dict_path)
+        _rebuild_and_apply(
+            _read_dict(user_dict_path),
+            Path(default_dict_path),
+            user_dict_path,
+            Path(compiled_dict_path),
+            persist_json=False,
+        )
 
-    return result
+
+def replace_user_dict(
+    user_dict: dict[str, UserDictWord],
+    *,
+    default_dict_path: Path = default_dict_path,
+    user_dict_path: Path = user_dict_path,
+    compiled_dict_path: Path = compiled_dict_path,
+) -> None:
+    """辞書全体の保存・コンパイル・適用を一つの更新処理として行う。"""
+
+    with mutex_openjtalk_dict, mutex_user_dict:
+        _rebuild_and_apply(
+            user_dict,
+            Path(default_dict_path),
+            Path(user_dict_path),
+            Path(compiled_dict_path),
+            persist_json=True,
+        )
 
 
 def create_word(
@@ -206,11 +355,18 @@ def apply_word(
         word_type=word_type,
         priority=priority,
     )
-    user_dict = read_dict(user_dict_path=user_dict_path)
-    word_uuid = str(uuid4())
-    user_dict[word_uuid] = word
-    write_to_json(user_dict, user_dict_path)
-    update_dict(user_dict_path=user_dict_path, compiled_dict_path=compiled_dict_path)
+    with mutex_openjtalk_dict, mutex_user_dict:
+        user_dict_path = Path(user_dict_path)
+        user_dict = _read_dict(user_dict_path)
+        word_uuid = str(uuid4())
+        user_dict[word_uuid] = word
+        _rebuild_and_apply(
+            user_dict,
+            default_dict_path,
+            user_dict_path,
+            Path(compiled_dict_path),
+            persist_json=True,
+        )
     return word_uuid
 
 
@@ -231,14 +387,22 @@ def rewrite_word(
         word_type=word_type,
         priority=priority,
     )
-    user_dict = read_dict(user_dict_path=user_dict_path)
-    if word_uuid not in user_dict:
-        raise HTTPException(
-            status_code=422, detail="UUIDに該当するワードが見つかりませんでした"
+    with mutex_openjtalk_dict, mutex_user_dict:
+        user_dict_path = Path(user_dict_path)
+        user_dict = _read_dict(user_dict_path)
+        if word_uuid not in user_dict:
+            raise HTTPException(
+                status_code=422,
+                detail="指定されたUUIDに該当する単語が見つかりませんでした",
+            )
+        user_dict[word_uuid] = word
+        _rebuild_and_apply(
+            user_dict,
+            default_dict_path,
+            user_dict_path,
+            Path(compiled_dict_path),
+            persist_json=True,
         )
-    user_dict[word_uuid] = word
-    write_to_json(user_dict, user_dict_path)
-    update_dict(user_dict_path=user_dict_path, compiled_dict_path=compiled_dict_path)
 
 
 def delete_word(
@@ -246,14 +410,22 @@ def delete_word(
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
 ):
-    user_dict = read_dict(user_dict_path=user_dict_path)
-    if word_uuid not in user_dict:
-        raise HTTPException(
-            status_code=422, detail="IDに該当するワードが見つかりませんでした"
+    with mutex_openjtalk_dict, mutex_user_dict:
+        user_dict_path = Path(user_dict_path)
+        user_dict = _read_dict(user_dict_path)
+        if word_uuid not in user_dict:
+            raise HTTPException(
+                status_code=422,
+                detail="指定されたUUIDに該当する単語が見つかりませんでした",
+            )
+        del user_dict[word_uuid]
+        _rebuild_and_apply(
+            user_dict,
+            default_dict_path,
+            user_dict_path,
+            Path(compiled_dict_path),
+            persist_json=True,
         )
-    del user_dict[word_uuid]
-    write_to_json(user_dict, user_dict_path)
-    update_dict(user_dict_path=user_dict_path, compiled_dict_path=compiled_dict_path)
 
 
 def import_user_dict(
@@ -263,46 +435,53 @@ def import_user_dict(
     default_dict_path: Path = default_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
 ):
-    # 念のため型チェックを行う
+    # インポートデータはassertではなく、実行設定に依存しない例外で検証する。
     for word_uuid, word in dict_data.items():
-        UUID(word_uuid)
-        assert type(word) is UserDictWord
+        try:
+            UUID(word_uuid)
+        except (AttributeError, TypeError, ValueError) as error:
+            raise ValueError(f"UUIDが不正です: {word_uuid}") from error
+        if not isinstance(word, UserDictWord):
+            raise TypeError("ユーザー辞書の単語はUserDictWordである必要があります")
         for pos_detail in part_of_speech_data.values():
             if word.context_id == pos_detail.context_id:
-                assert word.part_of_speech == pos_detail.part_of_speech
-                assert (
-                    word.part_of_speech_detail_1 == pos_detail.part_of_speech_detail_1
-                )
-                assert (
-                    word.part_of_speech_detail_2 == pos_detail.part_of_speech_detail_2
-                )
-                assert (
-                    word.part_of_speech_detail_3 == pos_detail.part_of_speech_detail_3
-                )
-                assert (
-                    word.accent_associative_rule in pos_detail.accent_associative_rules
-                )
+                if word.part_of_speech != pos_detail.part_of_speech:
+                    raise ValueError("品詞が文脈IDと一致しません")
+                if word.part_of_speech_detail_1 != pos_detail.part_of_speech_detail_1:
+                    raise ValueError("品詞細分類1が文脈IDと一致しません")
+                if word.part_of_speech_detail_2 != pos_detail.part_of_speech_detail_2:
+                    raise ValueError("品詞細分類2が文脈IDと一致しません")
+                if word.part_of_speech_detail_3 != pos_detail.part_of_speech_detail_3:
+                    raise ValueError("品詞細分類3が文脈IDと一致しません")
+                if (
+                    word.accent_associative_rule
+                    not in pos_detail.accent_associative_rules
+                ):
+                    raise ValueError("アクセント結合規則が不正です")
                 break
         else:
             raise ValueError("対応していない品詞です")
-    old_dict = read_dict(user_dict_path=user_dict_path)
-    if override:
-        new_dict = {**old_dict, **dict_data}
-    else:
-        new_dict = {**dict_data, **old_dict}
-    write_to_json(user_dict=new_dict, user_dict_path=user_dict_path)
-    update_dict(
-        default_dict_path=default_dict_path,
-        user_dict_path=user_dict_path,
-        compiled_dict_path=compiled_dict_path,
-    )
+    with mutex_openjtalk_dict, mutex_user_dict:
+        user_dict_path = Path(user_dict_path)
+        old_dict = _read_dict(user_dict_path)
+        if override:
+            new_dict = {**old_dict, **dict_data}
+        else:
+            new_dict = {**dict_data, **old_dict}
+        _rebuild_and_apply(
+            new_dict,
+            Path(default_dict_path),
+            user_dict_path,
+            Path(compiled_dict_path),
+            persist_json=True,
+        )
 
 
 def search_cost_candidates(context_id: int) -> list[int]:
     for value in part_of_speech_data.values():
         if value.context_id == context_id:
             return value.cost_candidates
-    raise HTTPException(status_code=422, detail="品詞IDが不正です")
+    raise HTTPException(status_code=422, detail="文脈IDが不正です")
 
 
 def cost2priority(context_id: int, cost: int) -> int:

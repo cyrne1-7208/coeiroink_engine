@@ -17,11 +17,7 @@ __all__ = ["SynthesisEngineBase", "full_context_label_moras_to_moras", "mora_to_
 def adjust_interrogative_accent_phrases(
     accent_phrases: list[AccentPhrase],
 ) -> list[AccentPhrase]:
-    """
-    enable_interrogative_upspeakが有効になっていて与えられたaccent_phrasesに疑問系のものがあった場合、
-    各accent_phraseの末尾にある疑問系発音用のMoraに対して直前のMoraより少し音を高くすることで疑問文ぽくする
-    NOTE: リファクタリング時に適切な場所へ移動させること
-    """
+    """疑問文に指定されたアクセント句の末尾へ、音高を上げた疑問形発音用モーラを追加する。"""
     return [
         AccentPhrase(
             moras=adjust_interrogative_moras(accent_phrase),
@@ -46,8 +42,13 @@ def make_interrogative_mora(last_mora: Mora) -> Mora:
     fix_vowel_length = 0.15
     adjust_pitch = 0.3
     max_pitch = 6.5
+    vowel_key = last_mora.vowel
+    if vowel_key not in openjtalk_mora2text:
+        vowel_key = vowel_key.lower()
+    if vowel_key not in openjtalk_mora2text:
+        raise ValueError(f"unsupported interrogative mora vowel: {last_mora.vowel!r}")
     return Mora(
-        text=openjtalk_mora2text[last_mora.vowel],
+        text=openjtalk_mora2text[vowel_key],
         consonant=None,
         consonant_length=None,
         vowel=last_mora.vowel,
@@ -57,7 +58,7 @@ def make_interrogative_mora(last_mora: Mora) -> Mora:
 
 
 class SynthesisEngineBase(metaclass=ABCMeta):
-    # FIXME: jsonではなくModelを返すようにする
+    # FIXME: JSON文字列ではなくモデルを返すようにする。
     @property
     @abstractmethod
     def speakers(self) -> str:
@@ -77,7 +78,7 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         speaker_id : int
             話者ID
         skip_reinit : bool
-            True の場合, 既に初期化済みの話者の再初期化をスキップします
+            Trueの場合、既に初期化済みの話者の再初期化をスキップする
         """
         return
 
@@ -138,6 +139,8 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         accent_phrases: list[AccentPhrase],
         speaker_id: int,
     ) -> list[AccentPhrase]:
+        """音素長、モーラ音高の順に推論結果をアクセント句へ反映する。"""
+
         return self.replace_mora_pitch(
             accent_phrases=self.replace_phoneme_length(
                 accent_phrases=accent_phrases,
@@ -166,11 +169,10 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         self,
         query: AudioQuery,
         speaker_id: int,
-        enable_interrogative_upspeak: bool = True,
+        enable_interrogative_upspeak: bool = False,
     ) -> np.ndarray:
         """
-        音声合成クエリ内の疑問文指定されたMoraを変形した後、
-        継承先における実装`_synthesis_impl`を使い音声合成を行う
+        音声合成クエリ内で疑問文に指定されたMoraを変形した後、継承先の`_synthesis_impl`を使って音声合成を行う
         Parameters
         ----------
         query : AudioQuery
@@ -178,7 +180,7 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         speaker_id : int
             話者ID
         enable_interrogative_upspeak : bool
-            疑問系のテキストの語尾を自動調整する機能を有効にするか
+            疑問形のテキストの語尾を自動調整する機能を有効にするか
         Returns
         -------
         wave : numpy.ndarray

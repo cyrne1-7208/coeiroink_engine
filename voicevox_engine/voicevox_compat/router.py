@@ -81,6 +81,30 @@ from voicevox_engine.voicevox_compat.unavailable_apis import add_unavailable_rou
 USER_DICTIONARY_ERRORS = (OSError, RuntimeError, TypeError, ValueError, LookupError)
 
 
+def _wave_file_response(wave, sampling_rate: int) -> FileResponse:
+    """WAV一時ファイルを応答へ移譲し、移譲前の失敗時だけ直ちに削除する。"""
+
+    path: str | None = None
+    try:
+        with NamedTemporaryFile(delete=False) as file:
+            path = file.name
+            soundfile.write(
+                file=file,
+                data=wave,
+                samplerate=sampling_rate,
+                format="WAV",
+            )
+        return FileResponse(
+            path,
+            media_type="audio/wav",
+            background=BackgroundTask(delete_file, path),
+        )
+    except Exception:
+        if path is not None:
+            delete_file(path)
+        raise
+
+
 @dataclass(slots=True)
 class VoicevoxRouterDependencies:
     """互換ルート群が共有するEngineの既存マネージャー。"""
@@ -257,7 +281,7 @@ def _add_tts_routes(
         summary="テキストからアクセント句を得る",
         responses={
             400: {
-                "description": "読み仮名のパースに失敗",
+                "description": "読み仮名のパースに失敗した場合",
                 "model": ParseKanaBadRequest,
             }
         },
@@ -303,6 +327,7 @@ def _add_tts_routes(
         response_model=list[AccentPhrase],
         tags=["クエリ編集"],
         summary="アクセント句から音高・音素長を得る",
+        description="Engineマニフェストで必要な調整機能が未対応の場合は501を返します。",
     )
     def mora_data(
         accent_phrases: list[AccentPhrase],
@@ -320,6 +345,7 @@ def _add_tts_routes(
         response_model=list[AccentPhrase],
         tags=["クエリ編集"],
         summary="アクセント句から音素長を得る",
+        description="Engineマニフェストで音素長調整が未対応の場合は501を返します。",
     )
     def mora_length(
         accent_phrases: list[AccentPhrase],
@@ -338,6 +364,7 @@ def _add_tts_routes(
         response_model=list[AccentPhrase],
         tags=["クエリ編集"],
         summary="アクセント句から音高を得る",
+        description="Engineマニフェストでモーラ音高調整が未対応の場合は501を返します。",
     )
     def mora_pitch(
         accent_phrases: list[AccentPhrase],
@@ -368,11 +395,13 @@ def _add_tts_routes(
         query: AudioQuery,
         speaker: int,
         enable_interrogative_upspeak: bool = Query(
-            default=True,
-            description="疑問系のテキストが与えられたら語尾を自動調整する",
+            default=False,
+            description="疑問形のテキストが与えられたら語尾を自動調整する",
         ),
         core_version: str | None = None,
     ):
+        if enable_interrogative_upspeak:
+            require_supported_feature("interrogative_upspeak", "疑問文の自動調整機能")
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
         wave = engine.synthesis(
@@ -381,16 +410,7 @@ def _add_tts_routes(
             enable_interrogative_upspeak=enable_interrogative_upspeak,
         )
 
-        with NamedTemporaryFile(delete=False) as f:
-            soundfile.write(
-                file=f, data=wave, samplerate=query.outputSamplingRate, format="WAV"
-            )
-
-        return FileResponse(
-            f.name,
-            media_type="audio/wav",
-            background=BackgroundTask(delete_file, f.name),
-        )
+        return _wave_file_response(wave, query.outputSamplingRate)
 
     @voicevox_router.post(
         "/cancellable_synthesis",
@@ -410,11 +430,13 @@ def _add_tts_routes(
         speaker: int,
         request: Request,
         enable_interrogative_upspeak: bool = Query(
-            default=True,
-            description="疑問系のテキストが与えられたら語尾を自動調整する",
+            default=False,
+            description="疑問形のテキストが与えられたら語尾を自動調整する",
         ),
         core_version: str | None = None,
     ):
+        if enable_interrogative_upspeak:
+            require_supported_feature("interrogative_upspeak", "疑問文の自動調整機能")
         ensure_legacy_style_available(speaker)
         if cancellable_engine is None:
             raise HTTPException(
@@ -431,11 +453,15 @@ def _add_tts_routes(
         if f_name == "":
             raise HTTPException(status_code=422, detail="不明なバージョンです")
 
-        return FileResponse(
-            f_name,
-            media_type="audio/wav",
-            background=BackgroundTask(delete_file, f_name),
-        )
+        try:
+            return FileResponse(
+                f_name,
+                media_type="audio/wav",
+                background=BackgroundTask(delete_file, f_name),
+            )
+        except Exception:
+            delete_file(f_name)
+            raise
 
     @voicevox_router.post(
         "/multi_synthesis",
@@ -456,13 +482,15 @@ def _add_tts_routes(
         queries: list[AudioQuery],
         speaker: int,
         enable_interrogative_upspeak: bool = Query(
-            default=True,
-            description="疑問系のテキストが与えられたら語尾を自動調整する",
+            default=False,
+            description="疑問形のテキストが与えられたら語尾を自動調整する",
         ),
         core_version: str | None = None,
     ):
         """同一話者・サンプリングレートの複数クエリを順に合成し、一時ZIPとして応答する。"""
 
+        if enable_interrogative_upspeak:
+            require_supported_feature("interrogative_upspeak", "疑問文の自動調整機能")
         if not queries:
             raise HTTPException(
                 status_code=422,
@@ -509,7 +537,7 @@ def _add_tts_routes(
         "/morphable_targets",
         response_model=list[dict[str, MorphableTargetInfo]],
         tags=["音声合成"],
-        summary="指定した話者に対してエンジン内の話者がモーフィングが可能か判定する",
+        summary="指定した話者に対してエンジン内の話者がモーフィング可能か判定する",
     )
     def morphable_targets(
         base_speakers: list[int],
@@ -559,16 +587,18 @@ def _add_tts_routes(
         target_speaker: int,
         morph_rate: float = Query(..., ge=0.0, le=1.0),
         enable_interrogative_upspeak: bool = Query(
-            default=True,
-            description="疑問系のテキストが与えられたら語尾を自動調整する",
+            default=False,
+            description="疑問形のテキストが与えられたら語尾を自動調整する",
         ),
         core_version: str | None = None,
     ):
         """
-        指定された2人の話者で音声を合成、指定した割合でモーフィングした音声を得ます。
+        指定された2人の話者で音声を合成し、指定した割合でモーフィングした音声を得ます。
         モーフィングの割合は`morph_rate`で指定でき、0.0でベースの話者、1.0でターゲットの話者に近づきます。
         """
         require_supported_feature("synthesis_morphing", "音声モーフィング機能")
+        if enable_interrogative_upspeak:
+            require_supported_feature("interrogative_upspeak", "疑問文の自動調整機能")
         engine = get_engine(core_version)
 
         try:
@@ -602,19 +632,7 @@ def _add_tts_routes(
             output_stereo=query.outputStereo,
         )
 
-        with NamedTemporaryFile(delete=False) as f:
-            soundfile.write(
-                file=f,
-                data=morph_wave,
-                samplerate=morph_param.fs,
-                format="WAV",
-            )
-
-        return FileResponse(
-            f.name,
-            media_type="audio/wav",
-            background=BackgroundTask(delete_file, f.name),
-        )
+        return _wave_file_response(morph_wave, int(morph_param.fs))
 
     @voicevox_router.post(
         "/connect_waves",
@@ -631,26 +649,14 @@ def _add_tts_routes(
     )
     def connect_waves(waves: list[str]):
         """
-        base64エンコードされたwavデータを一纏めにし、wavファイルで返します。
+        base64エンコードされた複数のwavデータを1つに結合し、wavファイルとして返します。
         """
         try:
             waves_nparray, sampling_rate = connect_base64_waves(waves)
         except ConnectBase64WavesException as err:
             raise HTTPException(status_code=422, detail=str(err)) from err
 
-        with NamedTemporaryFile(delete=False) as f:
-            soundfile.write(
-                file=f,
-                data=waves_nparray,
-                samplerate=sampling_rate,
-                format="WAV",
-            )
-
-        return FileResponse(
-            f.name,
-            media_type="audio/wav",
-            background=BackgroundTask(delete_file, f.name),
-        )
+        return _wave_file_response(waves_nparray, sampling_rate)
 
     @voicevox_router.post(
         "/validate_kana",
@@ -912,7 +918,7 @@ def _add_user_dictionary_routes(
     def get_user_dict_words():
         """
         ユーザー辞書に登録されている単語の一覧を返します。
-        単語の表層形(surface)は正規化済みの物を返します。
+        単語の表層形（surface）は正規化済みの形式で返します。
 
         Returns
         -------
@@ -944,22 +950,21 @@ def _add_user_dictionary_routes(
         ] = None,
     ):
         """
-        ユーザー辞書に言葉を追加します。
+        ユーザー辞書に単語を追加します。
 
         Parameters
         ----------
         surface : str
-            言葉の表層形
+            単語の表層形
         pronunciation: str
-            言葉の発音（カタカナ）
+            単語の発音（カタカナ）
         accent_type: int
             アクセント型（音が下がる場所を指す）
         word_type: WordTypes, optional
-            PROPER_NOUN（固有名詞）、COMMON_NOUN（普通名詞）、VERB（動詞）、ADJECTIVE（形容詞）、SUFFIX（語尾）のいずれか
+            PROPER_NOUN（固有名詞）、COMMON_NOUN（普通名詞）、VERB（動詞）、ADJECTIVE（形容詞）、SUFFIX（接尾辞）のいずれか
         priority: int, optional
             単語の優先度（0から10までの整数）
-            数字が大きいほど優先度が高くなる
-            1から9までの値を指定することを推奨
+            数値が大きいほど優先度が高くなります（1から9までの値を推奨）。
         """
         try:
             word_uuid = apply_word(
@@ -1001,24 +1006,23 @@ def _add_user_dictionary_routes(
         ] = None,
     ):
         """
-        ユーザー辞書に登録されている言葉を更新します。
+        ユーザー辞書に登録されている単語を更新します。
 
         Parameters
         ----------
         surface : str
-            言葉の表層形
+            単語の表層形
         pronunciation: str
-            言葉の発音（カタカナ）
+            単語の発音（カタカナ）
         accent_type: int
             アクセント型（音が下がる場所を指す）
         word_uuid: str
-            更新する言葉のUUID
+            更新する単語のUUID
         word_type: WordTypes, optional
-            PROPER_NOUN（固有名詞）、COMMON_NOUN（普通名詞）、VERB（動詞）、ADJECTIVE（形容詞）、SUFFIX（語尾）のいずれか
+            PROPER_NOUN（固有名詞）、COMMON_NOUN（普通名詞）、VERB（動詞）、ADJECTIVE（形容詞）、SUFFIX（接尾辞）のいずれか
         priority: int, optional
             単語の優先度（0から10までの整数）
-            数字が大きいほど優先度が高くなる
-            1から9までの値を指定することを推奨
+            数値が大きいほど優先度が高くなります（1から9までの値を推奨）。
         """
         try:
             rewrite_word(
@@ -1051,12 +1055,12 @@ def _add_user_dictionary_routes(
     )
     def delete_user_dict_word(word_uuid: str):
         """
-        ユーザー辞書に登録されている言葉を削除します。
+        ユーザー辞書に登録されている単語を削除します。
 
         Parameters
         ----------
         word_uuid: str
-            削除する言葉のUUID
+            削除する単語のUUID
         """
         try:
             delete_word(word_uuid=word_uuid)
@@ -1067,7 +1071,7 @@ def _add_user_dictionary_routes(
         except USER_DICTIONARY_ERRORS as error:
             traceback.print_exc()
             raise HTTPException(
-                status_code=422, detail="ユーザー辞書の更新に失敗しました。"
+                status_code=422, detail="ユーザー辞書からの削除に失敗しました。"
             ) from error
 
     @voicevox_router.post(
@@ -1174,7 +1178,7 @@ def _add_setting_routes(
             allow_origin=allow_origin,
         )
 
-        # 更新した設定へ上書き
+        # 更新した設定で上書き
         setting_loader.dump_setting_file(settings)
 
         return Response(status_code=204)

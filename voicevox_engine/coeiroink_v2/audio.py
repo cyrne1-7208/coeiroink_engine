@@ -281,8 +281,7 @@ def trim_wave(
 ) -> Waveform:
     """Trim silence while retaining the requested context around both edges.
 
-    Coreと同じRMS判定を使う。trim-buffer値は検出範囲の外側へ残す音声長であり、
-    追加で破棄する長さではない。
+    Coreと同じRMS判定を使う。trim-buffer値は検出範囲の外側へ残す音声長であり、追加で破棄する長さではない。
     """
 
     wave = _require_waveform(wave)
