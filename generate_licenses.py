@@ -24,6 +24,7 @@ KNOWN_LICENSE_NAMES = {
     "nvidia-nvshmem-cu12": "LicenseRef-NVIDIA-NVSHMEM",
     "pyworld": "MIT",
     "sentencepiece": "Apache-2.0",
+    "siphash24": "Apache-2.0 OR LGPL-2.1-or-later",
     "sudachidict-full": "Apache-2.0",
     "sudachipy": "Apache-2.0",
     "torch-complex": "Apache-2.0",
@@ -130,6 +131,20 @@ def _unknown_license_text(name: str, version: str | None) -> str:
                 f"Unexpected external kaldiio distribution: {version}"
             )
         return _coeirocore_license_text()
+    if normalized_name == "siphash24" and version is not None:
+        license_root = f"https://raw.githubusercontent.com/dnicolodi/python-siphash24/v{version}/LICENSES"
+        return _combine_legal_documents(
+            [
+                (
+                    "LICENSES/Apache-2.0.txt",
+                    _read_url(f"{license_root}/Apache-2.0.txt"),
+                ),
+                (
+                    "LICENSES/LGPL-2.1-or-later.txt",
+                    _read_url(f"{license_root}/LGPL-2.1-or-later.txt"),
+                ),
+            ]
+        )
 
     fixed_urls = {
         "future": "https://raw.githubusercontent.com/PythonCharmers/python-future/master/LICENSE.txt",
