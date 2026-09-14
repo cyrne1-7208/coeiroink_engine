@@ -59,6 +59,7 @@ def make_audio_manager(
     resampler: str = "resampy",
     max_loaded_models: int | None = 1,
     generator_only: bool = False,
+    voice_smoothing: bool = False,
 ) -> AudioManager:
     """起動設定を正規化し、ネイティブAPIと互換APIが共有するCoreを生成する。"""
 
@@ -74,6 +75,7 @@ def make_audio_manager(
         resampler=resampler,
         max_loaded_models=max_loaded_models,
         generator_only=generator_only,
+        voice_smoothing=voice_smoothing,
     )
 
 
@@ -115,6 +117,7 @@ def make_synthesis_engines(
     opencl_platform_index: int = 0,
     resampler: str = "resampy",
     audio_manager: AudioManager | None = None,
+    voice_smoothing: bool = False,
 ) -> dict[str, SynthesisEngineBase]:
     """
     音声ライブラリをロードして、音声合成エンジンを生成する
@@ -138,6 +141,8 @@ def make_synthesis_engines(
         直近に使ったMYCOEIROINKモデルの保持上限。Noneでは全モデルを起動時に読み込む。
     generator_only: bool, optional, default=False
         VITSの推論用generatorだけを読み込む実験機能。
+    voice_smoothing: bool, optional, default=False
+        Coreの実験的な音声補正を有効化する。
     speaker_info_dir: Path, optional, default=None
         MYCOEIROINKを展開したspeaker_infoディレクトリ
     device: str, optional, default=None
@@ -163,6 +168,7 @@ def make_synthesis_engines(
             resampler=resampler,
             max_loaded_models=max_loaded_models,
             generator_only=generator_only,
+            voice_smoothing=voice_smoothing,
         )
     elif max_loaded_models is None:
         audio_manager.initialize_all_speakers()

@@ -119,11 +119,7 @@ def _world_process(
             "audio manager returned an invalid WORLD result"
         )
     base_f0, spectral_envelope, aperiodicity = result[:3]
-    f0 = (
-        _validated_f0(adjusted_f0)
-        if adjusted_f0 is not None
-        else _validated_f0(base_f0)
-    )
+    f0 = _validated_f0(adjusted_f0)
     f0 = _fit_f0_track(f0, len(np.asarray(base_f0).reshape(-1)))
     if pitch_scale != 0.0:
         f0 *= 2.0 ** float(pitch_scale)

@@ -145,6 +145,14 @@ jobs:
           IMAGE: ${{ steps.image.outputs.name }}
         run: docker pull "$IMAGE"
 
+      - name: Check CPU voice smoothing dependencies
+        if: (inputs.backend || 'cpu') == 'cpu'
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          docker run --rm "$IMAGE" .venv/bin/python -c \
+            "import parselmouth"
+
       - name: Start the selected container and check the HTTP server
         env:
           BACKEND: ${{ inputs.backend || 'cpu' }}

@@ -64,40 +64,32 @@ def decode_base64_waves(waves: list[str]) -> list[tuple[np.ndarray, int]]:
         except (UnicodeEncodeError, binascii.Error, TypeError, ValueError) as error:
             raise ConnectBase64WavesException("base64デコードに失敗しました") from error
         decoded_bytes += len(wav_bin)
-        if decoded_bytes > MAX_CONNECTED_WAVE_BYTES:
-            raise ConnectBase64WavesException(
-                "wavファイルの合計データ量が上限を超えています"
-            )
         try:
-            info = soundfile.info(io.BytesIO(wav_bin))
-            if (
-                info.frames <= 0
-                or info.samplerate <= 0
-                or info.samplerate > MAX_CONNECTED_SAMPLING_RATE
-                or info.channels not in (1, 2)
-            ):
-                raise ConnectBase64WavesException(
-                    "wavファイルの形式またはサイズが対応範囲外です"
-                )
-            decoded_samples += int(info.frames) * int(info.channels)
-            total_seconds += float(info.frames) / float(info.samplerate)
-            if decoded_samples > MAX_CONNECTED_WAVE_SAMPLES:
-                raise ConnectBase64WavesException(
-                    "wavファイルの合計サンプル数が上限を超えています"
-                )
-            if total_seconds > MAX_CONNECTED_WAVE_SECONDS:
-                raise ConnectBase64WavesException(
-                    "wavファイルの合計時間が上限を超えています"
-                )
-            _data = soundfile.read(io.BytesIO(wav_bin))
-        except ConnectBase64WavesException:
-            raise
+            # ヘッダー検証と波形読込に同じファイルを使い、WAVを二度開かない。
+            with soundfile.SoundFile(io.BytesIO(wav_bin)) as wav_file:
+                if (
+                    wav_file.frames <= 0
+                    or wav_file.samplerate > MAX_CONNECTED_SAMPLING_RATE
+                    or wav_file.channels not in (1, 2)
+                ):
+                    raise ConnectBase64WavesException(
+                        "wavファイルの形式またはサイズが対応範囲外です"
+                    )
+                decoded_samples += wav_file.frames * wav_file.channels
+                total_seconds += wav_file.frames / wav_file.samplerate
+                if decoded_samples > MAX_CONNECTED_WAVE_SAMPLES:
+                    raise ConnectBase64WavesException(
+                        "wavファイルの合計サンプル数が上限を超えています"
+                    )
+                if total_seconds > MAX_CONNECTED_WAVE_SECONDS:
+                    raise ConnectBase64WavesException(
+                        "wavファイルの合計時間が上限を超えています"
+                    )
+                waves_nparray_sr.append((wav_file.read(), wav_file.samplerate))
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise ConnectBase64WavesException(
                 "wavファイルを読み込めませんでした"
             ) from error
-        waves_nparray_sr.append(_data)
-
     return waves_nparray_sr
 
 

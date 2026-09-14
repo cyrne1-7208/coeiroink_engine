@@ -282,29 +282,14 @@ class SynthesisEngine(SynthesisEngineBase):
 
         # accent
         def _create_one_hot(accent_phrase: AccentPhrase, position: int):
-            """
-            単位行列(numpy.eye)を応用し、accent_phrase内でone hotな配列(リスト)を作る
-            例えば、accent_phraseのmorasの長さが12、positionが1なら
-            [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-            morasの長さが同じく12、positionが-1なら
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
-            のような配列を生成する
-            accent_phraseがpause_moraを含む場合はさらに後ろに0が足される
-            Parameters
-            ----------
-            accent_phrase : AccentPhrase
-                アクセント句モデル
-            position : int
-                one hotにするindex
-            Returns
-            -------
-            one_hot : numpy.ndarray
-                one hotな配列(リスト)
-            """
-            return numpy.r_[
-                numpy.eye(len(accent_phrase.moras))[position],
-                (0 if accent_phrase.pause_mora is not None else []),
-            ]
+            """指定モーラの位置だけを1にし、休止を持つ句には末尾の0を追加する。"""
+            one_hot = numpy.zeros(len(accent_phrase.moras), dtype=numpy.int64)
+            one_hot[position] = 1
+            return (
+                numpy.r_[one_hot, 0]
+                if accent_phrase.pause_mora is not None
+                else one_hot
+            )
 
         # accent_phrasesから、アクセントの開始位置のリストを作る
         start_accent_list = numpy.concatenate(
@@ -447,11 +432,9 @@ class SynthesisEngine(SynthesisEngineBase):
 
         # 有声音素(音高(ピッチ)が0より大きいもの)か否かを抽出する
         voiced = f0 > 0
-        # 有声音素の音高(ピッチ)の平均値を求める
-        mean_f0 = f0[voiced].mean()
-        # 平均値がNaNではないとき、抑揚を適用する
-        # 抑揚は音高と音高の平均値の差に抑揚を掛けたもの((f0 - mean_f0) * Intonation Scale)に抑揚の平均値(mean_f0)を足したもの
-        if not numpy.isnan(mean_f0):
+        # 無声音だけのクエリでは平均を計算せず、F0=0を保つ。
+        if numpy.any(voiced):
+            mean_f0 = f0[voiced].mean()
             f0[voiced] = (f0[voiced] - mean_f0) * query.intonationScale + mean_f0
 
         # OjtPhonemeの形に分解された音素リストから、vowel(母音)の位置を抜き出し、numpyのarrayにする

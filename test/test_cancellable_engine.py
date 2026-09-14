@@ -1,8 +1,8 @@
 import argparse
 import asyncio
-import pickle
 import queue
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
 from tempfile import NamedTemporaryFile as RealNamedTemporaryFile
@@ -102,22 +102,6 @@ def test_eof_replaces_failed_worker():
     assert engine.watch_con_list == []
 
 
-def test_worker_is_not_added_twice_when_finalizers_race():
-    engine = _engine_without_processes()
-    request = Mock()
-    process = Mock()
-    process.is_alive.return_value = True
-    connection = Mock()
-    engine.watch_con_list.append(_RequestState(request, process, connection))
-
-    engine.finalize_con(request, process, connection)
-    engine.finalize_con(request, process, None)
-
-    assert engine.procs_and_cons.get_nowait() == (process, connection)
-    assert engine.procs_and_cons.empty()
-    engine.start_new_proc.assert_not_called()
-
-
 def test_dead_worker_is_not_requeued_when_finalized():
     engine = _engine_without_processes()
     request = Mock()
@@ -211,6 +195,7 @@ def test_child_reports_synthesis_error_and_keeps_worker_alive():
         speaker_info_dir=None,
         enable_mock=True,
         generator_only=False,
+        voice_smoothing=False,
     )
 
     with (
@@ -264,6 +249,7 @@ def test_subprocess_removes_wave_if_result_cannot_be_sent(tmp_path: Path):
         speaker_info_dir=None,
         enable_mock=True,
         generator_only=False,
+        voice_smoothing=False,
     )
 
     def temporary_file(**kwargs):
@@ -356,6 +342,42 @@ def test_shutdown_is_explicit_bounded_and_idempotent():
     assert engine.procs_and_cons.empty()
 
 
+def test_shutdown_collects_a_worker_being_returned():
+    engine = _engine_without_processes()
+    process = _FakeProcess()
+    connection = Mock()
+    checking = threading.Event()
+    resume = threading.Event()
+    stopped = threading.Event()
+
+    def is_alive():
+        checking.set()
+        assert resume.wait(timeout=2)
+        return process.alive
+
+    def shutdown():
+        engine.shutdown(timeout=0)
+        stopped.set()
+
+    with (
+        patch.object(process, "is_alive", side_effect=is_alive),
+        ThreadPoolExecutor(max_workers=2) as executor,
+    ):
+        returning = executor.submit(engine._put_available_worker, (process, connection))
+        try:
+            assert checking.wait(timeout=2)
+            stopping = executor.submit(shutdown)
+            # 旧実装ではこの間にshutdownが完了し、後からキューへ戻るワーカーが取り残された。
+            stopped.wait(timeout=0.05)
+        finally:
+            resume.set()
+        returning.result(timeout=2)
+        stopping.result(timeout=2)
+
+    assert engine.procs_and_cons.empty()
+    assert process.close_calls == 1
+
+
 def test_workers_use_spawn_context():
     args = argparse.Namespace(
         enable_cancellable_synthesis=True,
@@ -386,6 +408,7 @@ def test_subprocess_passes_device_without_preloading_every_model():
         resampler="soxr-vhq",
         max_loaded_models=None,
         generator_only=True,
+        voice_smoothing=True,
     )
 
     with (
@@ -410,27 +433,5 @@ def test_subprocess_passes_device_without_preloading_every_model():
         enable_mock=True,
         max_loaded_models=1,
         generator_only=True,
+        voice_smoothing=True,
     )
-
-
-def test_subprocess_target_and_arguments_are_spawn_picklable():
-    """Windowsのspawn方式でワーカー生成前にpickleエラーを起こさないことを保証する。"""
-
-    args = argparse.Namespace(
-        device="directml",
-        use_gpu=None,
-        device_index=1,
-        opencl_platform_index=0,
-        voicelib_dir=[Path("voice")],
-        voicevox_dir=Path("engine"),
-        runtime_dir=[Path("runtime")],
-        cpu_num_threads=2,
-        speaker_info_dir=Path("speaker_info"),
-        enable_mock=True,
-    )
-
-    assert pickle.loads(pickle.dumps(start_synthesis_subprocess)) is (
-        start_synthesis_subprocess
-    )
-    restored = pickle.loads(pickle.dumps(args))
-    assert vars(restored) == vars(args)

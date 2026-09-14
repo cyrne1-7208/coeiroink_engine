@@ -152,35 +152,31 @@ def decode_pcm_wav(
         )
 
     try:
-        info = soundfile.info(io.BytesIO(raw))
-        if info.format.upper() != "WAV":
-            raise AudioValidationError("WAV container is required")
-        if not info.subtype.upper().startswith("PCM"):
-            raise AudioValidationError("PCM WAV data is required")
-        if info.channels != 1:
-            raise AudioValidationError("only mono WAV data is supported")
-        _require_bounded_waveform_size(int(info.frames), "WAV data")
-        if (
-            expected_sampling_rate is not None
-            and info.samplerate != expected_sampling_rate
-        ):
-            raise AudioValidationError(f"unexpected sampling rate: {info.samplerate}")
-        wave, sampling_rate = soundfile.read(
-            io.BytesIO(raw), dtype="float32", always_2d=True
-        )
+        with soundfile.SoundFile(io.BytesIO(raw)) as source:
+            if source.format.upper() != "WAV":
+                raise AudioValidationError("WAV container is required")
+            if not source.subtype.upper().startswith("PCM"):
+                raise AudioValidationError("PCM WAV data is required")
+            if source.channels != 1:
+                raise AudioValidationError("only mono WAV data is supported")
+            _require_bounded_waveform_size(source.frames, "WAV data")
+            sampling_rate = source.samplerate
+            if (
+                expected_sampling_rate is not None
+                and sampling_rate != expected_sampling_rate
+            ):
+                raise AudioValidationError(f"unexpected sampling rate: {sampling_rate}")
+            result = source.read(dtype="float32")
     except AudioValidationError:
         raise
     except Exception as error:
         raise AudioValidationError("wav_bytes is not a readable PCM WAV") from error
 
-    if wave.ndim != 2 or wave.shape[1] != 1:
-        raise AudioValidationError("only mono WAV data is supported")
-    result = wave[:, 0]
     if result.size == 0:
         raise AudioValidationError("WAV data must not be empty")
     if not np.isfinite(result).all():
         raise AudioValidationError("decoded WAV contains non-finite samples")
-    return result.astype(np.float32, copy=False), int(sampling_rate)
+    return result, sampling_rate
 
 
 def encode_pcm_wav_base64(wave: np.ndarray, sampling_rate: int) -> str:

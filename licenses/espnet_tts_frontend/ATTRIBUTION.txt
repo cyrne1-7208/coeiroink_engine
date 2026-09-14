@@ -1,0 +1,6 @@
+Package: espnet_tts_frontend
+Source: https://github.com/espnet/espnet_tts_frontend
+License: Apache-2.0
+License declaration: https://github.com/espnet/espnet_tts_frontend/blob/master/setup.py
+
+The upstream package metadata declares the Apache Software License but does not include the license text in its wheel. The accompanying Apache-2.0.txt is therefore included with this attribution.

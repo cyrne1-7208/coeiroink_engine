@@ -48,6 +48,14 @@ Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポ�
 
 実験的なgenerator-onlyローダーは`--experimental generator-only`で有効化できます。VITSの推論に不要な学習用重みを最初から読み込まないため、通常の合成処理や出力を変えずにモデルロード時のピークメモリを抑えます。
 
+実験的な音声補正は、`--experimental voice-smoothing`を指定すると有効になります。既定では無効で、必要な依存は各バックエンド用extraに含まれます。
+
+```bash
+.venv/bin/python run.py --speaker_info_dir /path/to/speaker_info --device cpu --experimental voice-smoothing
+```
+
+Coreで音色の細かな揺れを時間幅15ms・強さ0.85でならし、弱い周期間隔補正も適用します。`/v1/synthesis`とVOICEVOX互換の合成経路で有効になり、生波形を返す`/v1/predict`・`/v1/predict_with_duration`と、持ち込み波形の`/v1/process`は変更しません。CPUとDirectMLではParselmouthとSciPy、CUDAとOpenCLでは選択したGPU上の専用実装で補正します。`--experimental generator-only --experimental voice-smoothing`のように、ほかの実験機能と併用できます。CPUとDirectMLで利用する[Parselmouth](https://github.com/YannickJadoul/Parselmouth)にはGPL-3.0-or-laterが適用されます。
+
 Dockerで起動する場合は、CoreとEngineを含む親ディレクトリをビルドコンテキストにしてください。
 
 ```bash

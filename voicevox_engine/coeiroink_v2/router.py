@@ -784,23 +784,34 @@ def _add_processing_routes(router: APIRouter, context: _V2RouterContext) -> None
         },
     )
     def synthesis(param: SynthesisParam) -> Response:
-        """生波形を推論し、休止長変更に必要な場合だけ継続長を取得してから後処理する。"""
+        """生波形を一度推論し、音声補正または休止長変更が必要な場合だけ継続長も取得する。"""
 
         try:
-            needs_duration = param.pause_length is not None
+            voice_smoothing = audio_manager.voice_smoothing
+            needs_pause_durations = param.pause_length is not None
+            needs_duration = voice_smoothing or needs_pause_durations
             wave, frames, plain, detail, sampling_rate = predict_request(
                 param, with_duration=needs_duration
             )
-            mora_durations = (
-                convert_duration(
-                    plain,
-                    detail,
-                    frames,
-                    _hop_length(audio_manager, param.style_id, param.speaker_uuid),
+            mora_durations = None
+            if needs_duration:
+                hop_length = _hop_length(
+                    audio_manager, param.style_id, param.speaker_uuid
                 )
-                if needs_duration
-                else None
-            )
+                if voice_smoothing:
+                    wave = audio_manager.smooth_voice(
+                        wave,
+                        plain,
+                        frames,
+                        hop_length=hop_length,
+                    )
+                if needs_pause_durations:
+                    mora_durations = convert_duration(
+                        plain,
+                        detail,
+                        frames,
+                        hop_length,
+                    )
             output, output_sampling_rate = _process_wave(
                 audio_manager,
                 wave,

@@ -22,7 +22,12 @@ def executable_path(dist_dir: Path) -> Path:
     raise FileNotFoundError(f"Engine executable was not found in {dist_dir}")
 
 
-def check_release_build(dist_dir: Path, expected_version: str) -> None:
+def check_release_build(
+    dist_dir: Path,
+    expected_version: str,
+    *,
+    experimental_voice_smoothing: bool = False,
+) -> None:
     """マニフェストとHTTP起動を検査する。"""
 
     dist_dir = dist_dir.resolve(strict=True)
@@ -45,20 +50,22 @@ def check_release_build(dist_dir: Path, expected_version: str) -> None:
         speaker_info_dir = temporary_path / "speaker_info"
         speaker_info_dir.mkdir()
         with log_path.open("w", encoding="utf-8") as log:
+            command = [
+                str(executable),
+                "--device",
+                "cpu",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "50032",
+                "--speaker_info_dir",
+                str(speaker_info_dir),
+                "--output_log_utf8",
+            ]
+            if experimental_voice_smoothing:
+                command.extend(("--experimental", "voice-smoothing"))
             process = subprocess.Popen(
-                [
-                    str(executable),
-                    "--enable_mock",
-                    "--device",
-                    "cpu",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    "50032",
-                    "--speaker_info_dir",
-                    str(speaker_info_dir),
-                    "--output_log_utf8",
-                ],
+                command,
                 cwd=dist_dir,
                 stdout=log,
                 stderr=subprocess.STDOUT,
@@ -93,8 +100,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dist-dir", type=Path, required=True)
     parser.add_argument("--expected-version", required=True)
+    parser.add_argument("--experimental-voice-smoothing", action="store_true")
     args = parser.parse_args()
-    check_release_build(args.dist_dir, args.expected_version)
+    check_release_build(
+        args.dist_dir,
+        args.expected_version,
+        experimental_voice_smoothing=args.experimental_voice_smoothing,
+    )
 
 
 if __name__ == "__main__":

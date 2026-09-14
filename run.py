@@ -347,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--experimental",
         action="append",
-        choices=("generator-only", "soxr"),
+        choices=("generator-only", "soxr", "voice-smoothing"),
         default=[],
         help="任意機能を明示的に有効化します。複数の機能を有効化する場合は、このオプションを繰り返し指定します。",
     )
@@ -458,6 +458,7 @@ if __name__ == "__main__":
     # 公開フラグは実験機能名だけにし、下位層には既存の具体的な実装名を渡す。
     args.resampler = "soxr-vhq" if "soxr" in args.experimental else "resampy"
     args.generator_only = "generator-only" in args.experimental
+    args.voice_smoothing = "voice-smoothing" in args.experimental
 
     try:
         args.device = resolve_device(device=args.device, use_gpu=args.use_gpu)
@@ -491,6 +492,7 @@ if __name__ == "__main__":
         resampler=args.resampler,
         max_loaded_models=args.max_loaded_models,
         generator_only=args.generator_only,
+        voice_smoothing=args.voice_smoothing,
     )
     synthesis_engines = make_synthesis_engines(
         speaker_info_dir=speaker_info_dir,

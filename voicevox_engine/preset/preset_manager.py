@@ -130,10 +130,8 @@ class PresetManager:
             # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す
             self.load_presets()
 
-            prev_preset = (-1, None)
-            for i in range(len(self.presets)):
-                if self.presets[i].id == preset.id:
-                    prev_preset = (i, self.presets[i])
+            for i, previous in enumerate(self.presets):
+                if previous.id == preset.id:
                     self.presets[i] = preset
                     break
             else:
@@ -142,8 +140,7 @@ class PresetManager:
             try:
                 self._write_presets()
             except Exception as err:
-                if prev_preset != (-1, None):
-                    self.presets[prev_preset[0]] = prev_preset[1]
+                self.presets[i] = previous
                 if isinstance(err, FileNotFoundError):
                     raise PresetError(
                         "プリセットの設定ファイルへの書き込みに失敗しました"
@@ -171,12 +168,9 @@ class PresetManager:
             # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す
             self.load_presets()
 
-            buf = None
-            buf_index = -1
-            for i in range(len(self.presets)):
-                if self.presets[i].id == id:
-                    buf = self.presets.pop(i)
-                    buf_index = i
+            for i, previous in enumerate(self.presets):
+                if previous.id == id:
+                    self.presets.pop(i)
                     break
             else:
                 raise PresetError("削除対象のプリセットが存在しません")
@@ -184,7 +178,7 @@ class PresetManager:
             try:
                 self._write_presets()
             except Exception as err:
-                self.presets.insert(buf_index, buf)
+                self.presets.insert(i, previous)
                 if isinstance(err, FileNotFoundError):
                     raise PresetError(
                         "プリセットの設定ファイルへの書き込みに失敗しました"

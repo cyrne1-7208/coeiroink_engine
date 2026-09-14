@@ -54,10 +54,6 @@ class FakeSession:
         self.calls.append({"url": url, **kwargs})
         if self.error is not None:
             raise self.error
-        if callable(self.responses):
-            return self.responses(url)
-        if isinstance(self.responses, dict):
-            return self.responses[url]
         return self.responses
 
 
@@ -116,23 +112,21 @@ def _update_info_payload() -> list[dict[str, Any]]:
 
 
 @pytest.mark.parametrize(
-    "method_name, endpoint, payload, expected_field",
+    "method_name, endpoint, payload",
     [
-        ("get_download_info", "download-info", _download_info_payload(), "speaker"),
+        ("get_download_info", "download-info", _download_info_payload()),
         (
             "get_downloadable_speakers",
             "downloadable-speakers",
             _downloadable_speakers_payload(),
-            "speaker_uuid",
         ),
-        ("get_update_info", "update-info", _update_info_payload(), "version"),
+        ("get_update_info", "update-info", _update_info_payload()),
     ],
 )
 def test_catalog_methods_use_public_endpoints_and_validate_models(
     method_name: str,
     endpoint: str,
     payload: list[dict[str, Any]],
-    expected_field: str,
 ) -> None:
     response = FakeResponse(json.dumps(payload).encode("utf-8"))
     session = FakeSession(response)
@@ -142,8 +136,7 @@ def test_catalog_methods_use_public_endpoints_and_validate_models(
 
     result = getattr(client, method_name)()
 
-    assert len(result) == 1
-    assert hasattr(result[0], expected_field)
+    assert [item.model_dump(by_alias=True) for item in result] == payload
     assert session.calls == [
         {
             "url": f"{_BASE_URL}/{endpoint}",
@@ -152,16 +145,6 @@ def test_catalog_methods_use_public_endpoints_and_validate_models(
         }
     ]
     assert response.closed
-
-
-def test_update_info_uses_the_validated_catalog_client() -> None:
-    payload = _update_info_payload()
-    session = FakeSession(FakeResponse(json.dumps(payload).encode("utf-8")))
-    client = CatalogClient(session=session, max_response_bytes=4096)
-
-    result = client.get_update_info()
-
-    assert result[0].version == "v.2.13.0"
 
 
 def test_http_errors_are_bounded_and_include_only_a_small_preview() -> None:
@@ -230,6 +213,21 @@ def test_network_failures_are_wrapped() -> None:
 
     with pytest.raises(CatalogNetworkError):
         CatalogClient(session=session).get_update_info()
+
+
+def test_stream_failure_is_reported_and_response_is_closed(monkeypatch) -> None:
+    response = FakeResponse(b"[]")
+
+    def interrupted_content(chunk_size):
+        yield b"["
+        raise requests.ConnectionError("connection lost")
+
+    monkeypatch.setattr(response, "iter_content", interrupted_content)
+
+    with pytest.raises(CatalogNetworkError, match="response could not be read"):
+        CatalogClient(session=FakeSession(response)).get_update_info()
+
+    assert response.closed
 
 
 def test_constructor_rejects_an_unbounded_configuration() -> None:

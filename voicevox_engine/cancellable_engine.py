@@ -152,9 +152,6 @@ def _stop_process(
 
 def _receive_worker_response(connection: Connection) -> str:
     response: Any = connection.recv()
-    # 旧ワーカーとの一時的な互換性を保ち、文字列は成功応答として受け取る。
-    if isinstance(response, str):
-        return response
     if not isinstance(response, dict):
         raise CancellableWorkerError("サブプロセスから不正な応答を受信しました")
     kind = response.get("kind")
@@ -272,12 +269,12 @@ class CancellableEngine:
     def _put_available_worker(self, worker: tuple[Process, Connection]) -> bool:
         proc, connection = worker
         with self._state_lock:
-            shutting_down = self._shutting_down
-        if shutting_down or not _is_process_alive(proc):
-            _stop_process(proc, connection, _PROCESS_JOIN_TIMEOUT)
-            return False
-        self.procs_and_cons.put(worker)
-        return True
+            # 終了判定から返却までを一体にし、shutdownが回収を終えた後にワーカーを追加しない。
+            if not self._shutting_down and _is_process_alive(proc):
+                self.procs_and_cons.put(worker)
+                return True
+        _stop_process(proc, connection, _PROCESS_JOIN_TIMEOUT)
+        return False
 
     def _checkout_worker(self, state: _RequestState) -> tuple[Process, Connection]:
         """切断または終了要求を監視しながら、利用可能なワーカーを一つ確保する。"""
@@ -543,6 +540,7 @@ def start_synthesis_subprocess(
         # 各ワーカーで全モデルを複製するとプロセス数に比例してメモリを消費するため、キャンセル経路は要求されたモデルだけを保持する。
         max_loaded_models=1,
         generator_only=getattr(args, "generator_only", False),
+        voice_smoothing=args.voice_smoothing,
     )
     if not synthesis_engines:
         raise RuntimeError("音声合成エンジンがありません。")

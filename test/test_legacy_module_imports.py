@@ -44,9 +44,13 @@ def test_legacy_module_import_resolves_to_canonical_module(
 
 
 def test_package_level_class_exports_remain_compatible() -> None:
+    from voicevox_engine.dev.synthesis_engine import MockSynthesisEngine
     from voicevox_engine.engine_manifest import EngineManifest
     from voicevox_engine.preset import Preset, PresetError, PresetManager
     from voicevox_engine.setting import CorsPolicyMode, Setting, SettingLoader
+    from voicevox_engine.synthesis_engine import CoeiroinkVoicevoxAdapter
+
+    assert MockSynthesisEngine is CoeiroinkVoicevoxAdapter
 
     assert (
         EngineManifest

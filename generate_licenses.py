@@ -20,7 +20,7 @@ KNOWN_LICENSE_NAMES = {
     "coeiroink-engine": "LGPL-3.0-only",
     "coeirocore": "LGPL-3.0-only",
     "coeiroink-opencl": "LGPL-3.0-only",
-    "kaldiio": "LGPL-3.0-only",
+    "espnet-tts-frontend": "Apache-2.0",
     "nvidia-nvshmem-cu12": "LicenseRef-NVIDIA-NVSHMEM",
     "pyworld": "MIT",
     "sentencepiece": "Apache-2.0",
@@ -122,14 +122,22 @@ def _unknown_license_text(name: str, version: str | None) -> str:
                 ),
             ]
         )
+    if normalized_name == "espnet-tts-frontend":
+        return _combine_legal_documents(
+            [
+                (
+                    "licenses/Apache-2.0.txt",
+                    Path("licenses/Apache-2.0.txt").read_text(encoding="utf-8"),
+                ),
+                (
+                    "licenses/espnet_tts_frontend/ATTRIBUTION.txt",
+                    Path("licenses/espnet_tts_frontend/ATTRIBUTION.txt").read_text(
+                        encoding="utf-8"
+                    ),
+                ),
+            ]
+        )
     if normalized_name == "coeirocore":
-        return _coeirocore_license_text()
-    if normalized_name == "kaldiio" and version is not None:
-        # 評価用途に限定された上流kaldiioを公開配布物へ混入させないため、ローカル互換ガード以外は生成時に拒否する。
-        if not version.endswith("+coeiroink.guard1"):
-            raise LicenseGenerationError(
-                f"Unexpected external kaldiio distribution: {version}"
-            )
         return _coeirocore_license_text()
     if normalized_name == "siphash24" and version is not None:
         license_root = f"https://raw.githubusercontent.com/dnicolodi/python-siphash24/v{version}/LICENSES"
@@ -159,7 +167,7 @@ def _unknown_license_text(name: str, version: str | None) -> str:
         "lockfile": "https://opendev.org/openstack/pylockfile/raw/tag/0.12.2/LICENSE",
         "platformdirs": "https://raw.githubusercontent.com/platformdirs/platformdirs/aa671aaa97913c7b948567f4d9c77d4f98bfa134/LICENSE",
         "webencodings": "https://raw.githubusercontent.com/gsnedders/python-webencodings/fa2cb5d75ab41e63ace691bc0825d3432ba7d694/LICENSE",
-        "espnet": "https://raw.githubusercontent.com/espnet/espnet/v.202604-patch1/LICENSE",
+        "espnet": "https://raw.githubusercontent.com/espnet/espnet/v.202609/LICENSE",
         "sentencepiece": "https://raw.githubusercontent.com/google/sentencepiece/v0.2.1/LICENSE",
         "sudachipy": "https://raw.githubusercontent.com/WorksApplications/sudachi.rs/90fd6068c80c2fc3b63e0dbab0e341475bad4d8f/LICENSE",
         "torch-directml": "https://raw.githubusercontent.com/microsoft/DirectML/8700779fe7a09ea7a007cf3d7ab4293c78e41017/LICENSE",

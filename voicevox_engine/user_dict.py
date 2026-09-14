@@ -63,24 +63,7 @@ def _remove_file(path: Path) -> None:
 
 
 def _write_json_atomic(user_dict_json: str, user_dict_path: Path) -> None:
-    temporary_path: Path | None = None
-    try:
-        with NamedTemporaryFile(
-            encoding="utf-8",
-            mode="w",
-            delete=False,
-            dir=user_dict_path.parent,
-            prefix=f".{user_dict_path.name}.",
-        ) as temporary_file:
-            temporary_path = Path(temporary_file.name)
-            temporary_file.write(user_dict_json)
-            temporary_file.flush()
-            os.fsync(temporary_file.fileno())
-        # 同じディレクトリ内で置換するため、読み手には旧JSONか新JSONだけが見える。
-        os.replace(temporary_path, user_dict_path)
-    finally:
-        if temporary_path is not None:
-            _remove_file(temporary_path)
+    _write_bytes_atomic(user_dict_json.encode("utf-8"), user_dict_path)
 
 
 def _write_bytes_atomic(content: bytes, path: Path) -> None:
@@ -96,6 +79,7 @@ def _write_bytes_atomic(content: bytes, path: Path) -> None:
             temporary_file.write(content)
             temporary_file.flush()
             os.fsync(temporary_file.fileno())
+        # 同じディレクトリ内で置換し、読み手に書き込み途中の内容を見せない。
         os.replace(temporary_path, path)
     finally:
         if temporary_path is not None:
