@@ -45,7 +45,7 @@ def _reset_user_dict() -> None:
     if hasattr(pyopenjtalk, "unset_user_dict"):
         pyopenjtalk.unset_user_dict()
     else:
-        # pyopenjtalk 0.4系には解除用公開APIがないため、非公開状態へ依存せずモジュール再読込で既定のOpenJTalkインスタンスを再生成する。
+        # pyopenjtalk 0.4系には辞書を解除する公開APIがないため、非公開状態を触らず、モジュールを再読み込みして既定のOpen JTalkへ戻す。
         importlib.reload(pyopenjtalk)
 
 
@@ -112,7 +112,7 @@ def _read_dict(user_dict_path: Path) -> dict[str, UserDictWord]:
     with user_dict_path.open(encoding="utf-8") as f:
         result = {}
         for word_uuid, word in json.load(f).items():
-            # 0.12以前の辞書は固有名詞のcontext_idがハードコードされており保存データに含まれないため、cost2priority変換用に固有名詞のcontext_idを補完する。
+            # 0.12以前の辞書には固有名詞のcontext_idが保存されていないため、優先度の変換に必要な値を補う。
             if word.get("context_id") is None:
                 word["context_id"] = part_of_speech_data[
                     WordTypes.PROPER_NOUN
@@ -488,9 +488,9 @@ def search_cost_candidates(context_id: int) -> list[int]:
 
 def cost2priority(context_id: int, cost: int) -> int:
     cost_candidates = search_cost_candidates(context_id)
-    # cost_candidatesの中にある値で最も近い値を元にpriorityを返す
+    # 辞書のcostに最も近い候補からpriorityを求める。
     # 参考: https://qiita.com/Krypf/items/2eada91c37161d17621d
-    # この関数とpriority2cost関数によって、辞書ファイルのcostを操作しても最も近いpriorityのcostに上書きされる
+    # 辞書を保存し直すと、costは対応するpriorityの値へ揃えられる。
     return MAX_PRIORITY - np.argmin(np.abs(np.array(cost_candidates) - cost))
 
 

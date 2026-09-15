@@ -43,7 +43,7 @@ torch_cpu_library="$purelib/torch/lib/libtorch_cpu.so"
 test -f "$torch_cpu_library"
 "$venv_dir/bin/patchelf" --clear-execstack "$torch_cpu_library"
 
-# importと標準辞書の初期化をビルド時に検証し、初回HTTP要求へ遅延させない。
+# モジュールの読み込みと標準辞書の初期化をビルド時に確認し、初回リクエストの遅延を防ぐ。
 "$venv_python" - <<'PY'
 import importlib.metadata
 import espnet2

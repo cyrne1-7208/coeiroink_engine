@@ -17,7 +17,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=("sudachi",),
         default=[],
-        help="任意機能を明示的に有効化する",
+        help="実験的な機能を有効にする",
     )
     parser.add_argument(
         "--mode",

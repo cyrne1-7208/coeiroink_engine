@@ -52,7 +52,7 @@ def decode_base64_waves(waves: list[str]) -> list[tuple[np.ndarray, int]]:
     for wave in waves:
         if not isinstance(wave, str):
             raise ConnectBase64WavesException("base64データは文字列で指定してください")
-        # 上限確認を文字列の複製前に行い、巨大入力を拒否する段階で同量のASCII bytesを確保しない。
+        # 文字列をbytesへ変換する前に上限を確認し、過大な入力で同量のメモリを追加確保しない。
         estimated_bytes = (len(wave) + 3) // 4 * 3
         if decoded_bytes + estimated_bytes > MAX_CONNECTED_WAVE_BYTES:
             raise ConnectBase64WavesException(
@@ -65,7 +65,7 @@ def decode_base64_waves(waves: list[str]) -> list[tuple[np.ndarray, int]]:
             raise ConnectBase64WavesException("base64デコードに失敗しました") from error
         decoded_bytes += len(wav_bin)
         try:
-            # ヘッダー検証と波形読込に同じファイルを使い、WAVを二度開かない。
+            # ヘッダーの確認と波形の読み込みに同じSoundFileを使う。
             with soundfile.SoundFile(io.BytesIO(wav_bin)) as wav_file:
                 if (
                     wav_file.frames <= 0

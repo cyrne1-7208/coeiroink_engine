@@ -26,7 +26,7 @@ concurrency:
 
 permissions:
   contents: read
-  # 指定したworkflow runの成果物を取得するために必要。
+  # 指定したワークフロー実行の成果物を取得するために必要。
   actions: read
 
 defaults:

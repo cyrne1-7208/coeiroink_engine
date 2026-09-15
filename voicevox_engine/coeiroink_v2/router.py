@@ -121,7 +121,7 @@ def _model_value(value: Any, *names: str, default: Any = None) -> Any:
 
 
 def _as_http_error(error: Exception, default_status: int = 500) -> HTTPException:
-    """既知の公開例外だけを安定したHTTPエラーへ変換し、未知の障害はこの関数へ渡さない。"""
+    """既知の例外だけをHTTPエラーへ変換する。未知の例外は呼び出し側で再送出する。"""
 
     if isinstance(error, HTTPException):
         return error
@@ -1106,7 +1106,7 @@ def create_v2_router(
         settings=settings,
         verify_mutability_allowed=verify_mutability_allowed,
     )
-    # 各ルート群には必要な依存だけを共有コンテキストから渡す。
+    # 各ルートには必要な設定と依存だけをcontextから渡す。
     _add_status_routes(router)
     _add_speaker_list_routes(router, context)
     _add_prosody_routes(router, context)

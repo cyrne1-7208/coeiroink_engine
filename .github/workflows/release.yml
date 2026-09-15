@@ -43,7 +43,7 @@ jobs:
             echo "version must use the vX.Y.Z+coeiroink.1.7.3 format: $VERSION" >&2
             exit 2
           fi
-          # OCI/Docker tagでは'+'を使用できないため、GHCRに渡すときだけ'-'へ置換する。
+          # OCIイメージのタグには`+`を使えないため、GHCR用のタグでは`-`へ置き換える。
           echo "container_tag=${VERSION/+/-}" >> "$GITHUB_OUTPUT"
           echo "internal_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
 
@@ -234,7 +234,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          # Windowsでは起動検査直後に実行ファイルのハンドル解放が遅れるため、移動だけ再試行する。
+          # Windowsでは起動確認の直後にファイルハンドルが残る場合があるため、移動だけを再試行する。
           for attempt in $(seq 1 10); do
             if mv dist/run "$TARGET"; then
               break

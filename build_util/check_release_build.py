@@ -1,4 +1,4 @@
-"""依存込みRelease成果物を外部Python環境に頼らず起動確認する。"""
+"""リリース用の配布パッケージが単体で起動できるか確認する。"""
 
 from __future__ import annotations
 

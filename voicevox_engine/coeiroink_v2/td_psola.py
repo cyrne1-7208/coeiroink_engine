@@ -14,7 +14,7 @@ import numpy as np
 PROCESSING_ALGORITHM = "td-psola"
 DEFAULT_FRAME_PERIOD = 0.005
 
-# 不正または過大なリクエストによるmark/grainの無制限確保を防ぎ、音高変化は隣接grainが重なる1オクターブ以内へ制限する。
+# 過大な入力によるmarkとgrainの無制限な確保を防ぐ。音高の変化は、隣接するgrainが重なる1オクターブ以内に制限する。
 MIN_F0_HZ = 20.0
 MAX_F0_HZ = 2000.0
 MIN_PITCH_RATIO = 0.5
@@ -136,14 +136,14 @@ def _sample_f0_track(
                 f0[positive],
             )
 
-    # WORLDが強い雑音から実用的な音声範囲外の値を返しても、巨大grainやゼロ幅stepを作らないよう周期を制限する。
+    # WORLDが音声の範囲を外れた値を返しても、巨大なgrainや幅0のstepが生じないようF0を制限する。
     positive = samples > 0.0
     samples[positive] = np.clip(samples[positive], MIN_F0_HZ, MAX_F0_HZ)
     return samples, voiced
 
 
 def _f0_from_public_world(wave: np.ndarray, sampling_rate: int) -> np.ndarray:
-    # F0軌跡を指定する呼出元がCoreアダプターやWORLDを初期化せず使えるよう、必要時だけ読み込む。
+    # F0軌跡が渡された場合はWORLDを使わないため、必要になった時だけ読み込む。
     from .audio import estimate_world_f0
 
     try:
@@ -237,7 +237,7 @@ def _target_marks(
     end: int,
     sampling_rate: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """目標F0の周期で合成markを進め、各markに最も近い入力grainの索引を対応付ける。"""
+    """目標F0の周期で合成markを進め、各markに最も近い入力grainのインデックスを割り当てる。"""
 
     marks: list[int] = []
     source_indices: list[int] = []

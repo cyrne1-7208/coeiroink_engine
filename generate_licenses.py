@@ -86,7 +86,7 @@ def _read_package_snapshot(path: Path) -> dict[str, tuple[str, str]]:
 
 
 def _read_url(url: str) -> str:
-    """ネットワーク障害で生成処理が無期限に停止しないよう、上限時間付きで本文を取得する。"""
+    """通信障害で処理が止まり続けないよう、タイムアウトを設けて本文を取得する。"""
 
     with urllib.request.urlopen(url, timeout=URL_TIMEOUT_SECONDS) as response:
         return response.read().decode()
@@ -276,7 +276,7 @@ def _matches_declared_license_file(
 
     if path == declared_path:
         return True
-    # 一部のeditable metadataはサブディレクトリを保たず、法的文書を`.dist-info`直下へ配置する。
+    # 一部のeditable metadataはサブディレクトリを保たず、ライセンス関連ファイルを`.dist-info`直下へ配置する。
     if path.name == declared_path.name and any(
         part.endswith(".dist-info") for part in path.parts[:-1]
     ):
@@ -290,7 +290,7 @@ def _matches_declared_license_file(
 
 
 def _legal_documents(package_name: str) -> list[tuple[str, str]]:
-    """メタデータが指定した法的文書と慣例的なライセンス・NOTICE本文を返す。"""
+    """メタデータで指定されたファイルと、一般的なライセンス・NOTICEファイルを返す。"""
 
     try:
         distribution = metadata.distribution(package_name)
@@ -354,7 +354,7 @@ def _legal_documents(package_name: str) -> list[tuple[str, str]]:
 
 
 def _combine_legal_documents(documents: list[tuple[str, str]]) -> str:
-    """複数の法的文書を改変せず、元ファイル名が分かる区切りだけ付けて収録する。"""
+    """複数のライセンス関連ファイルを改変せず、元のファイル名が分かる形で結合する。"""
 
     if len(documents) == 1:
         return documents[0][1]
@@ -364,7 +364,7 @@ def _combine_legal_documents(documents: list[tuple[str, str]]) -> str:
 def _pip_license_rows(
     runtime_packages: dict[str, tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """pip-licensesを実行し、配布対象だけのメタデータ行を返す。"""
+    """pip-licensesを実行し、配布パッケージに含まれるライブラリだけを返す。"""
 
     command = [
         sys.executable,
@@ -404,7 +404,7 @@ def _validate_runtime_package(
     canonical_name: str,
     runtime_packages: dict[str, tuple[str, str]] | None,
 ) -> None:
-    """ライセンス対象の名前と版が、配布前に保存した依存一覧と一致するか確認する。"""
+    """パッケージ名とバージョンが、事前に保存した依存一覧と一致するか確認する。"""
 
     if runtime_packages is None:
         return

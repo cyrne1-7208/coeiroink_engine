@@ -141,7 +141,7 @@ class SudachiAnalyzer:
         ]
 
     def close(self) -> None:
-        """mmap辞書を明示的に閉じて保持資源を解放する。"""
+        """mmap辞書を閉じ、リソースを解放する。"""
         if self._dictionary is None:
             return
         try:

@@ -104,7 +104,7 @@ def _world_process(
     intonation_scale: float,
     adjusted_f0: Sequence[float] | None,
 ) -> np.ndarray:
-    """CoreのWORLD処理を使い、必要なら呼出元が指定したF0軌跡を適用する。"""
+    """CoreのWORLD処理を使い、指定されていればF0軌跡を適用する。"""
 
     if adjusted_f0 is None:
         return as_waveform(
@@ -225,7 +225,7 @@ def _optional_adjusted_f0(value: Sequence[float] | None) -> np.ndarray | None:
         return None
     try:
         if len(value) == 0:
-            # 公式リクエスト例の空配列は、呼出元指定のF0軌跡がないことを表す。
+            # 公式リクエスト例の空配列は、F0軌跡が指定されていないことを表す。
             return None
     except TypeError:
         pass
@@ -451,7 +451,7 @@ def process_wave(
     current = as_waveform(current)
     _require_processing_size(current.size)
 
-    # 旧sampling intervalは通信互換性のため受理するが、公開処理器は安全な解析間隔を内部で決める。
+    # 旧sampling intervalは互換性のため受け付けるが、解析間隔は内部で決めるため使用しない。
     return current, resolved.output_sampling_rate
 
 

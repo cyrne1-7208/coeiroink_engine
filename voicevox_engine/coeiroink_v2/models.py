@@ -105,7 +105,7 @@ class UtilMora(V2BaseModel):
     pitch: float
 
 
-# OpenAPIが生成するコンポーネント名に依存せず、2種類のMora schemaを区別したい呼出元向けの別名。
+# OpenAPI上の名前に依存せず、2種類のMoraスキーマを区別するための別名。
 AudioQueryMora = UtilMora
 VUtilMora = UtilMora
 

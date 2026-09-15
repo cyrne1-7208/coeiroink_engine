@@ -1,4 +1,4 @@
-"""VOICEVOX互換APIで返す公開リソースを不透明なIDへ対応付ける。"""
+"""VOICEVOX互換APIで公開する静的リソースをハッシュIDで管理する。"""
 
 from base64 import b64encode
 from hashlib import sha256

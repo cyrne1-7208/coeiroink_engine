@@ -1,10 +1,10 @@
 # COEIROINK Engine (Forked by Cyrne1)
 
-Cyrne1によってフォークされたCOEIROINK Engineです。HTTP API、MYCOEIROINKモデルのメタデータ管理、リクエスト処理を担当し、音声合成は隣接する[coeiroink_core](https://github.com/cyrne1-7208/coeiroink_core)へ委譲します。GUIと歌唱機能は対象外です。
+Cyrne1によってフォークされたCOEIROINK Engineです。HTTP API、MYCOEIROINKモデルのメタデータ管理、リクエスト処理を担当します。音声合成は、隣接する[coeiroink_core](https://github.com/cyrne1-7208/coeiroink_core)が行います。GUIと歌唱機能は対象外です。
 
 ## 対象環境
 
-EngineとCoreを同じ親ディレクトリへ配置し、利用するバックエンドを1つ選択します。
+EngineとCoreを同じ親ディレクトリに配置し、利用するバックエンドを1つ選択します。
 
 | OS | バックエンド | uv extra | 起動時の指定 | Python |
 | --- | --- | --- | --- | --- |
@@ -15,7 +15,24 @@ EngineとCoreを同じ親ディレクトリへ配置し、利用するバック�
 | Windows x64 | CUDA | `cuda` | `--device cuda` | 3.12 |
 | Windows x64 | DirectML | `directml` | `--device directml` | 3.12 |
 
+## 事前に必要なもの
+
+このリポジトリのソースから`uv sync`でセットアップする場合は、次のものが必要です。
+
+- [uv](https://docs.astral.sh/uv/)
+- [Git](https://git-scm.com/)
+- C/C++のビルド環境（LinuxではGCC/G++、WindowsではMSVC Build Tools）
+- インターネット接続（初回セットアップではPyPI、GitHub、PyTorchのパッケージ配布先に接続します）
+- CUDA版：CUDA 12.8に対応するNVIDIAドライバ
+- OpenCL版：GPUベンダーのOpenCLドライバ、OpenCL C++ヘッダー、ICDローダー、SQLite 3の開発用ヘッダー
+- DirectML版：Windows 10 バージョン1709以降、DirectX 12対応GPU、最新のGPUドライバ
+- Dockerで起動する場合：Docker Engine
+
+Pythonは3.12を使用します。インストールされていない場合は、`uv`がセットアップ時に取得します。
+
 ## セットアップ
+
+`--extra`には、使用するバックエンドを指定します。複数のバックエンドを同時に指定することはできません。
 
 LinuxまたはWindowsのCPU環境では、Engineディレクトリから次を実行します。
 
@@ -23,7 +40,7 @@ LinuxまたはWindowsのCPU環境では、Engineディレクトリから次を�
 uv sync --locked --extra cpu
 ```
 
-CUDAまたはOpenCLでは`cpu`を`cuda`または`opencl`へ置き換えてください。Windows DirectMLでは次を実行します。
+CUDAまたはOpenCLを利用する場合は、`cpu`を`cuda`または`opencl`に置き換えてください。Windows DirectMLでは次を実行します。
 
 ```powershell
 uv sync --python 3.12 --locked --extra directml
@@ -35,7 +52,7 @@ Linux CPUではセットアップスクリプトも利用できます。
 bash build_util/setup_mycoeiroink_linux_cpu.bash .venv ../coeiroink_core
 ```
 
-MYCOEIROINKのZIPを展開し、モデルフォルダを`/path/to/speaker_info`直下へ配置します。ZIPファイル自体ではなく、展開後のディレクトリを指定してください。
+MYCOEIROINKのZIPを展開し、モデルのディレクトリを`/path/to/speaker_info`直下へ配置します。ZIPファイル自体は指定できません。
 
 ```bash
 .venv/bin/python run.py \
@@ -44,17 +61,24 @@ MYCOEIROINKのZIPを展開し、モデルフォルダを`/path/to/speaker_info`�
   --device cpu
 ```
 
-Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。モデルは必要になった時点でロードされ、既定では直近の1モデルを保持します。`--max-loaded-models 3`のような数値指定では直近の指定数をLRU保持し、`--max-loaded-models`または`--max-loaded-models all`では全モデルを起動時に読み込みます。利用可能メモリが不足する場合は指定値にかかわらず古いモデルから解放するため、全件が収まらない環境では`all`でも一部モデルが要求時の再ロードになります。
+Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。
 
-モデルは既定でgenerator-onlyローダーを使用します。VITSの推論に不要な学習用重みを最初から読み込まないため、通常の合成処理や出力を変えずにモデルロード時のピークメモリを抑えます。旧`--experimental generator-only`指定も互換用に受け付けますが、現在は指定不要です。
+モデルは必要になったときに読み込まれます。既定では、最後に使った1モデルを保持します。
 
-実験的な音声補正は、`--experimental voice-smoothing`を指定すると有効になります。既定では無効で、必要な依存は各バックエンド用extraに含まれます。
+- `--max-loaded-models 3`のように数値を指定すると、最近使ったモデルから順にその数まで保持します。
+- `--max-loaded-models`または`--max-loaded-models all`を指定すると、起動時に全モデルを読み込みます。
+
+空きメモリが足りない場合は、設定にかかわらず、最後に使ってから最も時間が経ったモデルを解放します。そのため、すべてのモデルがメモリに収まらない環境では、`all`を指定してもリクエスト時にモデルの再読み込みが発生します。
+
+モデルの読み込みには、既定でgenerator-onlyローダーを使用します。VITSの推論に必要な重みだけを読み込むため、合成結果を変えずにメモリ使用量を抑えられます。
+
+実験的な音声補正は、`--experimental voice-smoothing`を指定すると有効になります。既定では無効です。必要なライブラリは各バックエンド用のuv extraに含まれます。
 
 ```bash
 .venv/bin/python run.py --speaker_info_dir /path/to/speaker_info --device cpu --experimental voice-smoothing
 ```
 
-Coreで音色の細かな揺れを時間幅15ms・強さ0.85でならし、弱い周期間隔補正も適用します。`/v1/synthesis`とVOICEVOX互換の合成経路で有効になり、生波形を返す`/v1/predict`・`/v1/predict_with_duration`と、持ち込み波形の`/v1/process`は変更しません。CPUとDirectMLではParselmouthとSciPy、CUDAとOpenCLでは選択したGPU上の専用実装で補正します。`--experimental soxr --experimental voice-smoothing`のように、ほかの実験機能と併用できます。CPUとDirectMLで利用する[Parselmouth](https://github.com/YannickJadoul/Parselmouth)にはGPL-3.0-or-laterが適用されます。
+この機能は、Coreで母音の音色や周期の細かな揺れを抑えます。`/v1/synthesis`とVOICEVOX互換の合成で有効になります。`/v1/predict`、`/v1/predict_with_duration`、`/v1/process`が返す波形には適用されません。CPUとDirectMLでは補正をCPU上のParselmouthとSciPyで行い、CUDAとOpenCLでは選択したGPU上で行います。`--experimental soxr --experimental voice-smoothing`のように、ほかの実験的機能と併用できます。CPUとDirectMLで利用する[Parselmouth](https://github.com/YannickJadoul/Parselmouth)にはGPL-3.0-or-laterが適用されます。
 
 Dockerで起動する場合は、CoreとEngineを含む親ディレクトリをビルドコンテキストにしてください。
 
@@ -66,7 +90,7 @@ docker run --rm -p 127.0.0.1:50032:50032 \
   coeiroink-engine:cpu
 ```
 
-Linux CUDAとOpenCLも同じDockerfileから`COEIROINK_BACKEND=cuda`または`opencl`を指定してビルドできます。CUDAは`--gpus all`、OpenCLはホストのICDとデバイスをコンテナへ渡し、必要に応じて`COEIROINK_DEVICE`を指定してください。Windows CPU・CUDA・DirectMLはWindows用のリリースアーカイブで提供し、Linux用Dockerイメージとは分けて扱います。
+Linux CUDA版とOpenCL版も、同じDockerfileからビルドできます。`COEIROINK_BACKEND`には`cuda`または`opencl`を指定してください。CUDAでは`--gpus all`を指定します。OpenCLではホストのICDとデバイスをコンテナへ渡し、必要に応じて`COEIROINK_DEVICE`を指定します。WindowsのCPU・CUDA・DirectML版は、Dockerイメージではなくリリースアーカイブで提供します。
 
 ## API
 
@@ -78,7 +102,7 @@ curl http://127.0.0.1:50032/v1/engine_info
 curl http://127.0.0.1:50032/v1/speakers
 ```
 
-COEIROINK v2形式のAPIは`/v1/predict`、`/v1/predict_with_duration`、`/v1/process`、`/v1/synthesis`などを提供します。OpenAPIドキュメントは`http://127.0.0.1:50032/docs`、定義JSONは`/openapi.json`で確認できます。
+COEIROINK v2形式のAPIは`/v1/predict`、`/v1/predict_with_duration`、`/v1/process`、`/v1/synthesis`などを提供します。OpenAPIドキュメントは`http://127.0.0.1:50032/docs`、定義JSONは`http://127.0.0.1:50032/openapi.json`で確認できます。
 
 VOICEVOX互換の通常音声APIは`/voicevox`配下にあります。クエリ作成と合成の例は次のとおりです。
 
@@ -91,7 +115,7 @@ curl -s -H 'Content-Type: application/json' -X POST --data-binary @query.json 'h
 
 ## モデルと辞書
 
-モデルのメタデータには話者UUID、スタイルID、アイコン、ライセンス、サンプルを含めてください。Engineはモデルフォルダ名ではなくメタデータの識別子を使います。
+モデルのメタデータには話者UUID、スタイルID、アイコン、ライセンス、サンプルを含めてください。Engineはモデルのディレクトリ名ではなく、メタデータの識別子を使います。
 
 ユーザー辞書は`/voicevox/user_dict`と`/voicevox/user_dict_word`から管理できます。Open JTalkの既定辞書は`default.csv`です。ユーザー辞書はOSのユーザーデータ領域へ保存されます。
 
@@ -106,7 +130,7 @@ uv run --locked --extra cpu --group dev ruff format --check .
 
 ## ライセンス
 
-本リポジトリのソースコードは、個別にライセンスが示されているものを除き、LGPL-3.0-onlyです。詳細は[LICENSE](./LICENSE)を参照してください。GPLv3の参照本文と同梱ライブラリのライセンス原文は`licenses/`へ収録しています。配布対象へ入る実行時依存の一覧は、バックエンドごとに`engine_manifest_assets/dependency_licenses.json`へ生成します。
+本リポジトリのソースコードは、個別にライセンスが示されているものを除き、LGPL-3.0-onlyです。詳細は[LICENSE](./LICENSE)を参照してください。GPLv3の参照本文と、同梱するライブラリのライセンス原文は`licenses/`に収録しています。配布パッケージに含まれるライブラリの一覧は、バックエンドごとに`engine_manifest_assets/dependency_licenses.json`へ出力されます。
 
 ## 謝辞
 

@@ -29,16 +29,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# EngineのprofileをCoreへ転送し、Coreの実行backendと依存wheelを必ず一致させる。
+# Engineで選んだextraをCoreにも適用し、バックエンドと依存するwheelを揃える。
 cpu = [
     "coeirocore[cpu]==0.2.0+coeiroink.1.7.3",
-    # root projectでCPU wheelのindexを選ぶため、Coreと同じ組を明示する。
+    # ルートプロジェクトでCPU用wheelの配布先を選ぶため、Coreと同じ組み合わせを指定する。
     "torch==2.10.0",
     "torchaudio==2.10.0",
 ]
 cuda = [
     "coeirocore[cuda]==0.2.0+coeiroink.1.7.3",
-    # root projectでCUDA wheelのindexを選ぶため、Coreと同じ組を明示する。
+    # ルートプロジェクトでCUDA用wheelの配布先を選ぶため、Coreと同じ組み合わせを指定する。
     "torch==2.10.0",
     "torchaudio==2.10.0",
 ]
@@ -47,18 +47,18 @@ directml = [
 ]
 opencl = [
     "coeirocore[opencl]==0.2.0+coeiroink.1.7.3",
-    # uvのextra別sourceを有効にし、Core内のnative packageとCPU版Torchを同じlockへ固定する。
+    # OpenCL用のsource設定を有効にし、Core内のネイティブパッケージとCPU版Torchを同じuv.lockで固定する。
     "coeiroink-opencl==0.2.0+coeiroink.1.7.3; sys_platform == 'linux'",
     "torch==2.10.0; sys_platform == 'linux'",
     "torchaudio==2.10.0; sys_platform == 'linux'",
 ]
 sudachi = [
-    # SudachiPyはRust実装の検証済みwheelを使い、通常のEngine構築には含めない。
+    # SudachiPyはRust実装を含むwheelを使い、通常のEngine構築には含めない。
     "sudachipy==0.6.11",
     "sudachidict_full==20260723",
 ]
 soxr = [
-    # Coreの高品質リサンプラーを任意機能として明示導入する。
+    # Coreの高品質リサンプラーは、選択した場合だけ導入する。
     "coeirocore[soxr]==0.2.0+coeiroink.1.7.3",
 ]
 [dependency-groups]
@@ -76,7 +76,7 @@ licenses = ["pip-licenses>=5,<6"]
 
 [tool.uv]
 default-groups = []
-# 異なるbackend wheelを同一環境へ混在させないよう、全profileを相互排他にする。
+# 異なるバックエンドのwheelが同じ環境に入らないよう、各extraを同時に指定できない設定にする。
 conflicts = [
     [
         { extra = "cpu" },
@@ -102,7 +102,7 @@ conflicts = [
         { extra = "directml" },
         { extra = "opencl" },
     ],
-    # Coreは別projectとしてlockへ入るため、Core側extraの相互排他もroot lockで再宣言する。
+    # Coreは別のプロジェクトとして解決されるため、Core側のextraも同時に指定できないよう設定する。
     [
         { package = "coeirocore", extra = "cpu" },
         { package = "coeirocore", extra = "cuda" },
@@ -127,7 +127,7 @@ conflicts = [
         { package = "coeirocore", extra = "directml" },
         { package = "coeirocore", extra = "opencl" },
     ],
-    # EngineとCoreで異なるbackend extraが同時に有効になる理論上の組合せも除外し、Torch indexを一意にする。
+    # EngineとCoreで異なるバックエンドが選ばれないようにし、Torchの配布先を一つに決める。
     [
         { extra = "cpu" },
         { package = "coeirocore", extra = "cuda" },
@@ -183,9 +183,9 @@ environments = [
 ]
 
 [tool.uv.sources]
-# Engineは隣接するCoreを明示的に利用する。配布時はこのsourceをwheelまたはgitへ置き換える。
+# このソースツリーでは、隣接するCoreを使用する。
 coeirocore = { path = "../coeiroink_core", editable = true }
-# OpenCL native packageはCoreのソースを参照し、Engine側のlockでも入力を明示する。
+# OpenCLのネイティブパッケージはCore内のソースを参照し、Engine側のuv.lockにも含める。
 coeiroink-opencl = [
     { path = "../coeiroink_core/native/opencl", extra = "opencl" },
 ]
@@ -202,7 +202,7 @@ torchaudio = [
 ]
 
 [tool.uv.extra-build-dependencies]
-# C++拡張のABI不一致を避けるため、OpenCL拡張を選択した実行時Torchと同じ版でビルドする。
+# C++ ABIの不一致を避けるため、OpenCL拡張のビルド時と実行時で同じTorchを使う。
 coeiroink-opencl = [
     { requirement = "torch", match-runtime = true },
 ]
@@ -210,7 +210,7 @@ coeiroink-opencl = [
 [[tool.uv.dependency-metadata]]
 name = "coeiroink-opencl"
 version = "0.2.0+coeiroink.1.7.3"
-# backend別TorchはEngineのextraで固定するため、ローカルpackageの重複要件をlock解決へ持ち込まない。
+# TorchのバージョンはEngineのextraで固定しているため、ローカルパッケージ側では重ねて指定しない。
 requires-dist = []
 
 [[tool.uv.index]]

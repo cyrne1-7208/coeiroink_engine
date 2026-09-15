@@ -1,10 +1,9 @@
 ## このソフトウェアについて
 
-本ソフトウェアは、Cyrne1によってフォークされたCOEIROINK Engineです。
+本ソフトウェアは、Cyrne1によってフォークされたCOEIROINK Engineで、Cyrne1が提供しています。
 
-- このソフトウェアはCyrne1によって提供されています。
 - COEIROINKおよびVOICEVOXの公式提供物ではありません。
-- VOICEVOX公式と使える機能が異なる可能性があります。
+- VOICEVOX公式版とは、利用できる機能が異なる場合があります。
 
 各プロジェクトの詳細はこちらからご確認ください。
 
@@ -22,6 +21,5 @@
 
 ## 謝辞・クレジット
 
-[シロワニさん](https://x.com/shirowanisan)
-
-[@hiho_karuta](https://twitter.com/hiho_karuta)
+- [シロワニさん](https://x.com/shirowanisan)（COEIROINK開発者）
+- [hihoさん（@hiho_karuta）](https://x.com/hiho_karuta)（VOICEVOX開発者）

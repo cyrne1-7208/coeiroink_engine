@@ -32,7 +32,7 @@ class DurationConversionError(ValueError):
     """Raised when the token, prosody, and duration streams do not align."""
 
 
-# API上の概念名を使いたい呼出元向けの短い別名であり、別の例外型は作らない。
+# APIで使う名前に合わせた別名。例外の種類は元のまま変えない。
 DurationError = DurationConversionError
 
 

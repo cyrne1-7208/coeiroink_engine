@@ -20,8 +20,8 @@ WORKDIR /opt/coeiroink
 RUN useradd --create-home --uid 10001 coeiroink \
     && install -d -o coeiroink -g coeiroink /opt/coeiroink/speaker_info
 
-# pyopenjtalkとPyWorldのビルド、ESPnetの取得、音声出力に必要なLinux依存。
-# OpenCLだけはホスト側のICDを利用するため、コンテナにはloaderのみ入れる。
+# pyopenjtalkとPyWorldのビルド、ESPnetの取得、音声出力に必要なパッケージを導入する。
+# OpenCLのICDはホスト側のものを使うため、コンテナにはローダーだけを入れる。
 RUN set -eux; \
     apt-get update; \
     case "$COEIROINK_BACKEND" in \
@@ -42,7 +42,7 @@ COPY --chown=coeiroink:coeiroink coeiroink_engine /opt/coeiroink/coeiroink_engin
 
 WORKDIR /opt/coeiroink/coeiroink_engine
 
-# バックエンドごとに依存profileを分離し、同じイメージへ異なるTorch wheelを混在させない。
+# バックエンドごとに依存関係を分け、異なるTorchのwheelを同じイメージに入れない。
 # 公式PythonイメージのC++共有ライブラリ用リンカーはgccのため、pyopenjtalkをlibstdc++へ正しくリンクする。
 RUN CXX=g++ LDCXXSHARED="g++ -shared" \
     uv sync --locked --extra "$COEIROINK_BACKEND" --no-dev \

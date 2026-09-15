@@ -45,7 +45,7 @@ def _to_core_mora(mora: EngineMora) -> CoreMora:
 def _to_core_query(
     accent_phrases: Sequence[EngineAccentPhrase],
 ) -> CoreAudioQuery:
-    """Engineの解析結果をCoreのプロソディトークン変換だけに必要なAudioQueryへ写像する。"""
+    """Engineの解析結果を、Coreのプロソディ変換に必要なAudioQueryへ変換する。"""
 
     return CoreAudioQuery(
         accent_phrases=[

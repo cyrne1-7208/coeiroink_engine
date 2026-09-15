@@ -62,7 +62,7 @@ concurrency:
 
 permissions:
   contents: read
-  # 非公開設定のGHCRイメージもpullして検証できるようにする。
+  # 非公開のGHCRイメージも取得できるようにする。
   packages: read
 
 defaults:
@@ -159,7 +159,7 @@ jobs:
           IMAGE: ${{ steps.image.outputs.name }}
         run: |
           set -euo pipefail
-          # GitHub-hosted標準runnerにはGPUがないため、CUDA/OpenCL imageもCPU deviceでHTTP起動だけ確認する。
+          # GitHub-hosted runnerにはGPUがないため、CUDA/OpenCLイメージはCPUで起動し、HTTP応答だけを確認する。
           container_id="$(docker run --detach --env COEIROINK_DEVICE=cpu --publish 127.0.0.1:50032:50032 "$IMAGE")"
           cleanup() {
             local status="$1"

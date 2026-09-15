@@ -119,7 +119,7 @@ def set_output_log_utf8() -> None:
 
 
 def _create_lifespan(cancellable_engine: CancellableEngine | None):
-    """起動時の辞書更新と、任意のキャンセル監視タスクの寿命を管理する。"""
+    """起動時の辞書更新と、キャンセル監視タスクの開始・終了を管理する。"""
 
     cancellable_disconnection_task: asyncio.Task | None = None
 
@@ -139,7 +139,7 @@ def _create_lifespan(cancellable_engine: CancellableEngine | None):
                 try:
                     await cancellable_disconnection_task
                 except asyncio.CancelledError:
-                    # lifespan終了時に自分で取り消した監視タスクの完了通知なので、異常終了として扱わない。
+                    # サーバー終了時にキャンセルした監視タスクなので、異常終了として扱わない。
                     pass
                 cancellable_disconnection_task = None
             if cancellable_engine is not None:
@@ -176,7 +176,7 @@ def _add_cors_middleware(
     cors_policy_mode: CorsPolicyMode,
     allow_origin: list[str] | None,
 ) -> None:
-    """CLI設定からCORS許可リストを作り、不許可Originを一箇所で遮断する。"""
+    """CLI設定からCORSの許可リストを作り、許可されていないOriginを拒否する。"""
 
     localhost_regex = "^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$"
     compiled_localhost_regex = re.compile(localhost_regex)
@@ -226,7 +226,7 @@ def generate_app(
     cancellable_engine: CancellableEngine | None = None,
     disable_mutable_api: bool = False,
 ) -> FastAPI:
-    """Coreアダプター群をCOEIROINK v2 APIと`/voicevox`互換APIへ束ねたFastAPIアプリを構築する。"""
+    """COEIROINK v2 APIとVOICEVOX互換APIを提供するFastAPIアプリを作る。"""
 
     if root_dir is None:
         root_dir = engine_root()
@@ -259,7 +259,7 @@ def generate_app(
     resource_manager = ResourceManager(speaker_info_dir)
     verify_mutability_allowed = mutability_guard(disable_mutable_api)
 
-    # `/v1`と`/voicevox`はcomposition rootから渡された同じCoreを共有する。
+    # `/v1`と`/voicevox`は同じAudioManagerを共有する。
     app.include_router(
         create_v2_router(
             audio_manager=audio_manager,
@@ -349,7 +349,7 @@ if __name__ == "__main__":
         action="append",
         choices=("generator-only", "soxr", "voice-smoothing"),
         default=[],
-        help="任意機能を明示的に有効化します。複数の機能を有効化する場合は、このオプションを繰り返し指定します。",
+        help="実験的な機能を有効にします。複数指定する場合は、このオプションを繰り返してください。",
     )
     parser.add_argument(
         "--voicevox_dir",
@@ -380,7 +380,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--enable_mock",
         action="store_true",
-        help="旧起動引数との互換用です。現行の合成経路は変更しません。",
+        help="旧起動引数との互換用です。指定しても現在の動作には影響しません。",
     )
     parser.add_argument(
         "--enable_cancellable_synthesis",
@@ -424,8 +424,8 @@ if __name__ == "__main__":
         "--output_log_utf8",
         action="store_true",
         help=(
-            "指定するとログ出力をUTF-8でおこないます。指定しないと、代わりに環境変数 VV_OUTPUT_LOG_UTF8 の値が使われます。"
-            "VV_OUTPUT_LOG_UTF8 の値が1の場合はUTF-8で、0または空文字、値がない場合は環境によって自動的に決定されます。"
+            "指定するとログをUTF-8で出力します。指定しない場合は環境変数VV_OUTPUT_LOG_UTF8の値を使います。"
+            "値が1ならUTF-8を使い、0、空文字、未設定の場合は実行環境に合わせて決定します。"
         ),
     )
 
@@ -455,9 +455,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    # 実験機能名を下位層の具体的な実装設定へ変換する。
+    # CLIで指定された実験的機能を、Coreへ渡す設定に変換する。
     args.resampler = "soxr-vhq" if "soxr" in args.experimental else "resampy"
-    # generator-only指定は旧CLIとの互換用に受理し、現在は指定の有無にかかわらず通常経路として使用する。
+    # generator-onlyは既定で有効だが、以前のCLIとの互換性を保つため同名の指定も受け付ける。
     args.generator_only = True
     args.voice_smoothing = "voice-smoothing" in args.experimental
 
