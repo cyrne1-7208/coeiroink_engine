@@ -455,9 +455,10 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    # 公開フラグは実験機能名だけにし、下位層には既存の具体的な実装名を渡す。
+    # 実験機能名を下位層の具体的な実装設定へ変換する。
     args.resampler = "soxr-vhq" if "soxr" in args.experimental else "resampy"
-    args.generator_only = "generator-only" in args.experimental
+    # generator-only指定は旧CLIとの互換用に受理し、現在は指定の有無にかかわらず通常経路として使用する。
+    args.generator_only = True
     args.voice_smoothing = "voice-smoothing" in args.experimental
 
     try:

@@ -7,7 +7,7 @@ import sys
 from argparse import ArgumentParser
 from importlib.util import find_spec
 from pathlib import Path
-from shutil import copy2, copytree
+from shutil import copy2, copytree, ignore_patterns
 
 from PyInstaller.utils.hooks import (
     collect_all,
@@ -137,8 +137,15 @@ for source in (
     "README.md",
 ):
     copy2(source, target_dir)
-for source in ("engine_manifest_assets", "licenses", "ui_template"):
+for source in ("engine_manifest_assets", "ui_template"):
     copytree(source, target_dir / source, dirs_exist_ok=True)
+# uvはコンテナだけに同梱されるため、その表示文書を通常のstandalone成果物から除外する。
+copytree(
+    "licenses",
+    target_dir / "licenses",
+    dirs_exist_ok=True,
+    ignore=ignore_patterns("container"),
+)
 
 # 配布元のマニフェストは共通のまま保ち、Windows成果物だけ実行ファイル名を調整する。
 if sys.platform == "win32":

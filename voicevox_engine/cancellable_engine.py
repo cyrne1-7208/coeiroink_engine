@@ -539,7 +539,7 @@ def start_synthesis_subprocess(
         enable_mock=args.enable_mock,
         # 各ワーカーで全モデルを複製するとプロセス数に比例してメモリを消費するため、キャンセル経路は要求されたモデルだけを保持する。
         max_loaded_models=1,
-        generator_only=getattr(args, "generator_only", False),
+        generator_only=getattr(args, "generator_only", True),
         voice_smoothing=args.voice_smoothing,
     )
     if not synthesis_engines:

@@ -21,7 +21,6 @@ dependencies = [
     "pyopenjtalk @ git+https://github.com/r9y9/pyopenjtalk.git@v0.4.1",
     "pyyaml>=6.0.1,<7",
     "requests>=2.32,<3",
-    "resampy>=0.4.3,<1",
     "scipy>=1.16,<2",
     "soundfile>=0.14,<1",
     "starlette>=1.6,<2",
@@ -68,6 +67,7 @@ build = [
     "pyinstaller>=6.16,<7",
 ]
 dev = [
+    # FastAPIのTestClientが旧httpx互換経路へ戻らないよう、推奨クライアントを明示する。
     "httpx2>=2.12,<3",
     "pytest>=8.3,<9",
     "ruff>=0.11,<1",

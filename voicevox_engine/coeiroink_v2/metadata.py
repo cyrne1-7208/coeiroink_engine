@@ -466,23 +466,26 @@ class SpeakerMetadataStore:
             for path in folder.iterdir()
             if path.is_file() and path.name.lower().startswith("license")
         ]
-        return sorted(paths, key=lambda path: (path.name.lower(), path.name))
+        return sorted(
+            paths,
+            key=lambda path: (
+                path.name.lower() != "license.txt",
+                path.name.lower(),
+                path.name,
+            ),
+        )
 
     def read_license(self, speaker_uuid: str) -> str | None:
-        """Read the canonical license, falling back to the first LICENSE file.
-
-        ``LICENSE.txt`` is preferred when a package also contains an
-        author-specific ``LICENSE_*.txt``.  ``license_paths`` remains
-        available to callers that need to present every license separately.
-        """
+        """Read every speaker license while preserving the single-file response."""
 
         paths = self.license_paths(speaker_uuid)
         if not paths:
             return None
-        preferred = next(
-            (path for path in paths if path.name.lower() == "license.txt"), paths[0]
+        if len(paths) == 1:
+            return _read_text(paths[0], "speaker license")
+        return "\n\n".join(
+            f"## {path.name}\n\n{_read_text(path, 'speaker license')}" for path in paths
         )
-        return _read_text(preferred, "speaker license")
 
     def speaker_policy(self, speaker_uuid: str) -> SpeakerPolicy:
         """Return policy and optional license text for one speaker."""

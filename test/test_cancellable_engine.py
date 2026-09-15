@@ -407,7 +407,6 @@ def test_subprocess_passes_device_without_preloading_every_model():
         enable_mock=True,
         resampler="soxr-vhq",
         max_loaded_models=None,
-        generator_only=True,
         voice_smoothing=True,
     )
 

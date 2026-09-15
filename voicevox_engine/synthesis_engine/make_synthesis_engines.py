@@ -58,7 +58,7 @@ def make_audio_manager(
     cpu_num_threads: int | None = None,
     resampler: str = "resampy",
     max_loaded_models: int | None = 1,
-    generator_only: bool = False,
+    generator_only: bool = True,
     voice_smoothing: bool = False,
 ) -> AudioManager:
     """起動設定を正規化し、ネイティブAPIと互換APIが共有するCoreを生成する。"""
@@ -110,7 +110,7 @@ def make_synthesis_engines(
     cpu_num_threads: int | None = None,
     enable_mock: bool = True,
     max_loaded_models: int | None = 1,
-    generator_only: bool = False,
+    generator_only: bool = True,
     speaker_info_dir: Path | None = None,
     device: str | None = None,
     device_index: int = 0,
@@ -139,8 +139,8 @@ def make_synthesis_engines(
         旧Engineとの呼び出し互換性のために受け取る。
     max_loaded_models: int | None, optional, default=1
         直近に使ったMYCOEIROINKモデルの保持上限。Noneでは全モデルを起動時に読み込む。
-    generator_only: bool, optional, default=False
-        VITSの推論用generatorだけを読み込む実験機能。
+    generator_only: bool, optional, default=True
+        VITSの推論用generatorだけを読み込む。非対応モデルではFalseを指定する。
     voice_smoothing: bool, optional, default=False
         Coreの実験的な音声補正を有効化する。
     speaker_info_dir: Path, optional, default=None

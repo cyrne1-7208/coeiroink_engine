@@ -1,9 +1,9 @@
 ## このソフトウェアについて
 
-[シロワニさん](https://twitter.com/shirowanisan) が作成した「[COEIROINK](https://coeiroink.com)」を、オープンソースの「[VOICEVOX](https://voicevox.hiroshiba.jp)」の操作画面で動かせるようにしたものです。
+本ソフトウェアは、Cyrne1によってフォークされたCOEIROINK Engineです。
 
-- このソフトウェアはシロワニさんにより提供されています。
-- COEIROINKはVOICEVOX公式の活動とは全く関係のない別のプロジェクトです。
+- このソフトウェアはCyrne1によって提供されています。
+- COEIROINKおよびVOICEVOXの公式提供物ではありません。
 - VOICEVOX公式と使える機能が異なる可能性があります。
 
 各プロジェクトの詳細はこちらからご確認ください。
@@ -14,10 +14,14 @@
 
 ## 利用規約・禁止事項
 
-こちらをご確認ください。
+本プロジェクトのソースコードには[LGPL-3.0-only](https://github.com/cyrne1-7208/coeiroink_engine/blob/main/LICENSE)が適用されます。
+
+音声モデル、キャラクター、生成音声の利用条件は、COEIROINKおよび各音声ライブラリ配布者の規約をご確認ください。
 
 [COEIROINK 利用規約](https://coeiroink.com/terms)
 
 ## 謝辞・クレジット
+
+[シロワニさん](https://x.com/shirowanisan)
 
 [@hiho_karuta](https://twitter.com/hiho_karuta)

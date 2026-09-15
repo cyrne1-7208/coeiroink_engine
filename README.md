@@ -46,7 +46,7 @@ MYCOEIROINKのZIPを展開し、モデルフォルダを`/path/to/speaker_info`�
 
 Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。モデルは必要になった時点でロードされ、既定では直近の1モデルを保持します。`--max-loaded-models 3`のような数値指定では直近の指定数をLRU保持し、`--max-loaded-models`または`--max-loaded-models all`では全モデルを起動時に読み込みます。利用可能メモリが不足する場合は指定値にかかわらず古いモデルから解放するため、全件が収まらない環境では`all`でも一部モデルが要求時の再ロードになります。
 
-実験的なgenerator-onlyローダーは`--experimental generator-only`で有効化できます。VITSの推論に不要な学習用重みを最初から読み込まないため、通常の合成処理や出力を変えずにモデルロード時のピークメモリを抑えます。
+モデルは既定でgenerator-onlyローダーを使用します。VITSの推論に不要な学習用重みを最初から読み込まないため、通常の合成処理や出力を変えずにモデルロード時のピークメモリを抑えます。旧`--experimental generator-only`指定も互換用に受け付けますが、現在は指定不要です。
 
 実験的な音声補正は、`--experimental voice-smoothing`を指定すると有効になります。既定では無効で、必要な依存は各バックエンド用extraに含まれます。
 
@@ -54,7 +54,7 @@ Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポ�
 .venv/bin/python run.py --speaker_info_dir /path/to/speaker_info --device cpu --experimental voice-smoothing
 ```
 
-Coreで音色の細かな揺れを時間幅15ms・強さ0.85でならし、弱い周期間隔補正も適用します。`/v1/synthesis`とVOICEVOX互換の合成経路で有効になり、生波形を返す`/v1/predict`・`/v1/predict_with_duration`と、持ち込み波形の`/v1/process`は変更しません。CPUとDirectMLではParselmouthとSciPy、CUDAとOpenCLでは選択したGPU上の専用実装で補正します。`--experimental generator-only --experimental voice-smoothing`のように、ほかの実験機能と併用できます。CPUとDirectMLで利用する[Parselmouth](https://github.com/YannickJadoul/Parselmouth)にはGPL-3.0-or-laterが適用されます。
+Coreで音色の細かな揺れを時間幅15ms・強さ0.85でならし、弱い周期間隔補正も適用します。`/v1/synthesis`とVOICEVOX互換の合成経路で有効になり、生波形を返す`/v1/predict`・`/v1/predict_with_duration`と、持ち込み波形の`/v1/process`は変更しません。CPUとDirectMLではParselmouthとSciPy、CUDAとOpenCLでは選択したGPU上の専用実装で補正します。`--experimental soxr --experimental voice-smoothing`のように、ほかの実験機能と併用できます。CPUとDirectMLで利用する[Parselmouth](https://github.com/YannickJadoul/Parselmouth)にはGPL-3.0-or-laterが適用されます。
 
 Dockerで起動する場合は、CoreとEngineを含む親ディレクトリをビルドコンテキストにしてください。
 
@@ -106,7 +106,7 @@ uv run --locked --extra cpu --group dev ruff format --check .
 
 ## ライセンス
 
-LGPL-3.0-onlyです。詳細は[LICENSE](./LICENSE)を参照してください。GPLv3の参照本文と同梱ライブラリのライセンス原文は`licenses/`へ収録しています。配布対象へ入る実行時依存の一覧は、バックエンドごとに`engine_manifest_assets/dependency_licenses.json`へ生成します。
+本リポジトリのソースコードは、個別にライセンスが示されているものを除き、LGPL-3.0-onlyです。詳細は[LICENSE](./LICENSE)を参照してください。GPLv3の参照本文と同梱ライブラリのライセンス原文は`licenses/`へ収録しています。配布対象へ入る実行時依存の一覧は、バックエンドごとに`engine_manifest_assets/dependency_licenses.json`へ生成します。
 
 ## 謝辞
 
