@@ -87,7 +87,7 @@ conflicts = [[
 
 [[manifest.dependency-metadata]]
 name = "coeiroink-opencl"
-version = "0.2.0+coeiroink.1.7.3"
+version = "0.2.1+coeiroink.1.7.3"
 
 [[package]]
 name = "absl-py"
@@ -266,7 +266,7 @@ wheels = [
 
 [[package]]
 name = "coeirocore"
-version = "0.2.0+coeiroink.1.7.3"
+version = "0.2.1+coeiroink.1.7.3"
 source = { editable = "../coeiroink_core" }
 dependencies = [
     { name = "espnet-tts-frontend" },
@@ -359,7 +359,7 @@ dev = [
 
 [[package]]
 name = "coeiroink-engine"
-version = "0.2.0+coeiroink.1.7.3"
+version = "0.2.1+coeiroink.1.7.3"
 source = { editable = "." }
 dependencies = [
     { name = "coeirocore" },
@@ -473,7 +473,7 @@ licenses = [{ name = "pip-licenses", specifier = ">=5,<6" }]
 
 [[package]]
 name = "coeiroink-opencl"
-version = "0.2.0+coeiroink.1.7.3"
+version = "0.2.1+coeiroink.1.7.3"
 source = { directory = "../coeiroink_core/native/opencl" }
 
 [[package]]

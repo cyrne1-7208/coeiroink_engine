@@ -30,12 +30,11 @@ for text, (consonant, vowel) in openjtalk_text2mora.items():
             is_interrogative=False,
         )
 
+_MAX_MORA_TEXT_LENGTH = max(map(len, text2mora_with_unvoice))
+
 
 def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
-    """
-    最長一致（longest match）により読み仮名からAccentPhraseを生成する
-    入力長Nに対し計算量O(N^2)
-    """
+    """登録済みモーラの最長一致により、読み仮名をAccentPhraseへ変換する。"""
     accent_index: int | None = None
     moras: list[Mora] = []
 
@@ -54,7 +53,9 @@ def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
             accent_index = len(moras)
             base_index += 1
             continue
-        for watch_index in range(base_index, len(phrase)):
+        # 最長モーラより先には一致候補がないため、句末まで走査しない。
+        end_index = min(base_index + _MAX_MORA_TEXT_LENGTH, len(phrase))
+        for watch_index in range(base_index, end_index):
             if phrase[watch_index] == ACCENT_SYMBOL:
                 break
             stack += phrase[watch_index]
@@ -62,7 +63,8 @@ def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
                 matched_text = stack
         # 確定したモーラを現在のアクセント句へ追加する。
         if matched_text is None:
-            raise ParseKanaError(ParseKanaErrorCode.UNKNOWN_TEXT, text=stack)
+            unknown_text = phrase[base_index:].split(ACCENT_SYMBOL, 1)[0]
+            raise ParseKanaError(ParseKanaErrorCode.UNKNOWN_TEXT, text=unknown_text)
         moras.append(text2mora_with_unvoice[matched_text].model_copy(deep=True))
         base_index += len(matched_text)
         stack = ""

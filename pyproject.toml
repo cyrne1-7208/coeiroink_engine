@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coeiroink-engine"
-version = "0.2.0+coeiroink.1.7.3"
+version = "0.2.1+coeiroink.1.7.3"
 description = "COEIROINK Engine HTTP server"
 requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }
 dependencies = [
-    "coeirocore==0.2.0+coeiroink.1.7.3",
+    "coeirocore==0.2.1+coeiroink.1.7.3",
     "fastapi>=0.141,<0.142",
     "jinja2>=3.1.4,<4",
     "kanalizer>=0.1.1,<0.2",
@@ -31,24 +31,24 @@ dependencies = [
 [project.optional-dependencies]
 # Engineで選んだextraをCoreにも適用し、バックエンドと依存するwheelを揃える。
 cpu = [
-    "coeirocore[cpu]==0.2.0+coeiroink.1.7.3",
+    "coeirocore[cpu]==0.2.1+coeiroink.1.7.3",
     # ルートプロジェクトでCPU用wheelの配布先を選ぶため、Coreと同じ組み合わせを指定する。
     "torch==2.10.0",
     "torchaudio==2.10.0",
 ]
 cuda = [
-    "coeirocore[cuda]==0.2.0+coeiroink.1.7.3",
+    "coeirocore[cuda]==0.2.1+coeiroink.1.7.3",
     # ルートプロジェクトでCUDA用wheelの配布先を選ぶため、Coreと同じ組み合わせを指定する。
     "torch==2.10.0",
     "torchaudio==2.10.0",
 ]
 directml = [
-    "coeirocore[directml]==0.2.0+coeiroink.1.7.3",
+    "coeirocore[directml]==0.2.1+coeiroink.1.7.3",
 ]
 opencl = [
-    "coeirocore[opencl]==0.2.0+coeiroink.1.7.3",
+    "coeirocore[opencl]==0.2.1+coeiroink.1.7.3",
     # OpenCL用のsource設定を有効にし、Core内のネイティブパッケージとCPU版Torchを同じuv.lockで固定する。
-    "coeiroink-opencl==0.2.0+coeiroink.1.7.3; sys_platform == 'linux'",
+    "coeiroink-opencl==0.2.1+coeiroink.1.7.3; sys_platform == 'linux'",
     "torch==2.10.0; sys_platform == 'linux'",
     "torchaudio==2.10.0; sys_platform == 'linux'",
 ]
@@ -59,7 +59,7 @@ sudachi = [
 ]
 soxr = [
     # Coreの高品質リサンプラーは、選択した場合だけ導入する。
-    "coeirocore[soxr]==0.2.0+coeiroink.1.7.3",
+    "coeirocore[soxr]==0.2.1+coeiroink.1.7.3",
 ]
 [dependency-groups]
 build = [
@@ -209,7 +209,7 @@ coeiroink-opencl = [
 
 [[tool.uv.dependency-metadata]]
 name = "coeiroink-opencl"
-version = "0.2.0+coeiroink.1.7.3"
+version = "0.2.1+coeiroink.1.7.3"
 # TorchのバージョンはEngineのextraで固定しているため、ローカルパッケージ側では重ねて指定しない。
 requires-dist = []
 
