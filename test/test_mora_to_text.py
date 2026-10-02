@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-# TODO: voicevox_engine.synthesis_engine.moraからimportする。
+# TODO: import from voicevox_engine.synthesis_engine.mora
 from voicevox_engine.synthesis_engine.synthesis_engine_base import mora_to_text
 
 

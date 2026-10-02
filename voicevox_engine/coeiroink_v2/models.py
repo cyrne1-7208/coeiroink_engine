@@ -1,24 +1,32 @@
-"""COEIROINK v2 HTTPサーバー契約のPydanticモデルです。
-フィールド定義は公開OpenAPI契約から再構成し、HTTPルート・GUI・ダウンロード・合成処理は含めません。
-APIには``Mora``という名前の異なるモデルが2つあります。
-ここでの``Mora``は韻律系エンドポイントの``coeirocore.mora.Mora``形状、``UtilMora``はAudioQueryの``coeirocore.v_util.Mora``形状です。
+"""Pydantic models for the COEIROINK v2 HTTP server contract.
+
+The field definitions in this module are reconstructed from the public
+OpenAPI contract.  It intentionally contains only data models: HTTP routes,
+GUI behavior, downloading, and synthesis implementation belong elsewhere.
+
+The API has two different models named ``Mora``.  ``Mora`` below is the
+``coeirocore.mora.Mora`` shape used by prosody-related endpoints, while
+``UtilMora`` is the ``coeirocore.v_util.Mora`` shape used by AudioQuery.
 """
 
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class V2BaseModel(BaseModel):
-    """v2通信モデルで共通に使うPydantic設定です。"""
+    """Common Pydantic configuration for the v2 wire models."""
 
-    # Python形式のフィールド名とAPIの別名を両方受け付け、FastAPIの応答では別名を出力します。
+    # Python側の属性名とAPI上のaliasをどちらも入力で受け付け、FastAPIの応答ではaliasを維持する。
     model_config = ConfigDict(populate_by_name=True)
 
     def __eq__(self, other: object) -> bool:
-        """このAPIが使ってきたPydantic 1のモデルと辞書の比較を維持します。
-        Pydantic 2では``model == dict``が一致しなくなったため、v2変換層との互換境界で従来の比較を保ちます。
+        """Keep the Pydantic 1 model-to-dict comparison used by this API.
+
+        Pydantic 2 intentionally stopped treating ``model == dict`` as equal.
+        The v2 conversion layer and its callers historically relied on that
+        behavior, so preserve it at this compatibility boundary.
         """
 
         if isinstance(other, dict):
@@ -26,9 +34,13 @@ class V2BaseModel(BaseModel):
         return super().__eq__(other)
 
     @classmethod
-    def model_json_schema(cls, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        """暗黙の``null``デフォルトを除いた旧通信スキーマを出力します。
-        Pydantic 2はNoneを既定値に持つ任意フィールドへ``default: null``を追加するため、実値の既定値は残して暗黙の項目だけを削除します。
+    def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Emit the old wire schema without implicit ``null`` defaults.
+
+        Pydantic 2 adds ``default: null`` for optional fields with a
+        ``None`` default.  The existing COEIROINK v2 schema did not expose
+        those entries, so remove only these implicit defaults while retaining
+        real defaults such as ``0.0`` and ``"0.0.1"``.
         """
 
         schema = super().model_json_schema(*args, **kwargs)
@@ -47,7 +59,7 @@ class V2BaseModel(BaseModel):
         return schema
 
     def json(self, *args: Any, **kwargs: Any) -> str:
-        """呼び出し元が使うPydantic 1互換のJSON形式を提供します。"""
+        """Provide the Pydantic 1-compatible JSON formatting used by callers."""
 
         if args:
             raise TypeError("positional arguments are not supported")
@@ -75,7 +87,7 @@ class V2BaseModel(BaseModel):
 
 
 class Mora(V2BaseModel):
-    """韻律・波形パラメータモデルで使うモーラです。"""
+    """A mora used by prosody and waveform parameter models."""
 
     phoneme: str
     hira: str
@@ -83,30 +95,30 @@ class Mora(V2BaseModel):
 
 
 class UtilMora(V2BaseModel):
-    """AudioQueryとAccentPhraseの内部で使うモーラです。"""
+    """A mora used inside the AudioQuery/AccentPhrase representation."""
 
     text: str
-    consonant: Optional[str] = None
-    consonant_length: Optional[float] = Field(None, alias="consonantLength")
+    consonant: str | None = None
+    consonant_length: float | None = Field(None, alias="consonantLength")
     vowel: str
     vowel_length: float = Field(..., alias="vowelLength")
     pitch: float
 
 
-# OpenAPI生成名に依存せず2つのAPIスキーマを区別したい呼び出し元向けの説明的な別名です。
+# OpenAPIが生成するコンポーネント名に依存せず、2種類のMora schemaを区別したい呼出元向けの別名。
 AudioQueryMora = UtilMora
 VUtilMora = UtilMora
 
 
 class AccentPhrase(V2BaseModel):
-    moras: List[UtilMora]
+    moras: list[UtilMora]
     accent: int
-    pause_mora: Optional[UtilMora] = Field(None, alias="pauseMora")
+    pause_mora: UtilMora | None = Field(None, alias="pauseMora")
     is_interrogative: bool = Field(..., alias="isInterrogative")
 
 
 class AudioQuery(V2BaseModel):
-    accent_phrases: List[AccentPhrase] = Field(..., alias="accentPhrases")
+    accent_phrases: list[AccentPhrase] = Field(..., alias="accentPhrases")
     speed_scale: float = Field(..., alias="speedScale")
     pitch_scale: float = Field(..., alias="pitchScale")
     intonation_scale: float = Field(..., alias="intonationScale")
@@ -115,16 +127,16 @@ class AudioQuery(V2BaseModel):
     post_phoneme_length: float = Field(..., alias="postPhonemeLength")
     output_sampling_rate: int = Field(..., alias="outputSamplingRate")
     output_stereo: bool = Field(..., alias="outputStereo")
-    kana: Optional[str] = None
+    kana: str | None = None
 
 
 class Phrase(V2BaseModel):
-    detail: List[List[Mora]]
+    detail: list[list[Mora]]
 
 
 class Prosody(V2BaseModel):
-    plain: List[str]
-    detail: List[List[Mora]]
+    plain: list[str]
+    detail: list[list[Mora]]
 
 
 class ProsodyMakingParam(V2BaseModel):
@@ -135,7 +147,7 @@ class WavMakingParam(V2BaseModel):
     speaker_uuid: str = Field(..., alias="speakerUuid")
     style_id: int = Field(..., alias="styleId")
     text: str
-    prosody_detail: Optional[List[List[Mora]]] = Field(None, alias="prosodyDetail")
+    prosody_detail: list[list[Mora]] | None = Field(None, alias="prosodyDetail")
     speed_scale: float = Field(..., alias="speedScale")
 
 
@@ -152,13 +164,13 @@ class PhonemeDuration(V2BaseModel):
 class MoraDuration(V2BaseModel):
     mora: str
     hira: str
-    phoneme_pitches: List[PhonemeDuration] = Field(..., alias="phonemePitches")
+    phoneme_pitches: list[PhonemeDuration] = Field(..., alias="phonemePitches")
     wav_range: TimeRange = Field(..., alias="wavRange")
 
 
 class WavWithDuration(V2BaseModel):
     wav_base64: str = Field(..., alias="wavBase64")
-    mora_durations: List[MoraDuration] = Field(..., alias="moraDurations")
+    mora_durations: list[MoraDuration] = Field(..., alias="moraDurations")
     start_trim_buffer: float = Field(0.0, alias="startTrimBuffer")
     end_trim_buffer: float = Field(0.0, alias="endTrimBuffer")
 
@@ -170,22 +182,16 @@ class WavProcessingParam(V2BaseModel):
     pre_phoneme_length: float = Field(..., alias="prePhonemeLength")
     post_phoneme_length: float = Field(..., alias="postPhonemeLength")
     output_sampling_rate: int = Field(..., alias="outputSamplingRate")
-    sampled_interval_value: Optional[int] = Field(
-        None, alias="sampledIntervalValue"
-    )
-    adjusted_f0: Optional[List[float]] = Field(None, alias="adjustedF0")
-    processing_algorithm: Optional[str] = Field(None, alias="processingAlgorithm")
-    start_trim_buffer: Optional[float] = Field(None, alias="startTrimBuffer")
-    end_trim_buffer: Optional[float] = Field(None, alias="endTrimBuffer")
-    pause_length: Optional[float] = Field(None, alias="pauseLength")
-    pause_start_trim_buffer: Optional[float] = Field(
-        None, alias="pauseStartTrimBuffer"
-    )
-    pause_end_trim_buffer: Optional[float] = Field(None, alias="pauseEndTrimBuffer")
+    sampled_interval_value: int | None = Field(None, alias="sampledIntervalValue")
+    adjusted_f0: list[float] | None = Field(None, alias="adjustedF0")
+    processing_algorithm: str | None = Field(None, alias="processingAlgorithm")
+    start_trim_buffer: float | None = Field(None, alias="startTrimBuffer")
+    end_trim_buffer: float | None = Field(None, alias="endTrimBuffer")
+    pause_length: float | None = Field(None, alias="pauseLength")
+    pause_start_trim_buffer: float | None = Field(None, alias="pauseStartTrimBuffer")
+    pause_end_trim_buffer: float | None = Field(None, alias="pauseEndTrimBuffer")
     wav_base64: str = Field(..., alias="wavBase64")
-    mora_durations: Optional[List[MoraDuration]] = Field(
-        None, alias="moraDurations"
-    )
+    mora_durations: list[MoraDuration] | None = Field(None, alias="moraDurations")
 
 
 class SynthesisParam(V2BaseModel):
@@ -195,22 +201,18 @@ class SynthesisParam(V2BaseModel):
     pre_phoneme_length: float = Field(..., alias="prePhonemeLength")
     post_phoneme_length: float = Field(..., alias="postPhonemeLength")
     output_sampling_rate: int = Field(..., alias="outputSamplingRate")
-    sampled_interval_value: Optional[int] = Field(
-        None, alias="sampledIntervalValue"
-    )
-    adjusted_f0: Optional[List[float]] = Field(None, alias="adjustedF0")
-    processing_algorithm: Optional[str] = Field(None, alias="processingAlgorithm")
-    start_trim_buffer: Optional[float] = Field(None, alias="startTrimBuffer")
-    end_trim_buffer: Optional[float] = Field(None, alias="endTrimBuffer")
-    pause_length: Optional[float] = Field(None, alias="pauseLength")
-    pause_start_trim_buffer: Optional[float] = Field(
-        None, alias="pauseStartTrimBuffer"
-    )
-    pause_end_trim_buffer: Optional[float] = Field(None, alias="pauseEndTrimBuffer")
+    sampled_interval_value: int | None = Field(None, alias="sampledIntervalValue")
+    adjusted_f0: list[float] | None = Field(None, alias="adjustedF0")
+    processing_algorithm: str | None = Field(None, alias="processingAlgorithm")
+    start_trim_buffer: float | None = Field(None, alias="startTrimBuffer")
+    end_trim_buffer: float | None = Field(None, alias="endTrimBuffer")
+    pause_length: float | None = Field(None, alias="pauseLength")
+    pause_start_trim_buffer: float | None = Field(None, alias="pauseStartTrimBuffer")
+    pause_end_trim_buffer: float | None = Field(None, alias="pauseEndTrimBuffer")
     speaker_uuid: str = Field(..., alias="speakerUuid")
     style_id: int = Field(..., alias="styleId")
     text: str
-    prosody_detail: Optional[List[List[Mora]]] = Field(None, alias="prosodyDetail")
+    prosody_detail: list[list[Mora]] | None = Field(None, alias="prosodyDetail")
     speed_scale: float = Field(..., alias="speedScale")
 
 
@@ -233,11 +235,11 @@ class DictionaryWord(V2BaseModel):
 
 
 class DictionaryWords(V2BaseModel):
-    dictionary_words: List[DictionaryWord] = Field(..., alias="dictionaryWords")
+    dictionary_words: list[DictionaryWord] = Field(..., alias="dictionaryWords")
 
 
 class Style(V2BaseModel):
-    """``/v1/speakers``が返す簡潔なスタイル情報です。"""
+    """The compact style object returned by ``/v1/speakers``."""
 
     name: str
     id: int
@@ -246,33 +248,33 @@ class Style(V2BaseModel):
 class Speaker(V2BaseModel):
     name: str
     speaker_uuid: str
-    styles: List[Style]
+    styles: list[Style]
     version: str
 
 
 class StyleInfo(V2BaseModel):
     id: int
     icon: str
-    voice_samples: List[str]
+    voice_samples: list[str]
 
 
 class SpeakerInfo(V2BaseModel):
     policy: str
     portrait: str
-    style_infos: List[StyleInfo]
+    style_infos: list[StyleInfo]
 
 
 class SpeakerMetaStyle(V2BaseModel):
     style_name: str = Field(..., alias="styleName")
     style_id: int = Field(..., alias="styleId")
     base64_icon: str = Field(..., alias="base64Icon")
-    base64_portrait: Optional[str] = Field(None, alias="base64Portrait")
+    base64_portrait: str | None = Field(None, alias="base64Portrait")
 
 
 class SpeakerMeta(V2BaseModel):
     speaker_name: str = Field(..., alias="speakerName")
     speaker_uuid: str = Field(..., alias="speakerUuid")
-    styles: List[SpeakerMetaStyle]
+    styles: list[SpeakerMetaStyle]
     version: str = "0.0.1"
     base64_portrait: str = Field(..., alias="base64Portrait")
 
@@ -281,13 +283,13 @@ class StylePathVariant(V2BaseModel):
     style_name: str = Field(..., alias="styleName")
     style_id: int = Field(..., alias="styleId")
     path_icon: str = Field(..., alias="pathIcon")
-    path_portrait: Optional[str] = Field(None, alias="pathPortrait")
+    path_portrait: str | None = Field(None, alias="pathPortrait")
 
 
 class SpeakerMetaPathVariant(V2BaseModel):
     speaker_name: str = Field(..., alias="speakerName")
     speaker_uuid: str = Field(..., alias="speakerUuid")
-    styles: List[StylePathVariant]
+    styles: list[StylePathVariant]
     version: str = "0.0.1"
     path_portrait: str = Field(..., alias="pathPortrait")
 
@@ -304,8 +306,8 @@ class SpeakerFolderPath(V2BaseModel):
 
 
 class SpeakerPolicy(V2BaseModel):
-    policy: Optional[str] = None
-    license: Optional[str] = None
+    policy: str | None = None
+    license: str | None = None
 
 
 class DownloadableStyle(V2BaseModel):
@@ -313,15 +315,15 @@ class DownloadableStyle(V2BaseModel):
     style_id: int = Field(..., alias="styleId")
     version: str
     icon_base64: str = Field(..., alias="iconBase64")
-    voice_sample_base64s: List[str] = Field(..., alias="voiceSampleBase64s")
+    voice_sample_base64s: list[str] = Field(..., alias="voiceSampleBase64s")
     download_url: str = Field(..., alias="downloadUrl")
 
 
 class DownloadableSpeaker(V2BaseModel):
     speaker_name: str = Field(..., alias="speakerName")
     speaker_uuid: str = Field(..., alias="speakerUuid")
-    sub_speaker_uuids: List[str] = Field(..., alias="subSpeakerUuids")
-    styles: List[DownloadableStyle]
+    sub_speaker_uuids: list[str] = Field(..., alias="subSpeakerUuids")
+    styles: list[DownloadableStyle]
     version: str
     portrait_base64: str = Field(..., alias="portraitBase64")
     meta_download_url: str = Field(..., alias="metaDownloadUrl")
@@ -338,12 +340,12 @@ class DownloadableModel(V2BaseModel):
 class UpdateInfo(V2BaseModel):
     version: str
     date: str
-    contents: List[str]
+    contents: list[str]
 
 
 class WorldF0(V2BaseModel):
-    f0: List[float]
-    mora_durations: List[MoraDuration] = Field(..., alias="moraDurations")
+    f0: list[float]
+    mora_durations: list[MoraDuration] = Field(..., alias="moraDurations")
 
 
 class EngineInfo(V2BaseModel):
@@ -356,13 +358,13 @@ class Status(V2BaseModel):
 
 
 class ValidationError(V2BaseModel):
-    loc: List[Union[str, int]]
+    loc: list[str | int]
     msg: str
     type: str
 
 
 class HTTPValidationError(V2BaseModel):
-    detail: Optional[List[ValidationError]] = None
+    detail: list[ValidationError] | None = None
 
 
 __all__ = [

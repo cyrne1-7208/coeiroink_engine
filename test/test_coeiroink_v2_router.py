@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from coeirocore.pyworld_compat import load_pyworld
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -12,7 +13,6 @@ from voicevox_engine.coeiroink_v2.audio import (
     MAX_SAMPLING_RATE,
     encode_pcm_wav,
 )
-from coeirocore.pyworld_compat import load_pyworld
 from voicevox_engine.coeiroink_v2.metadata import MetadataAssetNotFoundError
 from voicevox_engine.coeiroink_v2.models import (
     SpeakerMeta,
@@ -21,7 +21,6 @@ from voicevox_engine.coeiroink_v2.models import (
     SpeakerPolicy,
 )
 from voicevox_engine.coeiroink_v2.router import create_v2_router
-
 
 SPEAKER_UUID = "00000000-0000-0000-0000-000000000001"
 STYLE_ID = 7
@@ -250,13 +249,13 @@ def _internal_pause_durations():
 
 
 def test_v2_router_covers_json_metadata_and_control_endpoints():
-    app, manager, dictionary_calls = _app()
+    app, _manager, dictionary_calls = _app()
     client = TestClient(app)
 
     assert client.get("/").json() == {"status": "start"}
     assert client.get("/v1/engine_info").json() == {
         "device": "cpu",
-        "version": "2.13.0",
+        "version": "0.1.0",
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
     assert client.get("/v1/speakers_path_variant").status_code == 200
@@ -266,9 +265,7 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
         json={"text": "ア'"},
     )
     assert prosody.status_code == 200
-    assert prosody.json() == {
-        "detail": [[{"phoneme": "a", "hira": "あ", "accent": 1}]]
-    }
+    assert prosody.json() == {"detail": [[{"phoneme": "a", "hira": "あ", "accent": 1}]]}
 
     query = {
         "accentPhrases": [
@@ -309,44 +306,56 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
     assert f0.status_code == 200
     assert f0.json()["f0"] == [110.0, 120.0]
 
-    assert client.get("/v1/speaker_folder_path", params={"speakerUuid": SPEAKER_UUID}).json()[
-        "speakerFolderPath"
-    ].endswith("/fake")
-    assert client.get("/v1/speaker_folder_path").json() == {
-        "speakerFolderPath": "None"
-    }
-    assert client.post("/v1/style_id_to_speaker_meta", params={"styleId": STYLE_ID}).json()[
-        "styleId"
-    ] == STYLE_ID
+    assert (
+        client.get("/v1/speaker_folder_path", params={"speakerUuid": SPEAKER_UUID})
+        .json()["speakerFolderPath"]
+        .endswith("/fake")
+    )
+    assert client.get("/v1/speaker_folder_path").json() == {"speakerFolderPath": "None"}
+    assert (
+        client.post(
+            "/v1/style_id_to_speaker_meta", params={"styleId": STYLE_ID}
+        ).json()["styleId"]
+        == STYLE_ID
+    )
     assert client.post("/v1/style_id_to_speaker_meta").json() == {
         "speakerUuid": "None",
         "styleId": 0,
         "speakerName": "None",
         "styleName": "None",
     }
-    assert client.get(
-        "/v1/sample_voice",
-        params={"speakerUuid": SPEAKER_UUID, "styleId": STYLE_ID},
-    ).headers["content-type"] == "audio/wav"
+    assert (
+        client.get(
+            "/v1/sample_voice",
+            params={"speakerUuid": SPEAKER_UUID, "styleId": STYLE_ID},
+        ).headers["content-type"]
+        == "audio/wav"
+    )
     assert client.get(
         "/v1/speaker_policy", params={"speakerUuid": SPEAKER_UUID}
     ).json() == {"policy": "policy", "license": "license"}
 
     assert client.post("/v1/set_dictionary", json={"dictionaryWords": []}).json() == {}
     assert len(dictionary_calls) == 1
-    assert client.post(
-        "/v1/set_default_processing_algorithm",
-        json={"processingAlgorithm": "world"},
-    ).json() is None
-    assert client.post(
-        "/v1/set_default_trim_buffer",
-        json={
-            "startTrimBuffer": 0.0,
-            "endTrimBuffer": 0.0,
-            "pauseStartTrimBuffer": 0.0,
-            "pauseEndTrimBuffer": 0.0,
-        },
-    ).json() is None
+    assert (
+        client.post(
+            "/v1/set_default_processing_algorithm",
+            json={"processingAlgorithm": "world"},
+        ).json()
+        is None
+    )
+    assert (
+        client.post(
+            "/v1/set_default_trim_buffer",
+            json={
+                "startTrimBuffer": 0.0,
+                "endTrimBuffer": 0.0,
+                "pauseStartTrimBuffer": 0.0,
+                "pauseEndTrimBuffer": 0.0,
+            },
+        ).json()
+        is None
+    )
     assert client.get("/v1/download_info").json() == []
     assert client.get("/v1/downloadable_speakers").json() == []
     assert client.get("/v1/update_info").json() == []
@@ -379,9 +388,11 @@ def test_v2_router_prediction_process_and_redirect_contract():
     processed = client.post(
         "/v1/process",
         json={
-            **_processing_payload(base64.standard_b64encode(encode_pcm_wav(
-                np.ones(8, dtype=np.float32) * 0.1, 16000
-            )).decode("ascii")),
+            **_processing_payload(
+                base64.standard_b64encode(
+                    encode_pcm_wav(np.ones(8, dtype=np.float32) * 0.1, 16000)
+                ).decode("ascii")
+            ),
             "sampledIntervalValue": 0,
             "adjustedF0": [],
             "processingAlgorithm": "coeiroink",
@@ -391,9 +402,7 @@ def test_v2_router_prediction_process_and_redirect_contract():
     assert processed.headers["content-type"] == "audio/wav"
 
     pitch_time = np.arange(4096, dtype=np.float32) / 16000.0
-    pitch_wav = encode_pcm_wav(
-        0.1 * np.sin(2.0 * np.pi * 220.0 * pitch_time), 16000
-    )
+    pitch_wav = encode_pcm_wav(0.1 * np.sin(2.0 * np.pi * 220.0 * pitch_time), 16000)
     pitch_payload = _processing_payload(
         base64.standard_b64encode(pitch_wav).decode("ascii")
     )
@@ -427,6 +436,42 @@ def test_v2_router_prediction_process_and_redirect_contract():
     assert redirected.status_code == 307
     assert redirected.headers["location"] == "/v1/process"
     assert redirected.content == b""
+
+
+@pytest.mark.parametrize(
+    "text, special_phoneme, special_hira",
+    [
+        ("これは。あれは。", "_", "、"),
+        ("これは質問ですか？", "?", "？"),
+    ],
+)
+def test_v2_estimated_prosody_detail_round_trips_special_phrases(
+    text, special_phoneme, special_hira
+):
+    app, manager, _ = _app()
+    client = TestClient(app)
+
+    estimated = client.post("/v1/estimate_prosody", json={"text": text})
+    assert estimated.status_code == 200
+    estimated_data = estimated.json()
+    assert [
+        phrase
+        for phrase in estimated_data["detail"]
+        if len(phrase) == 1 and phrase[0]["phoneme"] == special_phoneme
+    ] == [[{"phoneme": special_phoneme, "hira": special_hira, "accent": 0}]]
+
+    predicted = client.post(
+        "/v1/predict",
+        json={
+            "speakerUuid": SPEAKER_UUID,
+            "styleId": STYLE_ID,
+            "text": text,
+            "prosodyDetail": estimated_data["detail"],
+            "speedScale": 1.0,
+        },
+    )
+    assert predicted.status_code == 200
+    assert manager.prediction_calls[-1]["text"] == estimated_data["plain"]
 
 
 def test_v2_process_rejects_an_oversized_pause_length_with_422():
@@ -585,22 +630,30 @@ def test_v2_router_openapi_uses_aliases_and_audio_content_types():
     app, _, _ = _app()
     schema = app.openapi()
 
-    assert "speakerUuid" in schema["components"]["schemas"]["WavMakingParam"]["properties"]
+    assert (
+        "speakerUuid" in schema["components"]["schemas"]["WavMakingParam"]["properties"]
+    )
     assert "styleId" in schema["components"]["schemas"]["WavMakingParam"]["properties"]
-    assert "audio/wav" in schema["paths"]["/v1/predict"]["post"]["responses"]["200"]["content"]
-    assert "audio/wav" in schema["paths"]["/v1/process"]["post"]["responses"]["200"]["content"]
+    assert (
+        "audio/wav"
+        in schema["paths"]["/v1/predict"]["post"]["responses"]["200"]["content"]
+    )
+    assert (
+        "audio/wav"
+        in schema["paths"]["/v1/process"]["post"]["responses"]["200"]["content"]
+    )
     assert "307" in schema["paths"]["/v1/process_with_pitch"]["post"]["responses"]
     sample_parameters = schema["paths"]["/v1/sample_voice"]["get"]["parameters"]
-    index_parameter = next(item for item in sample_parameters if item["name"] == "index")
+    index_parameter = next(
+        item for item in sample_parameters if item["name"] == "index"
+    )
     assert "default" not in index_parameter["schema"]
 
 
-def test_missing_sample_voice_uses_v2_error_contract(tmp_path):
+def test_missing_sample_voice_uses_official_error_contract(tmp_path):
     class MissingSampleMetadata(FakeMetadata):
         def read_sample_voice(self, speaker_uuid, style_id, index):
-            raise MetadataAssetNotFoundError(
-                tmp_path / "missing.wav", "voice sample"
-            )
+            raise MetadataAssetNotFoundError(tmp_path / "missing.wav", "voice sample")
 
     manager = FakeAudioManager()
     missing_app = FastAPI()

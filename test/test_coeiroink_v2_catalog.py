@@ -1,5 +1,6 @@
 import json
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 import pytest
 import requests
@@ -13,7 +14,6 @@ from voicevox_engine.coeiroink_v2.catalog import (
     CatalogSchemaError,
 )
 
-
 _BASE_URL = "https://catalog.example.test/api/v1"
 
 
@@ -23,7 +23,7 @@ class FakeResponse:
         body: bytes,
         status_code: int = 200,
         content_type: str = "application/json; charset=utf-8",
-        content_length: Optional[str] = None,
+        content_length: str | None = None,
     ) -> None:
         self.status_code = status_code
         self.headers = {"Content-Type": content_type}
@@ -45,12 +45,10 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(
-        self, responses: Any = None, error: Optional[Exception] = None
-    ) -> None:
+    def __init__(self, responses: Any = None, error: Exception | None = None) -> None:
         self.responses = responses
         self.error = error
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
     def get(self, url: str, **kwargs: Any) -> FakeResponse:
         self.calls.append({"url": url, **kwargs})
@@ -63,7 +61,7 @@ class FakeSession:
         return self.responses
 
 
-def _download_info_payload() -> List[Dict[str, Any]]:
+def _download_info_payload() -> list[dict[str, Any]]:
     return [
         {
             "download_path": "https://downloads.example.test/model.zip",
@@ -71,7 +69,7 @@ def _download_info_payload() -> List[Dict[str, Any]]:
             "speaker": {
                 "name": "テスト話者",
                 "speaker_uuid": "00000000-0000-0000-0000-000000000001",
-                "styles": [{"name": "標準", "id": 140}],
+                "styles": [{"name": "のーまる", "id": 140}],
                 "version": "1.0.0",
             },
             "speaker_info": {
@@ -83,7 +81,7 @@ def _download_info_payload() -> List[Dict[str, Any]]:
     ]
 
 
-def _downloadable_speakers_payload() -> List[Dict[str, Any]]:
+def _downloadable_speakers_payload() -> list[dict[str, Any]]:
     return [
         {
             "speakerName": "テスト話者",
@@ -91,7 +89,7 @@ def _downloadable_speakers_payload() -> List[Dict[str, Any]]:
             "subSpeakerUuids": [],
             "styles": [
                 {
-                    "styleName": "標準",
+                    "styleName": "のーまる",
                     "styleId": 140,
                     "version": "1.0.0",
                     "iconBase64": "",
@@ -107,7 +105,7 @@ def _downloadable_speakers_payload() -> List[Dict[str, Any]]:
     ]
 
 
-def _update_info_payload() -> List[Dict[str, Any]]:
+def _update_info_payload() -> list[dict[str, Any]]:
     return [
         {
             "version": "v.2.13.0",
@@ -133,7 +131,7 @@ def _update_info_payload() -> List[Dict[str, Any]]:
 def test_catalog_methods_use_public_endpoints_and_validate_models(
     method_name: str,
     endpoint: str,
-    payload: List[Dict[str, Any]],
+    payload: list[dict[str, Any]],
     expected_field: str,
 ) -> None:
     response = FakeResponse(json.dumps(payload).encode("utf-8"))

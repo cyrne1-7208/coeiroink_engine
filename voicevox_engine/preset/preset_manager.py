@@ -1,11 +1,12 @@
+"""プリセットの永続化と検証を管理する。"""
+
 from pathlib import Path
-from typing import List
 
 import yaml
 from pydantic import TypeAdapter, ValidationError
 
-from .Preset import Preset
-from .PresetError import PresetError
+from .preset import Preset
+from .preset_error import PresetError
 
 
 class PresetManager:
@@ -32,23 +33,21 @@ class PresetManager:
             _last_modified_time = self.preset_path.stat().st_mtime
             if _last_modified_time == self.last_modified_time:
                 return self.presets
-        except OSError:
-            raise PresetError("プリセットの設定ファイルが見つかりません")
+        except OSError as error:
+            raise PresetError("プリセットの設定ファイルが見つかりません") from error
 
-        with open(self.preset_path, mode="r", encoding="utf-8") as f:
+        with open(self.preset_path, encoding="utf-8") as f:
             obj = yaml.safe_load(f)
             if obj is None:
                 raise PresetError("プリセットの設定ファイルが空の内容です")
 
         try:
-            _presets = TypeAdapter(List[Preset]).validate_python(obj)
-        except ValidationError:
-            raise PresetError("プリセットの設定ファイルにミスがあります")
+            _presets = TypeAdapter(list[Preset]).validate_python(obj)
+        except ValidationError as error:
+            raise PresetError("プリセットの設定ファイルにミスがあります") from error
 
         # idが一意か確認
-        if len([preset.id for preset in _presets]) != len(
-            {preset.id for preset in _presets}
-        ):
+        if len(_presets) != len({preset.id for preset in _presets}):
             raise PresetError("プリセットのidに重複があります")
 
         self.presets = _presets
@@ -75,7 +74,7 @@ class PresetManager:
 
         # IDが0未満、または存在するIDなら新しいIDを決定し、配列に追加
         if preset.id < 0 or preset.id in {preset.id for preset in self.presets}:
-            preset.id = max([preset.id for preset in self.presets]) + 1
+            preset.id = max(preset.id for preset in self.presets) + 1
         self.presets.append(preset)
 
         # ファイルに書き込み
@@ -90,9 +89,10 @@ class PresetManager:
         except Exception as err:
             self.presets.pop()
             if isinstance(err, FileNotFoundError):
-                raise PresetError("プリセットの設定ファイルに書き込み失敗しました")
-            else:
-                raise err
+                raise PresetError(
+                    "プリセットの設定ファイルに書き込み失敗しました"
+                ) from err
+            raise
 
         return preset.id
 
@@ -137,9 +137,10 @@ class PresetManager:
             if prev_preset != (-1, None):
                 self.presets[prev_preset[0]] = prev_preset[1]
             if isinstance(err, FileNotFoundError):
-                raise PresetError("プリセットの設定ファイルに書き込み失敗しました")
-            else:
-                raise err
+                raise PresetError(
+                    "プリセットの設定ファイルに書き込み失敗しました"
+                ) from err
+            raise
 
         return preset.id
 
@@ -181,8 +182,10 @@ class PresetManager:
                     allow_unicode=True,
                     sort_keys=False,
                 )
-        except FileNotFoundError:
+        except FileNotFoundError as error:
             self.presets.insert(buf_index, buf)
-            raise PresetError("プリセットの設定ファイルに書き込み失敗しました")
+            raise PresetError(
+                "プリセットの設定ファイルに書き込み失敗しました"
+            ) from error
 
         return id

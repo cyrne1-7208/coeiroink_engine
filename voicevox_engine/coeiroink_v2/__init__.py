@@ -1,4 +1,4 @@
-"""公開COEIROINK v2 HTTP APIのPydanticモデルを提供します。"""
+"""Pydantic models for the public COEIROINK v2 HTTP API."""
 
 from .models import (
     AccentPhrase,
@@ -35,8 +35,8 @@ from .models import (
     TrimBufferSettings,
     UpdateInfo,
     UtilMora,
-    VUtilMora,
     ValidationError,
+    VUtilMora,
     WavMakingParam,
     WavProcessingParam,
     WavWithDuration,

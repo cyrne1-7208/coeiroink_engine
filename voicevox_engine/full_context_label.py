@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from itertools import chain
-from typing import Dict, List, Optional
 
 import pyopenjtalk
 
@@ -18,7 +19,7 @@ class Phoneme:
         音素の元
     """
 
-    contexts: Dict[str, str]
+    contexts: dict[str, str]
 
     @classmethod
     def from_label(cls, label: str):
@@ -117,7 +118,7 @@ class Mora:
         母音
     """
 
-    consonant: Optional[Phoneme]
+    consonant: Phoneme | None
     vowel: Phoneme
 
     def set_context(self, key: str, value: str):
@@ -146,8 +147,7 @@ class Mora:
         """
         if self.consonant is not None:
             return [self.consonant, self.vowel]
-        else:
-            return [self.vowel]
+        return [self.vowel]
 
     @property
     def labels(self):
@@ -174,12 +174,12 @@ class AccentPhrase:
         アクセント
     """
 
-    moras: List[Mora]
+    moras: list[Mora]
     accent: int
     is_interrogative: bool
 
     @classmethod
-    def from_phonemes(cls, phonemes: List[Phoneme]):
+    def from_phonemes(cls, phonemes: list[Phoneme]):
         """
         PhonemeのリストからAccentPhraseクラスを作成する
         Parameters
@@ -192,11 +192,11 @@ class AccentPhrase:
         accent_phrase : AccentPhrase
             AccentPhraseクラスを返す
         """
-        moras: List[Mora] = []
+        moras: list[Mora] = []
 
-        mora_phonemes: List[Phoneme] = []
-        for phoneme, next_phoneme in zip(phonemes, phonemes[1:] + [None]):
-            # Hihosiba/voicevox_engine#57への回避策です。
+        mora_phonemes: list[Phoneme] = []
+        for phoneme, next_phoneme in zip(phonemes, [*phonemes[1:], None], strict=True):
+            # workaround for Hihosiba/voicevox_engine#57
             # (py)openjtalk によるアクセント句内のモーラへの附番は 49 番目まで
             # 49 番目のモーラについて、続く音素のモーラ番号を単一モーラの特定に使えない
             if int(phoneme.contexts["a2"]) == 49:
@@ -219,9 +219,9 @@ class AccentPhrase:
                 mora_phonemes = []
 
         accent = int(moras[0].vowel.contexts["f2"])
-        # Hihosiba/voicevox_engine#55への回避策です。
+        # workaround for Hihosiba/voicevox_engine#55
         # アクセント位置とするキー f2 の値がアクセント句内のモーラ数を超える場合がある
-        accent = accent if accent <= len(moras) else len(moras)
+        accent = min(accent, len(moras))
         is_interrogative = moras[-1].vowel.contexts["f3"] == "1"
         return cls(moras=moras, accent=accent, is_interrogative=is_interrogative)
 
@@ -260,7 +260,7 @@ class AccentPhrase:
         """
         return [p.label for p in self.phonemes]
 
-    def merge(self, accent_phrase: "AccentPhrase"):
+    def merge(self, accent_phrase: AccentPhrase):
         """
         AccentPhraseを合成する
         (このクラスが保持するmorasの後ろに、引数として渡されたAccentPhraseのmorasを合成する)
@@ -292,10 +292,10 @@ class BreathGroup:
         アクセント句のリスト
     """
 
-    accent_phrases: List[AccentPhrase]
+    accent_phrases: list[AccentPhrase]
 
     @classmethod
-    def from_phonemes(cls, phonemes: List[Phoneme]):
+    def from_phonemes(cls, phonemes: list[Phoneme]):
         """
         PhonemeのリストからBreathGroupクラスを作成する
         Parameters
@@ -308,9 +308,9 @@ class BreathGroup:
         breath_group : BreathGroup
             BreathGroupクラスを返す
         """
-        accent_phrases: List[AccentPhrase] = []
-        accent_phonemes: List[Phoneme] = []
-        for phoneme, next_phoneme in zip(phonemes, phonemes[1:] + [None]):
+        accent_phrases: list[AccentPhrase] = []
+        accent_phonemes: list[Phoneme] = []
+        for phoneme, next_phoneme in zip(phonemes, [*phonemes[1:], None], strict=True):
             accent_phonemes.append(phoneme)
 
             if (
@@ -377,11 +377,11 @@ class Utterance:
         無音のリスト
     """
 
-    breath_groups: List[BreathGroup]
-    pauses: List[Phoneme]
+    breath_groups: list[BreathGroup]
+    pauses: list[Phoneme]
 
     @classmethod
-    def from_phonemes(cls, phonemes: List[Phoneme]):
+    def from_phonemes(cls, phonemes: list[Phoneme]):
         """
         Phonemeの完全なリストからUtteranceクラスを作成する
         Parameters
@@ -394,10 +394,10 @@ class Utterance:
         utterance : Utterance
             Utteranceクラスを返す
         """
-        pauses: List[Phoneme] = []
+        pauses: list[Phoneme] = []
 
-        breath_groups: List[BreathGroup] = []
-        group_phonemes: List[Phoneme] = []
+        breath_groups: list[BreathGroup] = []
+        group_phonemes: list[Phoneme] = []
         for phoneme in phonemes:
             if not phoneme.is_pause():
                 group_phonemes.append(phoneme)
@@ -440,9 +440,10 @@ class Utterance:
             )
         )
         for prev, cent, post in zip(
-            [None] + accent_phrases[:-1],
+            [None, *accent_phrases[:-1]],
             accent_phrases,
-            accent_phrases[1:] + [None],
+            [*accent_phrases[1:], None],
+            strict=True,
         ):
             mora_num = len(cent.moras)
             accent = cent.accent
@@ -463,9 +464,10 @@ class Utterance:
                 mora.set_context("a3", str(mora_num - i_mora))
 
         for prev, cent, post in zip(
-            [None] + self.breath_groups[:-1],
+            [None, *self.breath_groups[:-1]],
             self.breath_groups,
-            self.breath_groups[1:] + [None],
+            [*self.breath_groups[1:], None],
+            strict=True,
         ):
             accent_phrase_num = len(cent.accent_phrases)
 
@@ -496,7 +498,7 @@ class Utterance:
             ),
         )
 
-        phonemes: List[Phoneme] = []
+        phonemes: list[Phoneme] = []
         for i in range(len(self.pauses)):
             if self.pauses[i] is not None:
                 phonemes += [self.pauses[i]]
@@ -521,5 +523,4 @@ class Utterance:
 def extract_full_context_label(text: str):
     labels = pyopenjtalk.extract_fullcontext(text)
     phonemes = [Phoneme.from_label(label=label) for label in labels]
-    utterance = Utterance.from_phonemes(phonemes)
-    return utterance
+    return Utterance.from_phonemes(phonemes)

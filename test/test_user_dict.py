@@ -2,7 +2,6 @@ import json
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict
 from unittest import TestCase
 
 from fastapi import HTTPException
@@ -16,8 +15,8 @@ from voicevox_engine.user_dict import (
     delete_word,
     import_user_dict,
     read_dict,
-    rewrite_word,
     reset_user_dict,
+    rewrite_word,
     update_dict,
 )
 
@@ -62,14 +61,14 @@ import_word = UserDictWord(
 )
 
 
-def get_new_word(user_dict: Dict[str, UserDictWord]):
+def get_new_word(user_dict: dict[str, UserDictWord]):
     assert len(user_dict) == 2 or (
         len(user_dict) == 1 and "aab7dda2-0d97-43c8-8cb7-3f440dab9b4e" not in user_dict
     )
-    for word_uuid in user_dict.keys():
+    for word_uuid, word in user_dict.items():
         if word_uuid == "aab7dda2-0d97-43c8-8cb7-3f440dab9b4e":
             continue
-        return user_dict[word_uuid]
+        return word
     raise AssertionError
 
 

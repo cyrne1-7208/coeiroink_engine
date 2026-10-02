@@ -1,10 +1,12 @@
-"""COEIROINK v2 HTTP API向けの公開ソース韻律変換です。
-テキストとカナは凍結版の公開Engineフロントエンドで解析し、凍結版公開Coreの``query2tokens_prosody``が平坦なトークン列を作ります。
-このモジュールはv2の通信形式への小さな変換だけを担当します。
+"""Public-source prosody conversion for the COEIROINK v2 HTTP API.
+
+Text and kana are analysed by the frozen public Engine frontend, while the
+frozen public Core ``query2tokens_prosody`` function creates the flat token
+stream.  This module only performs the small v2 wire-format conversion.
 """
 
+from collections.abc import Sequence
 from functools import lru_cache
-from typing import List, Optional, Sequence
 
 from coeirocore.model import AccentPhrase as CoreAccentPhrase
 from coeirocore.model import AudioQuery as CoreAudioQuery
@@ -20,32 +22,32 @@ from .models import Prosody
 
 
 class ProsodyError(ValueError):
-    """v2の韻律要求を決定的に解析できない場合に発生します。"""
+    """Raised when a v2 prosody request cannot be analysed deterministically."""
 
 
 class _TextAnalysisEngine(SynthesisEngineBase):
-    """公開テキスト解析器を再利用する音声合成なしのEngineフロントエンドです。"""
+    """No-op Engine frontend that reuses the public text analyser."""
 
     @property
     def speakers(self) -> str:
         return ""
 
     @property
-    def supported_devices(self) -> Optional[str]:
+    def supported_devices(self) -> str | None:
         return None
 
     def replace_phoneme_length(
         self,
-        accent_phrases: List[EngineAccentPhrase],
+        accent_phrases: list[EngineAccentPhrase],
         speaker_id: int,
-    ) -> List[EngineAccentPhrase]:
+    ) -> list[EngineAccentPhrase]:
         return accent_phrases
 
     def replace_mora_pitch(
         self,
-        accent_phrases: List[EngineAccentPhrase],
+        accent_phrases: list[EngineAccentPhrase],
         speaker_id: int,
-    ) -> List[EngineAccentPhrase]:
+    ) -> list[EngineAccentPhrase]:
         return accent_phrases
 
     def _synthesis_impl(self, query, speaker_id: int):
@@ -57,7 +59,7 @@ _TEXT_ANALYZER = _TextAnalysisEngine()
 
 def _require_string(value: object, field_name: str) -> str:
     if not isinstance(value, str):
-        raise ProsodyError("{} must be a string".format(field_name))
+        raise ProsodyError(f"{field_name} must be a string")
     return value
 
 
@@ -75,6 +77,8 @@ def _to_core_mora(mora: EngineMora) -> CoreMora:
 def _to_core_query(
     accent_phrases: Sequence[EngineAccentPhrase],
 ) -> CoreAudioQuery:
+    """Engineの解析結果をCoreのプロソディトークン変換だけに必要なAudioQueryへ写像する。"""
+
     return CoreAudioQuery(
         accent_phrases=[
             CoreAccentPhrase(
@@ -102,36 +106,31 @@ def _to_core_query(
 
 
 def _to_hiragana(text: str) -> str:
-    """公開Engineのカタカナ表記をひらがなへ変換します。"""
+    """Convert the public Engine's katakana mora spelling to hiragana."""
 
     return "".join(
-        chr(ord(char) - 0x60) if "\u30a1" <= char <= "\u30f6" else char
-        for char in text
+        chr(ord(char) - 0x60) if "\u30a1" <= char <= "\u30f6" else char for char in text
     )
 
 
 def _mora_accent(index: int, accent: int, mora_count: int) -> int:
-    """1モーラ分のv2高低アクセント記号を返します。"""
+    """Return the v2 high/low accent marker for one mora."""
 
     if not 0 <= accent <= mora_count:
         raise ProsodyError("accent must be between 0 and the number of moras")
     if accent == 0:
-        return int(index > 0)
+        return 0
     if accent == 1:
         return int(index == 0)
     return int(0 < index < accent)
 
 
-def _to_prosody_moras(phrase: EngineAccentPhrase) -> List[ProsodyMora]:
+def _to_prosody_moras(phrase: EngineAccentPhrase) -> list[ProsodyMora]:
     mora_count = len(phrase.moras)
     result = []
     for index, mora in enumerate(phrase.moras):
         vowel = mora.vowel if mora.vowel == "N" else mora.vowel.lower()
-        phoneme = (
-            "{}-{}".format(mora.consonant.lower(), vowel)
-            if mora.consonant
-            else vowel
-        )
+        phoneme = f"{mora.consonant.lower()}-{vowel}" if mora.consonant else vowel
         result.append(
             ProsodyMora(
                 phoneme=phoneme,
@@ -142,29 +141,41 @@ def _to_prosody_moras(phrase: EngineAccentPhrase) -> List[ProsodyMora]:
     return result
 
 
+def _special_detail(phoneme: str, hira: str) -> list[ProsodyMora]:
+    return [ProsodyMora(phoneme=phoneme, hira=hira, accent=0)]
+
+
 def _build_prosody(
     accent_phrases: Sequence[EngineAccentPhrase],
 ) -> Prosody:
     core_query = _to_core_query(accent_phrases)
     plain = query2tokens_prosody(core_query)
-    detail = [_to_prosody_moras(phrase) for phrase in accent_phrases]
+    detail: list[list[ProsodyMora]] = []
+    for phrase in accent_phrases:
+        detail.append(_to_prosody_moras(phrase))
+        if phrase.pause_mora is not None:
+            detail.append(_special_detail("_", "、"))
+        if phrase.is_interrogative:
+            detail.append(_special_detail("?", "？"))
     return Prosody(plain=plain, detail=detail)
 
 
 @lru_cache(maxsize=256)
 def _estimate_prosody_cached(text: str) -> Prosody:
-    """重いOpen JTalk解析を同じテキストの要求間でキャッシュします。"""
+    """Cache the expensive Open JTalk analysis for repeated request text."""
     try:
         accent_phrases = _TEXT_ANALYZER.create_accent_phrases(text, speaker_id=0)
     except Exception as error:
-        raise ProsodyError("text analysis failed: {}".format(error)) from error
+        raise ProsodyError(f"text analysis failed: {error}") from error
     return _build_prosody(accent_phrases)
 
 
 def estimate_prosody(text: str) -> Prosody:
-    """通常のテキストからv2韻律を推定します。
-    深いコピーを返してキャッシュを呼び出し元から変更できないようにします。
-    ユーザー辞書更新後は``clear_prosody_cache``を呼び、更新前の読みを残しません。
+    """Estimate v2 prosody from ordinary text.
+
+    A deep copy keeps the cache immutable from the caller's perspective.
+    ``clear_prosody_cache`` is called after user-dictionary updates so cached
+    readings cannot outlive the dictionary that produced them.
     """
 
     text = _require_string(text, "text")
@@ -172,21 +183,19 @@ def estimate_prosody(text: str) -> Prosody:
 
 
 def clear_prosody_cache() -> None:
-    """現在のユーザー辞書更新前に作られたテキスト解析を破棄します。"""
+    """Discard text analyses made before the current user dictionary update."""
 
     _estimate_prosody_cached.cache_clear()
 
 
 def estimate_prosody_from_kana(kana: str) -> Prosody:
-    """公開EngineのAquesTalk風カナからv2韻律を推定します。"""
+    """Estimate v2 prosody from the public Engine's AquesTalk-like kana."""
 
     kana = _require_string(kana, "kana")
     try:
         accent_phrases = parse_kana(kana)
     except ParseKanaError as error:
-        raise ProsodyError(
-            "invalid kana: {}: {}".format(error.errname, error.text)
-        ) from error
+        raise ProsodyError(f"invalid kana: {error.errname}: {error.text}") from error
     return _build_prosody(accent_phrases)
 
 

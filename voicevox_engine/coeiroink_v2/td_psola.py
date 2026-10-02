@@ -1,20 +1,20 @@
-"""小さく決定的な時間領域PSOLA処理です。
-パッケージ版COEIROINKアプリケーションから独立させ、NumPyだけで動作する構成にしています。
-F0トラックを指定しない場合だけ、:mod:`voicevox_engine.coeiroink_v2.audio`が公開するWORLD推定器を使います。
+"""A small, deterministic time-domain PSOLA processor.
+
+The processor is intentionally independent from the packaged COEIROINK
+application.  It only needs NumPy and, when an F0 track is not supplied, the
+public WORLD estimator exposed by :mod:`voicevox_engine.coeiroink_v2.audio`.
 """
 
 import math
 import numbers
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 import numpy as np
-
 
 PROCESSING_ALGORITHM = "td-psola"
 DEFAULT_FRAME_PERIOD = 0.005
 
-# これらの上限で不正または極端に大きい要求による無制限なマーク・グレイン確保を防ぎます。
-# 通常の音声範囲は上限を十分下回り、目標ピッチの変化は解析ピッチに対して上下1オクターブへ制限します。
+# 不正または過大なリクエストによるmark/grainの無制限確保を防ぎ、音高変化は隣接grainが重なる1オクターブ以内へ制限する。
 MIN_F0_HZ = 20.0
 MAX_F0_HZ = 2000.0
 MIN_PITCH_RATIO = 0.5
@@ -24,11 +24,11 @@ FLOAT32_MAX = float(np.finfo(np.float32).max)
 
 
 class TDPSOLAValidationError(ValueError):
-    """TD-PSOLAへの入力が不正な場合に発生します。"""
+    """Raised when an input to the TD-PSOLA processor is invalid."""
 
 
 class TDPSOLAProcessingError(RuntimeError):
-    """処理が有限な波形を生成できない場合に発生します。"""
+    """Raised when the processor cannot produce a finite waveform."""
 
 
 def _require_waveform(wave: object) -> np.ndarray:
@@ -65,15 +65,15 @@ def _require_rate(sampling_rate: object) -> int:
     return int(sampling_rate)
 
 
-def _require_scale(value: object, name: str, minimum: Optional[float] = None) -> float:
+def _require_scale(value: object, name: str, minimum: float | None = None) -> float:
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
-        raise TDPSOLAValidationError("{} must be a finite number".format(name))
+        raise TDPSOLAValidationError(f"{name} must be a finite number")
     value = float(value)
     if not math.isfinite(value):
-        raise TDPSOLAValidationError("{} must be a finite number".format(name))
+        raise TDPSOLAValidationError(f"{name} must be a finite number")
     if minimum is not None and value < minimum:
         raise TDPSOLAValidationError(
-            "{} must be greater than or equal to {}".format(name, minimum)
+            f"{name} must be greater than or equal to {minimum}"
         )
     return value
 
@@ -113,8 +113,8 @@ def _sample_f0_track(
     sample_count: int,
     sampling_rate: int,
     frame_period: float,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """サンプルまたはフレーム単位のF0列を波形長へ展開します。"""
+) -> tuple[np.ndarray, np.ndarray]:
+    """Expand a sample- or frame-aligned F0 track to the waveform length."""
 
     if f0.size == sample_count:
         samples = f0.copy()
@@ -136,15 +136,14 @@ def _sample_f0_track(
                 f0[positive],
             )
 
-    # WORLDはノイズの多い入力で有効範囲外の値を返すことがあります。
-    # 周期を制限して、巨大なグレイン確保や長さ0のステップを防ぎます。
+    # WORLDが強い雑音から実用的な音声範囲外の値を返しても、巨大grainやゼロ幅stepを作らないよう周期を制限する。
     positive = samples > 0.0
     samples[positive] = np.clip(samples[positive], MIN_F0_HZ, MAX_F0_HZ)
     return samples, voiced
 
 
 def _f0_from_public_world(wave: np.ndarray, sampling_rate: int) -> np.ndarray:
-    # F0トラックを指定した呼び出し元がCoreアダプターやWORLDを初期化せず使えるよう遅延importします。
+    # F0軌跡を指定する呼出元がCoreアダプターやWORLDを初期化せず使えるよう、必要時だけ読み込む。
     from .audio import estimate_world_f0
 
     try:
@@ -155,7 +154,7 @@ def _f0_from_public_world(wave: np.ndarray, sampling_rate: int) -> np.ndarray:
         raise TDPSOLAProcessingError("failed to estimate WORLD F0") from error
 
 
-def _voiced_runs(mask: np.ndarray, minimum_samples: int) -> List[Tuple[int, int]]:
+def _voiced_runs(mask: np.ndarray, minimum_samples: int) -> list[tuple[int, int]]:
     padded = np.concatenate(
         (
             np.zeros(1, dtype=bool),
@@ -167,7 +166,7 @@ def _voiced_runs(mask: np.ndarray, minimum_samples: int) -> List[Tuple[int, int]
     ends = np.flatnonzero(padded[:-1] & ~padded[1:])
     return [
         (int(start), int(end))
-        for start, end in zip(starts, ends)
+        for start, end in zip(starts, ends, strict=True)
         if int(end) - int(start) >= minimum_samples
     ]
 
@@ -188,15 +187,15 @@ def _source_marks(
     end: int,
     sampling_rate: int,
 ) -> np.ndarray:
-    """1つの有声区間から決定的な局所高エネルギーマークを求めます。"""
+    """Find deterministic, local high-energy marks in one voiced run."""
 
-    marks: List[int] = []
+    marks: list[int] = []
     expected = float(start)
     previous = start - 1
     while expected < end:
-        period = _period_at(f0, int(round(expected)), sampling_rate)
-        center = int(round(expected))
-        radius = max(2, int(round(0.45 * period)))
+        period = _period_at(f0, round(expected), sampling_rate)
+        center = round(expected)
+        radius = max(2, round(0.45 * period))
         left = max(start, center - radius)
         right = min(end, center + radius + 1)
         if right - left < 3:
@@ -237,13 +236,15 @@ def _target_marks(
     start: int,
     end: int,
     sampling_rate: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    marks: List[int] = []
-    source_indices: List[int] = []
+) -> tuple[np.ndarray, np.ndarray]:
+    """目標F0の周期で合成markを進め、各markに最も近い入力grainの索引を対応付ける。"""
+
+    marks: list[int] = []
+    source_indices: list[int] = []
     expected = float(source_marks[0])
     previous = start - 1
     while expected < end:
-        target = int(round(expected))
+        target = round(expected)
         if target <= previous:
             target = previous + 1
         if target >= end:
@@ -262,7 +263,7 @@ def _target_marks(
 def _edge_gate(
     indices: np.ndarray, start: int, end: int, fade_samples: int
 ) -> np.ndarray:
-    """有声区間の外側を0にするraised-cosineゲートを返します。"""
+    """Return a raised-cosine gate that is zero outside a voiced run."""
 
     values = np.asarray(indices, dtype=np.float64)
     gate = np.ones(values.shape, dtype=np.float64)
@@ -295,7 +296,7 @@ def _bounded_target_f0(
         deviation = voiced_values - mean
         target[voiced] = mean + deviation * intonation_scale
 
-    # exp2の指数を制限して有限なAPI値から有限な結果を作り、下の相対比率制限でPSOLAの安全範囲を確定します。
+    # exp2の指数を制限して有限なAPI入力を有限値に保ち、実際のPSOLA安全範囲は直後の相対倍率で制限する。
     ratio = 2.0 ** min(max(pitch_scale, -32.0), 32.0)
     target[voiced] *= ratio
     lower = source_f0[voiced] * MIN_PITCH_RATIO
@@ -311,38 +312,44 @@ def process_td_psola(
     pitch_scale: float = 0.0,
     intonation_scale: float = 1.0,
     *,
-    f0: Optional[Sequence[float]] = None,
-    target_f0: Optional[Sequence[float]] = None,
+    f0: Sequence[float] | None = None,
+    target_f0: Sequence[float] | None = None,
     frame_period: float = DEFAULT_FRAME_PERIOD,
 ) -> np.ndarray:
-    """長さを保ったままモノラル波形のピッチと抑揚を処理します。
-    ``pitch_scale``はCOEIROINK/VOICEVOXの規則に従い、1.0を1オクターブ、周波数倍率を``2 ** pitch_scale``とします。
-    ``intonation_scale``は有声F0の平均からの偏差を拡大・縮小し、``f0``は解析済みの入力トラック、``target_f0``は任意の目標トラックです。
-    両トラックはサンプル単位またはWORLD形式を受け付け、``f0``省略時は既存の公開WORLD推定器を使います。
-    有声区間内だけでマークを生成し、グレインを入力周期2つ分以内に制限し、出力サンプル数を入力と一致させます。
-    無声音サンプルは保持し、オーバーラップ加算の除算はすべて保護します。
-    アルゴリズムの根拠はMoulinesとCharpentierの1990年のPSOLA論文です。
+    """Pitch/intonation-process a mono waveform while retaining its length.
+
+    ``pitch_scale`` follows the COEIROINK/VOICEVOX convention: one unit is an
+    octave and the frequency multiplier is ``2 ** pitch_scale``.
+    ``intonation_scale`` expands or contracts the voiced F0 deviations around
+    their voiced mean.  ``f0`` is the analysed source track and
+    ``target_f0`` is an optional caller-adjusted destination track; either may
+    be sample-aligned or WORLD-style.  When ``f0`` is omitted, the existing
+    public WORLD estimator supplies the source track.
+
+    The implementation is a bounded PSOLA adapter: marks are generated only
+    inside voiced runs, each grain is at most two source periods wide, and the
+    output has exactly the input sample count.  Unvoiced samples are retained
+    and all overlap-add divisions are guarded.
+
+    Algorithm basis: E. Moulines and F. Charpentier, "Pitch-synchronous
+    waveform processing techniques for text-to-speech synthesis using
+    diphones", Speech Communication 9(5-6), 453-467 (1990),
+    https://doi.org/10.1016/0167-6393(90)90021-Z .
     """
 
     validated_wave = _require_waveform(wave)
     sampling_rate = _require_rate(sampling_rate)
     pitch_scale = _require_scale(pitch_scale, "pitch_scale")
-    intonation_scale = _require_scale(
-        intonation_scale, "intonation_scale", minimum=0.0
-    )
+    intonation_scale = _require_scale(intonation_scale, "intonation_scale", minimum=0.0)
     frame_period = _require_frame_period(frame_period)
 
-    # 推定器を呼ばずサンプルも変更しない完全な恒等処理を保証します。
-    if (
-        target_f0 is None
-        and pitch_scale == 0.0
-        and intonation_scale == 1.0
-    ):
+    # 無変換時は推定器を呼ばず、サンプル値を変えない厳密な恒等処理にする。
+    if target_f0 is None and pitch_scale == 0.0 and intonation_scale == 1.0:
         return validated_wave.copy()
 
     if f0 is None:
-        # WORLDには短い解析窓が必要で、短すぎる波形には有効な有声変換がないためそのまま保持します。
-        if validated_wave.size < max(64, int(round(sampling_rate * 0.02))):
+        # WORLDの解析窓より短い波形には有効な有声音変換を行えないため、そのまま保持する。
+        if validated_wave.size < max(64, round(sampling_rate * 0.02)):
             return validated_wave.copy()
         track = _f0_from_public_world(validated_wave, sampling_rate)
     else:
@@ -372,24 +379,18 @@ def process_td_psola(
         target_samples = source_f0.copy()
         lower = source_f0[voiced] * MIN_PITCH_RATIO
         upper = source_f0[voiced] * MAX_PITCH_RATIO
-        target_samples[voiced] = np.clip(
-            requested_samples[voiced], lower, upper
-        )
-        target_samples[voiced] = np.clip(
-            target_samples[voiced], MIN_F0_HZ, MAX_F0_HZ
-        )
+        target_samples[voiced] = np.clip(requested_samples[voiced], lower, upper)
+        target_samples[voiced] = np.clip(target_samples[voiced], MIN_F0_HZ, MAX_F0_HZ)
     source = validated_wave.astype(np.float64, copy=False)
     output_size = source.size
     accumulated = np.zeros(output_size, dtype=np.float64)
     weights = np.zeros(output_size, dtype=np.float64)
-    minimum_run = max(8, int(round(sampling_rate * 0.005)))
+    minimum_run = max(8, round(sampling_rate * 0.005))
     runs = _voiced_runs(voiced, minimum_run)
 
     window_cache = {}
     for start, end in runs:
-        source_marks = _source_marks(
-            source, source_f0, start, end, sampling_rate
-        )
+        source_marks = _source_marks(source, source_f0, start, end, sampling_rate)
         if source_marks.size < 2:
             continue
         synthesis_marks, source_indices = _target_marks(
@@ -402,20 +403,18 @@ def process_td_psola(
             _period_at(source_f0, int(source_marks[0]), sampling_rate),
             _period_at(source_f0, int(source_marks[-1]), sampling_rate),
         )
-        fade_samples = max(1, int(math.ceil(max_period)))
+        fade_samples = max(1, math.ceil(max_period))
         for synthesis_mark, source_mark_index in zip(
-            synthesis_marks, source_indices
+            synthesis_marks, source_indices, strict=True
         ):
             source_mark = int(source_marks[int(source_mark_index)])
             half_window = max(
                 2,
-                int(math.ceil(_period_at(source_f0, source_mark, sampling_rate))),
+                math.ceil(_period_at(source_f0, source_mark, sampling_rate)),
             )
             window = window_cache.get(half_window)
             if window is None:
-                window = np.hanning(2 * half_window + 1).astype(
-                    np.float64, copy=False
-                )
+                window = np.hanning(2 * half_window + 1).astype(np.float64, copy=False)
                 window_cache[half_window] = window
 
             offsets = np.arange(-half_window, half_window + 1, dtype=np.int64)
@@ -433,13 +432,11 @@ def process_td_psola(
             source_positions = source_positions[valid]
             output_positions = output_positions[valid]
             local_window = window[valid]
-            source_gate = _edge_gate(
-                source_positions, start, end, fade_samples
-            )
+            source_gate = _edge_gate(source_positions, start, end, fade_samples)
             accumulated[output_positions] += (
                 source[source_positions] * local_window * source_gate
             )
-            # 窓の重みを入力ゲートから独立させ、正規化時にゲートを打ち消さず滑らかに遷移させます。
+            # 正規化でgateを相殺せず滑らかな遷移を残すため、窓の重みはsource gateから独立させる。
             weights[output_positions] += local_window
 
     covered = weights > np.finfo(np.float64).eps
@@ -452,7 +449,7 @@ def process_td_psola(
     for start, end in runs:
         region = np.arange(start, end, dtype=np.int64)
         fade = min(
-            max(1, int(math.ceil(sampling_rate * 0.005))),
+            max(1, math.ceil(sampling_rate * 0.005)),
             max(1, (end - start) // 2),
         )
         blend = _edge_gate(region, start, end, fade)
@@ -486,11 +483,11 @@ def apply_td_psola(
     pitch_scale: float = 0.0,
     intonation_scale: float = 1.0,
     *,
-    f0: Optional[Sequence[float]] = None,
-    target_f0: Optional[Sequence[float]] = None,
+    f0: Sequence[float] | None = None,
+    target_f0: Sequence[float] | None = None,
     frame_period: float = DEFAULT_FRAME_PERIOD,
 ) -> np.ndarray:
-    """v2波形処理アダプターの互換名です。"""
+    """Compatibility name for the v2 waveform-processing adapter."""
 
     return process_td_psola(
         wave,

@@ -4,51 +4,55 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 engine_dir="$(cd "$script_dir/.." && pwd)"
-venv_dir="${1:-$engine_dir/.venv}"
-core_dir="${2:-$engine_dir/../coeiroink_core}"
-python_bin="${PYTHON_BIN:-python3.12}"
+venv_dir="$(realpath -m "${1:-$engine_dir/.venv}")"
+core_dir="$(realpath -m "${2:-$engine_dir/../coeiroink_core}")"
+python_bin="${PYTHON_BIN:-python3.14}"
+uv_bin="${UV_BIN:-uv}"
 
-"$python_bin" -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
-test -f "$core_dir/requirements.txt"
+"$python_bin" -c 'import sys; assert (3, 12) <= sys.version_info[:2] < (3, 15), sys.version'
+test -f "$engine_dir/pyproject.toml"
+test -f "$engine_dir/uv.lock"
+test -f "$core_dir/pyproject.toml"
 
-"$python_bin" -m venv "$venv_dir"
+expected_core_dir="$(realpath -m "$engine_dir/../coeiroink_core")"
+if [ "$core_dir" != "$expected_core_dir" ]; then
+  echo "CoreはEngineの隣接するcoeiroink_coreでなければなりません: $expected_core_dir" >&2
+  exit 1
+fi
+
+if [ -x "$venv_dir/bin/python" ]; then
+    "$venv_dir/bin/python" -c 'import sys; assert (3, 12) <= sys.version_info[:2] < (3, 15), sys.version'
+else
+    "$uv_bin" venv --allow-existing --python "$python_bin" "$venv_dir"
+fi
+
 venv_python="$venv_dir/bin/python"
 
-"$venv_python" -m pip install --upgrade \
-  'pip>=25,<27' \
-  'setuptools>=75,<80' \
-  'wheel>=0.45,<1'
-"$venv_python" -m pip install \
-  'Cython>=3.0.11,<3.1' \
-  'numpy>=1.26.4,<2' \
-  'cmake==3.31.6' \
-  ninja
-"$venv_python" -m pip install \
-  'torch==2.3.1+cpu' \
-  --index-url https://download.pytorch.org/whl/cpu
+# CPU版の依存とビルドツールはEngineのlockから一度に同期する。
+(
+  cd "$engine_dir"
+  UV_PROJECT_ENVIRONMENT="$venv_dir" \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.4.1 \
+    PATH="$venv_dir/bin:/usr/bin:/bin" \
+    "$uv_bin" sync --locked --extra cpu --group build --no-dev
+)
 
-# Some hardened Linux kernels reject the executable-stack flag in native
-# PyTorch libraries. Clearing the flag does not change executable code or model
-# weights and is harmless on hosts that do not enforce it.
-"$venv_python" -m pip install 'patchelf==0.19.1.0'
-purelib="$($venv_python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
-"$venv_dir/bin/patchelf" --clear-execstack "$purelib/torch/lib/libtorch_cpu.so"
+# 一部のLinuxカーネルがPyTorch共有ライブラリの実行スタック属性を拒否するため、
+# wheelに含まれる共有ライブラリだけ属性を明示的に解除する。
+purelib="$("$venv_python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+torch_cpu_library="$purelib/torch/lib/libtorch_cpu.so"
+test -f "$torch_cpu_library"
+"$venv_dir/bin/patchelf" --clear-execstack "$torch_cpu_library"
 
-# Build pyopenjtalk with the current Open JTalk dictionary package.  The
-# explicit no-isolation mode keeps the native build on the Python 3.12 tools
-# installed above.
-env PATH="$venv_dir/bin:/usr/bin:/bin" "$venv_python" -m pip install \
-  --no-build-isolation \
-  -r "$core_dir/requirements-pyopenjtalk.txt"
-"$venv_python" -m pip install --no-deps \
-  -r "$core_dir/requirements-espnet.txt"
+# importと標準辞書の初期化をビルド時に検証し、初回HTTP要求へ遅延させない。
+"$venv_python" - <<'PY'
+import importlib.metadata
+import espnet2
+import pyopenjtalk
+import torch
 
-env PATH="$venv_dir/bin:/usr/bin:/bin" "$venv_python" -m pip install \
-  --no-build-isolation \
-  -r "$core_dir/requirements.txt"
-"$venv_python" -m pip install --editable "$core_dir"
-env PATH="$venv_dir/bin:/usr/bin:/bin" "$venv_python" -m pip install \
-  --no-build-isolation \
-  -r "$engine_dir/requirements.txt"
-
-"$venv_python" -c 'import coeirocore, espnet, torch; print(torch.__version__)'
+print(f"torch={torch.__version__}")
+print(f"espnet={importlib.metadata.version('espnet')}")
+print(f"pyopenjtalk={pyopenjtalk.__version__}")
+pyopenjtalk.g2p("ビルド確認")
+PY

@@ -1,11 +1,20 @@
+import json
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
+from coeirocore.devices import DeviceBackend
 
+from voicevox_engine.dev.core.mock import supported_devices as core_supported_devices
 from voicevox_engine.dev.synthesis_engine import MockSynthesisEngine
 from voicevox_engine.kana_parser import create_kana
-from voicevox_engine.model import AccentPhrase, AudioQuery, Mora
+from voicevox_engine.model import AccentPhrase, AudioQuery, Mora, SupportedDevicesInfo
+from voicevox_engine.synthesis_engine.make_synthesis_engines import (
+    make_synthesis_engines,
+    resolve_device,
+)
 
 
 class TestMockSynthesisEngine(TestCase):
@@ -149,3 +158,99 @@ class TestMockSynthesisEngine(TestCase):
         )
         self.audio_manager.synthesis.assert_called_once()
         self.assertEqual(wave.shape, (32,))
+
+    def test_device_is_passed_to_core_audio_manager(self):
+        with patch(
+            "voicevox_engine.dev.synthesis_engine.mock.AudioManager"
+        ) as audio_manager_class:
+            MockSynthesisEngine(
+                speakers="",
+                device="opencl",
+                device_index=2,
+                opencl_platform_index=1,
+            )
+
+        audio_manager_class.assert_called_once_with(
+            fs=44100,
+            device="opencl",
+            device_index=2,
+            opencl_platform_index=1,
+            use_gpu=None,
+            speaker_info_dir=Path("speaker_info"),
+            cpu_num_threads=None,
+        )
+
+    def test_make_synthesis_engines_passes_complete_device_selection(self):
+        engine = Mock()
+        with (
+            patch("voicevox_engine.dev.core.metas", return_value="[]"),
+            patch(
+                "voicevox_engine.dev.core.supported_devices",
+                return_value='{"cpu": true}',
+            ),
+            patch(
+                "voicevox_engine.dev.synthesis_engine.MockSynthesisEngine",
+                return_value=engine,
+            ) as engine_class,
+        ):
+            result = make_synthesis_engines(
+                voicelib_dirs=[],
+                runtime_dirs=[],
+                speaker_info_dir=Path("speaker_info"),
+                device="opencl",
+                device_index=2,
+                opencl_platform_index=1,
+            )
+
+        self.assertEqual(result, {"0.1.0": engine})
+        engine_class.assert_called_once_with(
+            speakers="[]",
+            supported_devices='{"cpu": true}',
+            speaker_info_dir=Path("speaker_info").resolve(),
+            cpu_num_threads=0,
+            device="opencl",
+            device_index=2,
+            opencl_platform_index=1,
+        )
+
+    def test_resolve_device_keeps_new_devices_and_maps_legacy_gpu_flag(self):
+        self.assertEqual(resolve_device("directml"), "directml")
+        self.assertEqual(resolve_device("opencl"), "opencl")
+        self.assertEqual(resolve_device(use_gpu=True), "cuda")
+        self.assertEqual(resolve_device(use_gpu=False), "cpu")
+
+    def test_resolve_device_rejects_conflicting_arguments(self):
+        with self.assertRaisesRegex(ValueError, "同時に指定"):
+            resolve_device("cpu", use_gpu=True)
+
+    def test_supported_devices_delegates_to_core_capability(self):
+        capabilities = {
+            DeviceBackend.CPU: SimpleNamespace(available=True),
+            DeviceBackend.CUDA: SimpleNamespace(available=False),
+            DeviceBackend.DIRECTML: SimpleNamespace(available=True),
+            DeviceBackend.OPENCL: SimpleNamespace(available=True),
+        }
+
+        with patch(
+            "coeirocore.devices.get_supported_device_capabilities",
+            return_value=capabilities,
+        ):
+            device_info = json.loads(core_supported_devices())
+            self.assertEqual(
+                device_info,
+                {"cpu": True, "cuda": False, "dml": True, "opencl": True},
+            )
+            self.assertEqual(
+                SupportedDevicesInfo(**device_info).model_dump(),
+                {"cpu": True, "cuda": False, "dml": True},
+            )
+
+    def test_supported_devices_does_not_hide_unexpected_probe_errors(self):
+        with (
+            patch(
+                "coeirocore.devices.get_supported_device_capabilities",
+                side_effect=RuntimeError("probe failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "probe failed"),
+        ):
+            core_supported_devices()

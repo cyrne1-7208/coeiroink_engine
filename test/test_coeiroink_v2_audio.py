@@ -6,9 +6,9 @@ import pytest
 import soundfile
 
 from voicevox_engine.coeiroink_v2.audio import (
-    AudioValidationError,
     MAX_PAUSE_LENGTH_SECONDS,
     MAX_SAMPLING_RATE,
+    AudioValidationError,
     apply_trim_buffer,
     decode_pcm_wav,
     decode_pcm_wav_base64,
@@ -31,9 +31,7 @@ def _sine(seconds=0.25, sampling_rate=16000, frequency=440.0):
 def _stereo_pcm_wav():
     wave = np.column_stack((_sine(), _sine(frequency=660.0)))
     output = io.BytesIO()
-    soundfile.write(
-        output, wave, 16000, format="WAV", subtype="PCM_16"
-    )
+    soundfile.write(output, wave, 16000, format="WAV", subtype="PCM_16")
     return output.getvalue()
 
 
@@ -50,14 +48,12 @@ def test_pcm_wav_round_trip_has_mono_pcm_header_and_sampling_rate():
     wave = _sine()
 
     encoded = encode_pcm_wav(wave, 16000)
-    decoded, sampling_rate = decode_pcm_wav(
-        encoded, expected_sampling_rate=16000
-    )
+    decoded, sampling_rate = decode_pcm_wav(encoded, expected_sampling_rate=16000)
 
     assert encoded[:4] == b"RIFF"
     assert encoded[8:12] == b"WAVE"
-    assert encoded[20:22] == b"\x01\x00"  # PCM形式タグ
-    assert encoded[22:24] == b"\x01\x00"  # 1チャンネル
+    assert encoded[20:22] == b"\x01\x00"  # PCM format tag
+    assert encoded[22:24] == b"\x01\x00"  # one channel
     assert sampling_rate == 16000
     assert decoded.dtype == np.float32
     assert decoded.ndim == 1
@@ -128,9 +124,7 @@ def test_trim_buffer_retains_context_outside_detected_sound():
 def test_processing_identity_and_finite_output():
     wave = _sine(seconds=0.2, sampling_rate=16000)
 
-    identity, identity_rate = process_wave(
-        wave, 16000, output_sampling_rate=16000
-    )
+    identity, identity_rate = process_wave(wave, 16000, output_sampling_rate=16000)
     np.testing.assert_array_equal(identity, wave)
     assert identity_rate == 16000
 
@@ -208,9 +202,7 @@ def test_internal_pause_is_replaced_and_edge_pauses_are_untouched():
         pause_end_trim_buffer=0.1,
     )
 
-    expected = np.concatenate(
-        (wave[:7], np.zeros(3, dtype=np.float32), wave[9:])
-    )
+    expected = np.concatenate((wave[:7], np.zeros(3, dtype=np.float32), wave[9:]))
     np.testing.assert_array_equal(result, expected)
 
 

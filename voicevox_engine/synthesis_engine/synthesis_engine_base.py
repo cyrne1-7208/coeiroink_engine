@@ -1,6 +1,5 @@
 import copy
 from abc import ABCMeta, abstractmethod
-from typing import List, Optional
 
 import numpy as np
 
@@ -16,13 +15,12 @@ def mora_to_text(mora: str) -> str:
         mora = mora[:-1] + mora[-1].lower()
     if mora in openjtalk_mora2text:
         return openjtalk_mora2text[mora]
-    else:
-        return mora
+    return mora
 
 
 def adjust_interrogative_accent_phrases(
-    accent_phrases: List[AccentPhrase],
-) -> List[AccentPhrase]:
+    accent_phrases: list[AccentPhrase],
+) -> list[AccentPhrase]:
     """
     enable_interrogative_upspeakが有効になっていて与えられたaccent_phrasesに疑問系のものがあった場合、
     各accent_phraseの末尾にある疑問系発音用のMoraに対して直前のMoraより少し音を高くすることで疑問文ぽくする
@@ -39,14 +37,13 @@ def adjust_interrogative_accent_phrases(
     ]
 
 
-def adjust_interrogative_moras(accent_phrase: AccentPhrase) -> List[Mora]:
+def adjust_interrogative_moras(accent_phrase: AccentPhrase) -> list[Mora]:
     moras = copy.deepcopy(accent_phrase.moras)
     if accent_phrase.is_interrogative and not (len(moras) == 0 or moras[-1].pitch == 0):
         interrogative_mora = make_interrogative_mora(moras[-1])
         moras.append(interrogative_mora)
         return moras
-    else:
-        return moras
+    return moras
 
 
 def make_interrogative_mora(last_mora: Mora) -> Mora:
@@ -64,8 +61,8 @@ def make_interrogative_mora(last_mora: Mora) -> Mora:
 
 
 def full_context_label_moras_to_moras(
-    full_context_moras: List[full_context_label.Mora],
-) -> List[Mora]:
+    full_context_moras: list[full_context_label.Mora],
+) -> list[Mora]:
     return [
         Mora(
             text=mora_to_text("".join([p.phoneme for p in mora.phonemes])),
@@ -88,13 +85,10 @@ class SynthesisEngineBase(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def supported_devices(self) -> Optional[str]:
+    def supported_devices(self) -> str | None:
         raise NotImplementedError
 
-    def initialize_speaker_synthesis(
-        self, speaker_id: int, skip_reinit: bool
-    ):
-
+    def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool) -> None:
         """
         指定した話者での音声合成を初期化する。何度も実行可能。
         未実装の場合は何もしない
@@ -105,6 +99,7 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         skip_reinit : bool
             True の場合, 既に初期化済みの話者の再初期化をスキップします
         """
+        return
 
     def is_initialized_speaker_synthesis(self, speaker_id: int) -> bool:
         """
@@ -122,8 +117,8 @@ class SynthesisEngineBase(metaclass=ABCMeta):
 
     @abstractmethod
     def replace_phoneme_length(
-        self, accent_phrases: List[AccentPhrase], speaker_id: int
-    ) -> List[AccentPhrase]:
+        self, accent_phrases: list[AccentPhrase], speaker_id: int
+    ) -> list[AccentPhrase]:
         """
         accent_phrasesの母音・子音の長さを設定する
         Parameters
@@ -141,8 +136,8 @@ class SynthesisEngineBase(metaclass=ABCMeta):
 
     @abstractmethod
     def replace_mora_pitch(
-        self, accent_phrases: List[AccentPhrase], speaker_id: int
-    ) -> List[AccentPhrase]:
+        self, accent_phrases: list[AccentPhrase], speaker_id: int
+    ) -> list[AccentPhrase]:
         """
         accent_phrasesの音高(ピッチ)を設定する
         Parameters
@@ -160,9 +155,9 @@ class SynthesisEngineBase(metaclass=ABCMeta):
 
     def replace_mora_data(
         self,
-        accent_phrases: List[AccentPhrase],
+        accent_phrases: list[AccentPhrase],
         speaker_id: int,
-    ) -> List[AccentPhrase]:
+    ) -> list[AccentPhrase]:
         return self.replace_mora_pitch(
             accent_phrases=self.replace_phoneme_length(
                 accent_phrases=accent_phrases,
@@ -171,7 +166,9 @@ class SynthesisEngineBase(metaclass=ABCMeta):
             speaker_id=speaker_id,
         )
 
-    def create_accent_phrases(self, text: str, speaker_id: int) -> List[AccentPhrase]:
+    def create_accent_phrases(self, text: str, speaker_id: int) -> list[AccentPhrase]:
+        """Open JTalkのフルコンテキストラベルをアクセント句へ変換し、継続長と音高を補完する。"""
+
         if len(text.strip()) == 0:
             return []
 
@@ -179,7 +176,7 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         if len(utterance.breath_groups) == 0:
             return []
 
-        accent_phrases = self.replace_mora_data(
+        return self.replace_mora_data(
             accent_phrases=[
                 AccentPhrase(
                     moras=full_context_label_moras_to_moras(accent_phrase.moras),
@@ -208,7 +205,6 @@ class SynthesisEngineBase(metaclass=ABCMeta):
             ],
             speaker_id=speaker_id,
         )
-        return accent_phrases
 
     def synthesis(
         self,

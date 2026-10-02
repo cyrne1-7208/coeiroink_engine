@@ -1,6 +1,5 @@
-import os
 from pathlib import Path
-from typing import List, Type
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from voicevox_engine.acoustic_feature_extractor import (
@@ -38,9 +37,7 @@ class TestBasePhoneme(TestCase):
             17.00	18.00	s
             18.00	19.00	U
             19.00	20.00	pau
-        """.replace(
-            " ", ""
-        )[
+        """.replace(" ", "")[
             1:-1
         ]  # ダブルクオーテーションx3で囲われている部分で、空白をすべて置き換え、先頭と最後の"\n"を除外する
 
@@ -74,16 +71,15 @@ class TestBasePhoneme(TestCase):
 
     def lab_test_base(
         self,
-        file_path: str,
-        phonemes: List["BasePhoneme"],
-        phoneme_class: Type["BasePhoneme"],
+        phonemes: list[BasePhoneme],
+        phoneme_class: type[BasePhoneme],
     ):
-        phoneme_class.save_lab_list(phonemes, Path(file_path))
-        with open(file_path, mode="r") as f:
-            self.assertEqual(f.read(), self.lab_str)
-        result_phoneme = phoneme_class.load_lab_list(Path(file_path))
-        self.assertEqual(result_phoneme, phonemes)
-        os.remove(file_path)
+        with TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "phonemes.lab"
+            phoneme_class.save_lab_list(phonemes, file_path)
+            self.assertEqual(file_path.read_text(), self.lab_str)
+            result_phoneme = phoneme_class.load_lab_list(file_path)
+            self.assertEqual(result_phoneme, phonemes)
 
 
 class TestJvsPhoneme(TestBasePhoneme):
@@ -172,7 +168,7 @@ class TestJvsPhoneme(TestBasePhoneme):
         self.assertEqual(parsed_jvs_2.phoneme_id, 4)
 
     def test_lab_list(self):
-        self.lab_test_base("./jvs_lab_test", self.jvs_hello_hiho, JvsPhoneme)
+        self.lab_test_base(self.jvs_hello_hiho, JvsPhoneme)
 
 
 class TestOjtPhoneme(TestBasePhoneme):
@@ -263,4 +259,4 @@ class TestOjtPhoneme(TestBasePhoneme):
         self.assertEqual(parsed_ojt_2.phoneme_id, 14)
 
     def test_lab_list(self):
-        self.lab_test_base("./ojt_lab_test", self.ojt_hello_hiho, OjtPhoneme)
+        self.lab_test_base(self.ojt_hello_hiho, OjtPhoneme)

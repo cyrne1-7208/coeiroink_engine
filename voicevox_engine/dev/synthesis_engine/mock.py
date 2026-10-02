@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 from coeirocore.coeiro_manager import AudioManager
@@ -7,30 +6,41 @@ from coeirocore.query_manager import query2tokens_prosody
 
 from ...model import AccentPhrase, AudioQuery
 from ...synthesis_engine import SynthesisEngineBase
+from ...synthesis_engine.make_synthesis_engines import resolve_device
 
 
 class MockSynthesisEngine(SynthesisEngineBase):
+    """旧来のクラス名を維持しながら、公開Python Coreへ接続する実運用向けアダプター。"""
+
     def __init__(
         self,
         speakers: str,
-        supported_devices: Optional[str] = None,
+        supported_devices: str | None = None,
         speaker_info_dir: Path = Path("speaker_info"),
-        cpu_num_threads: Optional[int] = None,
-        audio_manager: Optional[AudioManager] = None,
+        cpu_num_threads: int | None = None,
+        audio_manager: AudioManager | None = None,
+        device: str | None = None,
+        use_gpu: bool | None = None,
+        device_index: int = 0,
+        opencl_platform_index: int = 0,
     ):
         super().__init__()
 
         self._speakers = speakers
         self._supported_devices = supported_devices
         self.default_sampling_rate = 44100
+        self.device = resolve_device(device=device, use_gpu=use_gpu)
 
-        # 名前はMockですが、実際の推論と音声後処理は公開CoreのAudioManagerへ委譲します。
+        # 実行可否と番号の範囲検証はCoreのAudioManagerへ一元化する。
         self.audio_manager = (
             audio_manager
             if audio_manager is not None
             else AudioManager(
                 fs=self.default_sampling_rate,
-                use_gpu=False,
+                device=self.device,
+                device_index=device_index,
+                opencl_platform_index=opencl_platform_index,
+                use_gpu=None,
                 speaker_info_dir=speaker_info_dir,
                 cpu_num_threads=cpu_num_threads,
             )
@@ -41,17 +51,17 @@ class MockSynthesisEngine(SynthesisEngineBase):
         return self._speakers
 
     @property
-    def supported_devices(self) -> Optional[str]:
+    def supported_devices(self) -> str | None:
         return self._supported_devices
 
     def replace_phoneme_length(
-        self, accent_phrases: List[AccentPhrase], speaker_id: int
-    ) -> List[AccentPhrase]:
+        self, accent_phrases: list[AccentPhrase], speaker_id: int
+    ) -> list[AccentPhrase]:
         return accent_phrases
 
     def replace_mora_pitch(
-        self, accent_phrases: List[AccentPhrase], speaker_id: int
-    ) -> List[AccentPhrase]:
+        self, accent_phrases: list[AccentPhrase], speaker_id: int
+    ) -> list[AccentPhrase]:
         return accent_phrases
 
     def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool):

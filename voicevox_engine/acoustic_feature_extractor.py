@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 from abc import abstractmethod
+from collections.abc import Sequence
 from enum import Enum
 from pathlib import Path
-from typing import List, Sequence
 
 import numpy
 
 
-class BasePhoneme(object):
+class BasePhoneme:
     """
     音素の応用クラス群の抽象基底クラス
 
@@ -111,7 +113,7 @@ class BasePhoneme(object):
 
     @classmethod
     @abstractmethod
-    def convert(cls, phonemes: List["BasePhoneme"]) -> List["BasePhoneme"]:
+    def convert(cls, phonemes: list[BasePhoneme]) -> list[BasePhoneme]:
         raise NotImplementedError
 
     @classmethod
@@ -128,7 +130,11 @@ class BasePhoneme(object):
         phonemes : List[BasePhoneme]
             パース結果を用いた音素クラスを返す
         """
-        phonemes = [cls.parse(s) for s in path.read_text().split("\n") if len(s) > 0]
+        phonemes = [
+            cls.parse(s)
+            for s in path.read_text(encoding="utf-8").split("\n")
+            if len(s) > 0
+        ]
         phonemes = cls.convert(phonemes)
 
         for phoneme in phonemes:
@@ -136,7 +142,7 @@ class BasePhoneme(object):
         return phonemes
 
     @classmethod
-    def save_lab_list(cls, phonemes: List["BasePhoneme"], path: Path):
+    def save_lab_list(cls, phonemes: list[BasePhoneme], path: Path):
         """
         音素クラスのリストをlabファイル形式で保存する
         Parameters
@@ -154,7 +160,7 @@ class BasePhoneme(object):
                 for p in phonemes
             ]
         )
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8")
 
 
 class JvsPhoneme(BasePhoneme):
@@ -216,7 +222,7 @@ class JvsPhoneme(BasePhoneme):
     space_phoneme = "pau"
 
     @classmethod
-    def convert(cls, phonemes: List["JvsPhoneme"]) -> List["JvsPhoneme"]:
+    def convert(cls, phonemes: list[JvsPhoneme]) -> list[JvsPhoneme]:
         """
         最初と最後のsil(silent)をspace_phoneme(pau)に置き換え(変換)する
         Parameters
@@ -301,7 +307,7 @@ class OjtPhoneme(BasePhoneme):
     space_phoneme = "pau"
 
     @classmethod
-    def convert(cls, phonemes: List["OjtPhoneme"]):
+    def convert(cls, phonemes: list[OjtPhoneme]):
         """
         最初と最後のsil(silent)をspace_phoneme(pau)に置き換え(変換)する
         Parameters

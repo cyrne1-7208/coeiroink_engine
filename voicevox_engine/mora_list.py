@@ -41,6 +41,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 """
+
 _mora_list_minimum = [
     ["ヴォ", "v", "o"],
     ["ヴェ", "v", "e"],
@@ -183,8 +184,7 @@ _mora_list_minimum = [
     ["ウォ", "w", "o"],
     ["ウェ", "w", "e"],
     ["ウィ", "w", "i"],
-    # 新しいVOICEVOXカナ変換が対応する外来音表記です。
-    # 逆引き表にも保持し、音素出力から曖昧さなくAquesTalkモーラへ戻せるようにします。
+    # 新しいVOICEVOXかな変換が扱う外来音表記も逆引き表へ含め、音素列から一意なAquesTalkモーラへ戻せるようにする。
     ["ウゥ", "w", "u"],
     ["ウ", "", "u"],
     ["イェ", "y", "e"],

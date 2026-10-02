@@ -1,6 +1,5 @@
 import threading
-from itertools import chain
-from typing import List, Optional, Tuple
+from itertools import chain, pairwise
 
 import numpy
 from scipy.signal import resample
@@ -11,11 +10,11 @@ from .core_wrapper import CoreWrapper, OldCoreError
 from .synthesis_engine_base import SynthesisEngineBase
 
 unvoiced_mora_phoneme_list = ["A", "I", "U", "E", "O", "cl", "pau"]
-mora_phoneme_list = ["a", "i", "u", "e", "o", "N"] + unvoiced_mora_phoneme_list
+mora_phoneme_list = ["a", "i", "u", "e", "o", "N", *unvoiced_mora_phoneme_list]
 
 
-# TODO: モーラ処理をmoraモジュールへ移す。
-def to_flatten_moras(accent_phrases: List[AccentPhrase]) -> List[Mora]:
+# TODO: move mora utility to mora module
+def to_flatten_moras(accent_phrases: list[AccentPhrase]) -> list[Mora]:
     """
     accent_phrasesに含まれるMora(とpause_moraがあればそれも)を
     すべて一つのリストに結合する
@@ -30,18 +29,20 @@ def to_flatten_moras(accent_phrases: List[AccentPhrase]) -> List[Mora]:
     """
     return list(
         chain.from_iterable(
-            accent_phrase.moras
-            + (
-                [accent_phrase.pause_mora]
-                if accent_phrase.pause_mora is not None
-                else []
-            )
+            [
+                *accent_phrase.moras,
+                *(
+                    [accent_phrase.pause_mora]
+                    if accent_phrase.pause_mora is not None
+                    else []
+                ),
+            ]
             for accent_phrase in accent_phrases
         )
     )
 
 
-def to_phoneme_data_list(phoneme_str_list: List[str]):
+def to_phoneme_data_list(phoneme_str_list: list[str]):
     """
     phoneme文字列のリストを、OjtPhonemeクラスのリストに変換する
     Parameters
@@ -57,11 +58,10 @@ def to_phoneme_data_list(phoneme_str_list: List[str]):
         OjtPhoneme(phoneme=p, start=i, end=i + 1)
         for i, p in enumerate(phoneme_str_list)
     ]
-    phoneme_data_list = OjtPhoneme.convert(phoneme_data_list)
-    return phoneme_data_list
+    return OjtPhoneme.convert(phoneme_data_list)
 
 
-def split_mora(phoneme_list: List[OjtPhoneme]):
+def split_mora(phoneme_list: list[OjtPhoneme]):
     """
     OjtPhonemeのリストから、
     母音の位置(vowel_indexes)
@@ -90,16 +90,19 @@ def split_mora(phoneme_list: List[OjtPhoneme]):
     # 1の場合はconsonant(子音)が存在しない=母音のみ(a/i/u/e/o/N/cl/pau)で構成されるモーラ(音)である
     # 2の場合はconsonantが存在するモーラである
     # なので、2の場合(else)でphonemeを取り出している
-    consonant_phoneme_list: List[Optional[OjtPhoneme]] = [None] + [
-        None if post - prev == 1 else phoneme_list[post - 1]
-        for prev, post in zip(vowel_indexes[:-1], vowel_indexes[1:])
+    consonant_phoneme_list: list[OjtPhoneme | None] = [
+        None,
+        *(
+            None if post - prev == 1 else phoneme_list[post - 1]
+            for prev, post in pairwise(vowel_indexes)
+        ),
     ]
     return consonant_phoneme_list, vowel_phoneme_list, vowel_indexes
 
 
 def pre_process(
-    accent_phrases: List[AccentPhrase],
-) -> Tuple[List[Mora], List[OjtPhoneme]]:
+    accent_phrases: list[AccentPhrase],
+) -> tuple[list[Mora], list[OjtPhoneme]]:
     """
     AccentPhraseモデルのリストを整形し、処理に必要なデータの原型を作り出す
     Parameters
@@ -116,11 +119,14 @@ def pre_process(
     flatten_moras = to_flatten_moras(accent_phrases)
 
     phoneme_each_mora = [
-        ([mora.consonant] if mora.consonant is not None else []) + [mora.vowel]
+        [
+            *([mora.consonant] if mora.consonant is not None else []),
+            mora.vowel,
+        ]
         for mora in flatten_moras
     ]
     phoneme_str_list = list(chain.from_iterable(phoneme_each_mora))
-    phoneme_str_list = ["pau"] + phoneme_str_list + ["pau"]
+    phoneme_str_list = ["pau", *phoneme_str_list, "pau"]
 
     phoneme_data_list = to_phoneme_data_list(phoneme_str_list)
 
@@ -179,34 +185,33 @@ class SynthesisEngine(SynthesisEngineBase):
         return self._speakers
 
     @property
-    def supported_devices(self) -> Optional[str]:
+    def supported_devices(self) -> str | None:
         return self._supported_devices
 
     def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool):
-        # 旧Coreは合成ごとにモデルを読み込み、明示的なモデルライフサイクルAPIを公開しません。
-        # 初期化に成功したように見せるためOldCoreErrorを握りつぶさず、機能フラグで判定します。
+        # 旧Coreは合成ごとにモデルを読み込み明示的なライフサイクルAPIを持たないため、例外を握りつぶさず機能フラグで分岐する。
         if not getattr(self.core, "exist_load_model", True):
             return
         with self.mutex:
             # 以下の条件のいずれかを満たす場合, 初期化を実行する
             # 1. 引数 skip_reinit が False の場合
             # 2. 話者が初期化されていない場合
-            if not skip_reinit:
-                self.core.load_model(speaker_id)
-            elif not getattr(self.core, "exist_is_model_loaded", True):
-                self.core.load_model(speaker_id)
-            elif not self.core.is_model_loaded(speaker_id):
+            if (
+                not skip_reinit
+                or not getattr(self.core, "exist_is_model_loaded", True)
+                or not self.core.is_model_loaded(speaker_id)
+            ):
                 self.core.load_model(speaker_id)
 
     def is_initialized_speaker_synthesis(self, speaker_id: int) -> bool:
         if not getattr(self.core, "exist_is_model_loaded", True):
-            # 旧Coreは外部から確認できるモデル読込状態を保持せず、合成時に必要な読込を行います。
+            # 旧Coreは外部から照会できるロード状態を保持せず、必要な読込は合成処理自身が行う。
             return True
         return self.core.is_model_loaded(speaker_id)
 
     def replace_phoneme_length(
-        self, accent_phrases: List[AccentPhrase], speaker_id: int
-    ) -> List[AccentPhrase]:
+        self, accent_phrases: list[AccentPhrase], speaker_id: int
+    ) -> list[AccentPhrase]:
         """
         accent_phrasesの母音・子音の長さを設定する
         Parameters
@@ -222,13 +227,13 @@ class SynthesisEngine(SynthesisEngineBase):
         """
         # モデルがロードされていない場合はロードする
         self.initialize_speaker_synthesis(speaker_id, skip_reinit=True)
-    # 音素処理
+        # phoneme
         # AccentPhraseをすべてMoraおよびOjtPhonemeの形に分解し、処理可能な形にする
         flatten_moras, phoneme_data_list = pre_process(accent_phrases)
         # OjtPhonemeの形に分解されたもの(phoneme_data_list)から、vowel(母音)の位置を抜き出す
         _, _, vowel_indexes_data = split_mora(phoneme_data_list)
 
-    # 音素長推定
+        # yukarin_s
         # OjtPhonemeのリストからOjtPhonemeのPhoneme ID(OpenJTalkにおける音素のID)のリストを作る
         phoneme_list_s = numpy.array(
             [p.phoneme_id for p in phoneme_data_list], dtype=numpy.int64
@@ -254,8 +259,8 @@ class SynthesisEngine(SynthesisEngineBase):
         return accent_phrases
 
     def replace_mora_pitch(
-        self, accent_phrases: List[AccentPhrase], speaker_id: int
-    ) -> List[AccentPhrase]:
+        self, accent_phrases: list[AccentPhrase], speaker_id: int
+    ) -> list[AccentPhrase]:
         """
         accent_phrasesの音高(ピッチ)を設定する
         Parameters
@@ -275,11 +280,11 @@ class SynthesisEngine(SynthesisEngineBase):
         if len(accent_phrases) == 0:
             return []
 
-    # 音素処理
+        # phoneme
         # AccentPhraseをすべてMoraおよびOjtPhonemeの形に分解し、処理可能な形にする
         flatten_moras, phoneme_data_list = pre_process(accent_phrases)
 
-    # アクセント処理
+        # accent
         def _create_one_hot(accent_phrase: AccentPhrase, position: int):
             """
             単位行列(numpy.eye)を応用し、accent_phrase内でone hotな配列(リスト)を作る
@@ -357,7 +362,7 @@ class SynthesisEngine(SynthesisEngineBase):
             _,
         ) = split_mora(phoneme_data_list)
 
-    # 音高推定
+        # yukarin_sa
         # Phoneme関連のデータをyukarin_sa_forwarderに渡すための最終処理、リスト内のデータをint64に変換する
         vowel_phoneme_list = numpy.array(
             [p.phoneme_id for p in vowel_phoneme_data_list], dtype=numpy.int64
@@ -411,7 +416,7 @@ class SynthesisEngine(SynthesisEngineBase):
         """
         # モデルがロードされていない場合はロードする
         self.initialize_speaker_synthesis(speaker_id, skip_reinit=True)
-    # 音素処理
+        # phoneme
         # AccentPhraseをすべてMoraおよびOjtPhonemeの形に分解し、処理可能な形にする
         flatten_moras, phoneme_data_list = pre_process(query.accent_phrases)
 
@@ -420,7 +425,7 @@ class SynthesisEngine(SynthesisEngineBase):
             [p.phoneme_id for p in phoneme_data_list], dtype=numpy.int64
         )
 
-    # 音素長
+        # length
         # 音素の長さをリストに展開・結合する。ここには前後の無音時間も含まれる
         phoneme_length_list = (
             [query.prePhonemeLength]
@@ -440,12 +445,12 @@ class SynthesisEngine(SynthesisEngineBase):
         # lengthにSpeed Scale(話速)を適用する
         phoneme_length /= query.speedScale
 
-    # 音高
+        # pitch
         # モーラの音高(ピッチ)を展開・結合し、floatにキャストする
         f0_list = [0] + [mora.pitch for mora in flatten_moras] + [0]
         f0 = numpy.array(f0_list, dtype=numpy.float32)
         # 音高(ピッチ)の調節を適用する(2のPitch Scale乗を掛ける)
-        f0 *= 2 ** query.pitchScale
+        f0 *= 2**query.pitchScale
 
         # 有声音素(音高(ピッチ)が0より大きいもの)か否かを抽出する
         voiced = f0 > 0
@@ -460,7 +465,7 @@ class SynthesisEngine(SynthesisEngineBase):
         _, _, vowel_indexes_data = split_mora(phoneme_data_list)
         vowel_indexes = numpy.array(vowel_indexes_data)
 
-    # 波形デコード
+        # forward decode
         # 音素の長さにrateを掛け、intにキャストする
         rate = 24000 / 256
         phoneme_bin_num = numpy.round(phoneme_length * rate).astype(numpy.int32)
@@ -489,7 +494,7 @@ class SynthesisEngine(SynthesisEngineBase):
                 speaker_id=numpy.array(speaker_id, dtype=numpy.int64).reshape(-1),
             )
 
-    # 音量: ゲインを適用します。
+        # volume: ゲイン適用
         wave *= query.volumeScale
 
         # 出力サンプリングレートがデフォルト(decode forwarderによるもの、24kHz)でなければ、それを適用する

@@ -1,25 +1,38 @@
-"""ESPnetのトークン長をv2のモーラ長応答へ変換します。
-v2の韻律応答はモーラ単位ですが、ESPnetは``plain``の各トークンに長さを返すため、両者の対応を決定的に整理します。
-範囲はサンプル単位なので、音響フレーム長に``hop_length``を掛けます。
-v2応答は最終的なモーラ範囲だけを公開し、トークンごとの長さは公開しません。
-そのため、非音素トークンのフレーム割当は次の規則で固定します。
-``^``は先頭の``pau``、``$``と``?``は末尾の``pau``、``_``は途中の``pau``になります。
-``[``, ``]``, ``#``など幅のない境界・アクセント記号は次の音素または休止へ加算し、最後の音素の後なら末尾休止に含めます。
-すべての入力フレームを消費し、範囲を連続させたうえで、差異が生じ得る箇所をこの割当規則に限定します。
+"""Convert ESPnet token durations into the v2 mora-duration response.
+
+The v2 prosody response describes only moras, while ESPnet returns one
+duration for every token in ``plain``.  This module performs the deterministic
+bookkeeping between those two representations.  Ranges are expressed in
+samples, so the acoustic-frame durations are multiplied by ``hop_length``.
+
+The saved official responses expose the final mora ranges, but not the raw
+per-token duration vector.  Consequently, they cannot establish where a
+non-phoneme token's frames are assigned.  The policy here is explicit:
+
+* ``^`` becomes a leading ``pau`` mora and ``$``/``?`` become a trailing one.
+* ``_`` is an in-stream ``pau`` mora.
+* ``[``, ``]``, ``#`` and other zero-width boundary/accent markers are added
+  to the next semantic unit (phoneme or pause).  Markers after the final
+  phoneme are therefore included in the terminal pause.
+
+This consumes every input frame, keeps all ranges contiguous, and makes the
+remaining parity uncertainty localized to that marker-allocation policy.
 """
 
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from operator import index as to_index
-from typing import Iterable, List, Mapping, Sequence, Tuple
 
 from .models import MoraDuration, PhonemeDuration, TimeRange
 
 
 class DurationConversionError(ValueError):
-    """トークン・韻律・長さの列が一致しない場合に発生します。"""
+    """Raised when the token, prosody, and duration streams do not align."""
 
 
-# API概念に合わせた短い別名であり、別の例外型ではありません。
+# API上の概念名を使いたい呼出元向けの短い別名であり、別の例外型は作らない。
 DurationError = DurationConversionError
 
 
@@ -31,32 +44,28 @@ _TERMINAL_MARKERS = frozenset(("$", "?"))
 class _MoraSpec:
     name: str
     hira: str
-    phonemes: Tuple[str, ...]
+    phonemes: tuple[str, ...]
 
 
-def _as_list(value: Iterable, field_name: str) -> List:
+def _as_list(value: Iterable, field_name: str) -> list:
     if isinstance(value, (str, bytes)):
-        raise DurationConversionError("{} must be a sequence".format(field_name))
+        raise DurationConversionError(f"{field_name} must be a sequence")
     try:
         return list(value)
     except TypeError as error:
-        raise DurationConversionError(
-            "{} must be an iterable".format(field_name)
-        ) from error
+        raise DurationConversionError(f"{field_name} must be an iterable") from error
 
 
 def _integer(value: object, field_name: str, minimum: int = 0) -> int:
     if isinstance(value, bool):
-        raise DurationConversionError("{} must be an integer".format(field_name))
+        raise DurationConversionError(f"{field_name} must be an integer")
     try:
         result = to_index(value)
     except TypeError as error:
-        raise DurationConversionError(
-            "{} must be an integer".format(field_name)
-        ) from error
+        raise DurationConversionError(f"{field_name} must be an integer") from error
     if result < minimum:
         raise DurationConversionError(
-            "{} must be greater than or equal to {}".format(field_name, minimum)
+            f"{field_name} must be greater than or equal to {minimum}"
         )
     return result
 
@@ -66,38 +75,32 @@ def _field(value: object, name: str, context: str) -> object:
         try:
             return value[name]
         except KeyError as error:
-            raise DurationConversionError(
-                "{} is missing {}".format(context, name)
-            ) from error
+            raise DurationConversionError(f"{context} is missing {name}") from error
     try:
         return getattr(value, name)
     except AttributeError as error:
-        raise DurationConversionError(
-            "{} has no {} field".format(context, name)
-        ) from error
+        raise DurationConversionError(f"{context} has no {name} field") from error
 
 
-def _mora_specs(prosody_detail: Iterable[Iterable[object]]) -> List[_MoraSpec]:
-    specs: List[_MoraSpec] = []
+def _mora_specs(prosody_detail: Iterable[Iterable[object]]) -> list[_MoraSpec]:
+    specs: list[_MoraSpec] = []
     phrases = _as_list(prosody_detail, "prosody_detail")
     for phrase_index, phrase in enumerate(phrases):
-        moras = _as_list(phrase, "prosody_detail[{}]".format(phrase_index))
+        moras = _as_list(phrase, f"prosody_detail[{phrase_index}]")
         for mora_index, mora in enumerate(moras):
-            context = "prosody_detail[{}][{}]".format(phrase_index, mora_index)
+            context = f"prosody_detail[{phrase_index}][{mora_index}]"
             name = _field(mora, "phoneme", context)
             hira = _field(mora, "hira", context)
             if not isinstance(name, str) or not name:
                 raise DurationConversionError(
-                    "{}.phoneme must be a non-empty string".format(context)
+                    f"{context}.phoneme must be a non-empty string"
                 )
             if not isinstance(hira, str):
-                raise DurationConversionError(
-                    "{}.hira must be a string".format(context)
-                )
+                raise DurationConversionError(f"{context}.hira must be a string")
             phonemes = tuple(name.split("-"))
             if any(not phoneme for phoneme in phonemes):
                 raise DurationConversionError(
-                    "{}.phoneme contains an empty phoneme".format(context)
+                    f"{context}.phoneme contains an empty phoneme"
                 )
             specs.append(_MoraSpec(name=name, hira=hira, phonemes=phonemes))
     return specs
@@ -105,16 +108,14 @@ def _mora_specs(prosody_detail: Iterable[Iterable[object]]) -> List[_MoraSpec]:
 
 def _pause_duration(
     cursor: int, frame_count: int, hop_length: int
-) -> Tuple[MoraDuration, int]:
+) -> tuple[MoraDuration, int]:
     end = cursor + frame_count * hop_length
     wav_range = TimeRange(start=cursor, end=end)
     return (
         MoraDuration(
             mora="pau",
             hira="",
-            phonemePitches=[
-                PhonemeDuration(phoneme="pau", wavRange=wav_range)
-            ],
+            phonemePitches=[PhonemeDuration(phoneme="pau", wavRange=wav_range)],
             wavRange=wav_range,
         ),
         end,
@@ -126,19 +127,27 @@ def convert_duration(
     prosody_detail: Sequence[Sequence[object]],
     duration_frames: Sequence[int],
     hop_length: int,
-) -> List[MoraDuration]:
-    """v2のplainトークンとESPnetの長さをモーラ範囲へ変換します。
-    ``plain_tokens``は境界記号を含むv2の平坦なトークン列です。
-    ``prosody_detail``は句・モーラ順の入れ子になったv2の``Mora``列です。
-    ``duration_frames``はplain各トークンに対応する非負のESPnetフレーム長です。
-    ``hop_length``は音響1フレームが表す出力サンプル数です。
-    返却する範囲は音響順で、0から始まり連続し、``sum(duration_frames) * hop_length``で終わります。
-    不正または不整合な列の場合は``DurationConversionError``を発生させます。
+) -> list[MoraDuration]:
+    """Convert v2 plain tokens and ESPnet durations to mora ranges.
+
+    Args:
+        plain_tokens: The flat v2 token stream, including boundary markers.
+        prosody_detail: Nested v2 ``Mora`` values in phrase/mora order.
+        duration_frames: One non-negative ESPnet frame count per plain token.
+        hop_length: Number of output samples represented by one acoustic frame.
+
+    Returns:
+        ``MoraDuration`` values in acoustic order.  Their nested phoneme and
+        mora ranges start at zero, are contiguous, and end at
+        ``sum(duration_frames) * hop_length``.
+
+    Raises:
+        DurationConversionError: If the streams are malformed or misaligned.
     """
 
     tokens = _as_list(plain_tokens, "plain_tokens")
     frames = [
-        _integer(value, "duration_frames[{}]".format(i))
+        _integer(value, f"duration_frames[{i}]")
         for i, value in enumerate(_as_list(duration_frames, "duration_frames"))
     ]
     hop_length = _integer(hop_length, "hop_length", minimum=1)
@@ -149,21 +158,23 @@ def convert_duration(
     for i, token in enumerate(tokens):
         if not isinstance(token, str) or not token:
             raise DurationConversionError(
-                "plain_tokens[{}] must be a non-empty string".format(i)
+                f"plain_tokens[{i}] must be a non-empty string"
             )
 
     specs = _mora_specs(prosody_detail)
-    result: List[MoraDuration] = []
+    result: list[MoraDuration] = []
     cursor = 0
     pending_frames = 0
     spec_index = 0
     phoneme_index = 0
     current_mora_start = None
-    current_phonemes: List[PhonemeDuration] = []
+    current_phonemes: list[PhonemeDuration] = []
     saw_leading_pause = False
     saw_terminal_pause = False
 
-    for token_index, (token, frame_count) in enumerate(zip(tokens, frames)):
+    for token_index, (token, frame_count) in enumerate(
+        zip(tokens, frames, strict=True)
+    ):
         if token == "^":
             if token_index != 0 or saw_leading_pause:
                 raise DurationConversionError(
@@ -181,7 +192,7 @@ def convert_duration(
         if token in _TERMINAL_MARKERS:
             if token_index != len(tokens) - 1 or saw_terminal_pause:
                 raise DurationConversionError(
-                    "{} must occur exactly at the end of plain_tokens".format(token)
+                    f"{token} must occur exactly at the end of plain_tokens"
                 )
             if spec_index != len(specs) or phoneme_index:
                 raise DurationConversionError(
@@ -197,9 +208,7 @@ def convert_duration(
 
         if token == "_":
             if phoneme_index:
-                raise DurationConversionError(
-                    "pause marker split a mora"
-                )
+                raise DurationConversionError("pause marker split a mora")
             pause, cursor = _pause_duration(
                 cursor, frame_count + pending_frames, hop_length
             )
@@ -223,9 +232,7 @@ def convert_duration(
         expected = spec.phonemes[phoneme_index]
         if token != expected:
             raise DurationConversionError(
-                "plain token {} at index {} does not match prosody phoneme {}".format(
-                    token, token_index, expected
-                )
+                f"plain token {token} at index {token_index} does not match prosody phoneme {expected}"
             )
 
         if phoneme_index == 0:

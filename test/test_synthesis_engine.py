@@ -1,7 +1,6 @@
 import math
 from copy import deepcopy
 from random import random
-from typing import Union
 from unittest import TestCase
 from unittest.mock import Mock
 
@@ -10,7 +9,8 @@ import numpy
 from voicevox_engine.acoustic_feature_extractor import OjtPhoneme
 from voicevox_engine.model import AccentPhrase, AudioQuery, Mora
 from voicevox_engine.synthesis_engine import SynthesisEngine
-# TODO: voicevox_engine.synthesis_engine.moraからimportする。
+
+# TODO: import from voicevox_engine.synthesis_engine.mora
 from voicevox_engine.synthesis_engine.synthesis_engine import (
     mora_phoneme_list,
     pre_process,
@@ -70,7 +70,7 @@ def decode_mock(
     phoneme_size: int,
     f0: numpy.ndarray,
     phoneme: numpy.ndarray,
-    speaker_id: Union[numpy.ndarray, int],
+    speaker_id: numpy.ndarray | int,
 ):
     result = []
     speaker_value = _speaker_value(speaker_id)
@@ -80,8 +80,7 @@ def decode_mock(
         for _ in range(256):
             result.append(
                 float(
-                    f0[i][0]
-                    * (numpy.where(phoneme[i] == 1)[0].item() / phoneme_size)
+                    f0[i][0] * (numpy.where(phoneme[i] == 1)[0].item() / phoneme_size)
                     + speaker_value
                 )
             )
@@ -106,13 +105,53 @@ class MockCore:
 class TestSynthesisEngine(TestCase):
     def setUp(self):
         super().setUp()
-        self.str_list_hello_hiho = (
-            "sil k o N n i ch i w a pau h i h o d e s U sil".split()
-        )
+        self.str_list_hello_hiho = [
+            "sil",
+            "k",
+            "o",
+            "N",
+            "n",
+            "i",
+            "ch",
+            "i",
+            "w",
+            "a",
+            "pau",
+            "h",
+            "i",
+            "h",
+            "o",
+            "d",
+            "e",
+            "s",
+            "U",
+            "sil",
+        ]
         self.phoneme_data_list_hello_hiho = [
             OjtPhoneme(phoneme=p, start=i, end=i + 1)
             for i, p in enumerate(
-                "pau k o N n i ch i w a pau h i h o d e s U pau".split()
+                [
+                    "pau",
+                    "k",
+                    "o",
+                    "N",
+                    "n",
+                    "i",
+                    "ch",
+                    "i",
+                    "w",
+                    "a",
+                    "pau",
+                    "h",
+                    "i",
+                    "h",
+                    "o",
+                    "d",
+                    "e",
+                    "s",
+                    "U",
+                    "pau",
+                ]
             )
         ]
         self.accent_phrases_hello_hiho = [
@@ -220,9 +259,11 @@ class TestSynthesisEngine(TestCase):
         flatten_moras = to_flatten_moras(self.accent_phrases_hello_hiho)
         self.assertEqual(
             flatten_moras,
-            self.accent_phrases_hello_hiho[0].moras
-            + [self.accent_phrases_hello_hiho[0].pause_mora]
-            + self.accent_phrases_hello_hiho[1].moras,
+            [
+                *self.accent_phrases_hello_hiho[0].moras,
+                self.accent_phrases_hello_hiho[0].pause_mora,
+                *self.accent_phrases_hello_hiho[1].moras,
+            ],
         )
 
     def test_to_phoneme_data_list(self):
@@ -542,14 +583,14 @@ class TestSynthesisEngine(TestCase):
         mean_f0 = []
         for i, phoneme_length in enumerate(phoneme_length_list):
             f0_single = numpy.array(f0_list[f0_index], dtype=numpy.float32) * (
-                2 ** audio_query.pitchScale
+                2**audio_query.pitchScale
             )
-            for _ in range(int(round(phoneme_length * (24000 / 256)))):
+            for _ in range(round(phoneme_length * (24000 / 256))):
                 f0.append([f0_single])
                 phoneme_s = []
                 for _ in range(num_phoneme):
                     phoneme_s.append(0)
-                # one-hot化
+                # one hot
                 phoneme_s[phoneme_id_list[i]] = 1
                 phoneme.append(phoneme_s)
             # consonantとvowelを判別し、vowelであればf0_indexを一つ進める

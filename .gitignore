@@ -1,27 +1,20 @@
-# Python-generated files
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
-
-# Test coverage output
+.mypy_cache/
 .coverage
-.coverage.*
-coverage.xml
 htmlcov/
 
-# Build and packaging output
-build/
-dist/
-*.so
-.Python
-*.egg-info/
-
-# Local environment and model data
-speaker_info/
+# 仮想環境とビルド成果物
 .venv/
 venv/
+build/
+dist/
+licenses_venv/
+licenses.json
 
-# Local editor and operating-system files
-.DS_Store
-.idea/
+# 実行時データ
+speaker_info/

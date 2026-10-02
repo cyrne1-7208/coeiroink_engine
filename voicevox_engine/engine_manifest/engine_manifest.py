@@ -1,4 +1,4 @@
-from typing import List, Optional
+"""エンジンマニフェストのデータモデル。"""
 
 from pydantic import BaseModel, Field
 
@@ -9,8 +9,8 @@ class UpdateInfo(BaseModel):
     """
 
     version: str = Field(title="エンジンのバージョン名")
-    descriptions: List[str] = Field(title="アップデートの詳細についての説明")
-    contributors: Optional[List[str]] = Field(default=None, title="貢献者名")
+    descriptions: list[str] = Field(title="アップデートの詳細についての説明")
+    contributors: list[str] | None = Field(default=None, title="貢献者名")
 
 
 class LicenseInfo(BaseModel):
@@ -19,10 +19,8 @@ class LicenseInfo(BaseModel):
     """
 
     name: str = Field(title="依存ライブラリ名")
-    version: Optional[str] = Field(
-        default=None, title="依存ライブラリのバージョン"
-    )
-    license: Optional[str] = Field(default=None, title="依存ライブラリのライセンス名")
+    version: str | None = Field(default=None, title="依存ライブラリのバージョン")
+    license: str | None = Field(default=None, title="依存ライブラリのライセンス名")
     text: str = Field(title="依存ライブラリのライセンス本文")
 
 
@@ -37,19 +35,19 @@ class SupportedFeatures(BaseModel):
     adjust_pitch_scale: bool = Field(title="全体の音高の調整")
     adjust_intonation_scale: bool = Field(title="全体の抑揚の調整")
     adjust_volume_scale: bool = Field(title="全体の音量の調整")
-    adjust_pause_length: Optional[bool] = Field(
+    adjust_pause_length: bool | None = Field(
         default=None, title="句読点などの無音時間の調整"
     )
     interrogative_upspeak: bool = Field(title="疑問文の自動調整")
     synthesis_morphing: bool = Field(title="2人の話者でモーフィングした音声を合成")
-    sing: Optional[bool] = Field(default=None, title="歌唱音声合成")
-    manage_library: Optional[bool] = Field(
+    sing: bool | None = Field(default=None, title="歌唱音声合成")
+    manage_library: bool | None = Field(
         default=None, title="音声ライブラリのインストール・アンインストール"
     )
-    return_resource_url: Optional[bool] = Field(
+    return_resource_url: bool | None = Field(
         default=None, title="キャラクター情報のリソースをURLで返送"
     )
-    apply_katakana_english: Optional[bool] = Field(
+    apply_katakana_english: bool | None = Field(
         default=None, title="未知の英単語をカタカナ読みに変換"
     )
 
@@ -63,14 +61,15 @@ class EngineManifest(BaseModel):
     name: str = Field(title="エンジン名")
     brand_name: str = Field(title="ブランド名")
     uuid: str = Field(title="エンジンのUUID")
+    version: str = Field(title="エンジンのバージョン")
     url: str = Field(title="エンジンのURL")
     icon: str = Field(title="エンジンのアイコンをBASE64エンコードしたもの")
     default_sampling_rate: int = Field(title="デフォルトのサンプリング周波数")
     frame_rate: float = Field(title="エンジンのフレームレート")
     terms_of_service: str = Field(title="エンジンの利用規約")
-    update_infos: List[UpdateInfo] = Field(title="エンジンのアップデート情報")
-    dependency_licenses: List[LicenseInfo] = Field(title="依存関係のライセンス情報")
-    supported_vvlib_manifest_version: Optional[str] = Field(
+    update_infos: list[UpdateInfo] = Field(title="エンジンのアップデート情報")
+    dependency_licenses: list[LicenseInfo] = Field(title="依存関係のライセンス情報")
+    supported_vvlib_manifest_version: str | None = Field(
         default=None, title="エンジンが対応するvvlibのバージョン"
     )
     supported_features: SupportedFeatures = Field(title="エンジンが持つ機能")

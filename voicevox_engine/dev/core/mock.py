@@ -1,21 +1,21 @@
 import json
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
+from coeirocore.coeiro_manager import MetaManager
 from pyopenjtalk import tts
 from scipy.signal import resample
-from coeirocore.coeiro_manager import MetaManager
 
 DUMMY_TEXT = "これはダミーのテキストです"
 
 
-def initialize(path: str, use_gpu: bool, *args: List[Any]) -> None:
+def initialize(path: str, use_gpu: bool, *args: list[Any]) -> None:
     pass
 
 
-def yukarin_s_forward(length: int, **kwargs: Dict[str, Any]) -> np.ndarray:
+def yukarin_s_forward(length: int, **kwargs: dict[str, Any]) -> np.ndarray:
     logger = getLogger("uvicorn")  # FastAPI / Uvicorn 内からの利用のため
     logger.info(
         "Sorry, yukarin_s_forward() is a mock. Return values are incorrect.",
@@ -23,7 +23,7 @@ def yukarin_s_forward(length: int, **kwargs: Dict[str, Any]) -> np.ndarray:
     return np.ones(length) / 5
 
 
-def yukarin_sa_forward(length: int, **kwargs: Dict[str, Any]) -> np.ndarray:
+def yukarin_sa_forward(length: int, **kwargs: dict[str, Any]) -> np.ndarray:
     logger = getLogger("uvicorn")  # FastAPI / Uvicorn 内からの利用のため
     logger.info(
         "Sorry, yukarin_sa_forward() is a mock. Return values are incorrect.",
@@ -31,7 +31,7 @@ def yukarin_sa_forward(length: int, **kwargs: Dict[str, Any]) -> np.ndarray:
     return np.ones((1, length)) * 5
 
 
-def decode_forward(length: int, **kwargs: Dict[str, Any]) -> np.ndarray:
+def decode_forward(length: int, **kwargs: dict[str, Any]) -> np.ndarray:
     """
     合成音声の波形データをNumPy配列で返します。ただし、常に固定の文言を読み上げます（DUMMY_TEXT）
     参照→SynthesisEngine のdocstring [Mock]
@@ -61,12 +61,11 @@ def decode_forward(length: int, **kwargs: Dict[str, Any]) -> np.ndarray:
     logger.info(
         "Sorry, decode_forward() is a mock. Return values are incorrect.",
     )
-    wave, sr = tts(DUMMY_TEXT)
-    wave = resample(
+    wave, _sr = tts(DUMMY_TEXT)
+    return resample(
         wave.astype("int16"),
         24000 * len(wave) // 48000,
     )
-    return wave
 
 
 def metas(speaker_info_dir: Path = Path("speaker_info")) -> str:
@@ -77,10 +76,19 @@ def metas(speaker_info_dir: Path = Path("speaker_info")) -> str:
 
 
 def supported_devices() -> str:
+    # OpenCLは内部拡張として保持し、VOICEVOX互換APIでは既存schemaにより3項目へ絞られる。
+    from coeirocore.devices import (
+        DeviceBackend,
+        get_supported_device_capabilities,
+    )
+
+    capabilities = get_supported_device_capabilities()
     return json.dumps(
         {
-            "cpu": True,
-            "cuda": False,
-            "dml": False,
-        }
+            "cpu": capabilities[DeviceBackend.CPU].available,
+            "cuda": capabilities[DeviceBackend.CUDA].available,
+            "dml": capabilities[DeviceBackend.DIRECTML].available,
+            "opencl": capabilities[DeviceBackend.OPENCL].available,
+        },
+        ensure_ascii=False,
     )

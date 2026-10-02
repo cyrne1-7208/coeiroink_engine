@@ -1,4 +1,3 @@
-from typing import List
 from unittest import TestCase
 
 from voicevox_engine import kana_parser
@@ -6,9 +5,8 @@ from voicevox_engine.kana_parser import create_kana
 from voicevox_engine.model import AccentPhrase, Mora, ParseKanaError, ParseKanaErrorCode
 
 
-def parse_kana(text: str) -> List[AccentPhrase]:
-    accent_phrases = kana_parser.parse_kana(text)
-    return accent_phrases
+def parse_kana(text: str) -> list[AccentPhrase]:
+    return kana_parser.parse_kana(text)
 
 
 class TestParseKana(TestCase):
@@ -50,7 +48,11 @@ class TestParseKana(TestCase):
         self.assertEqual(parse_kana("_ス'")[0].moras[0].vowel, "U")
 
     def test_roundtrip(self):
-        for text in ["コンニチワ'", "ワタシワ'/シャチョオデ'_ス", "トテモ'、エラ'インデス"]:
+        for text in [
+            "コンニチワ'",
+            "ワタシワ'/シャチョオデ'_ス",
+            "トテモ'、エラ'インデス",
+        ]:
             self.assertEqual(create_kana(parse_kana(text)), text)
 
         for text in ["ヲ'", "ェ'"]:
@@ -68,14 +70,35 @@ class TestParseKana(TestCase):
         self.assertEqual(
             [mora.text for mora in phrase.moras],
             [
-                "ウゥ", "キィ", "ギィ", "クァ", "クィ", "クゥ", "クェ", "クォ",
-                "グァ", "グィ", "グゥ", "グェ", "グォ", "ヂェ", "ヂャ", "ヂュ",
-                "ヂョ", "テェ", "ニィ", "ヒィ", "ビィ", "ピィ", "ミィ", "リィ",
+                "ウゥ",
+                "キィ",
+                "ギィ",
+                "クァ",
+                "クィ",
+                "クゥ",
+                "クェ",
+                "クォ",
+                "グァ",
+                "グィ",
+                "グゥ",
+                "グェ",
+                "グォ",
+                "ヂェ",
+                "ヂャ",
+                "ヂュ",
+                "ヂョ",
+                "テェ",
+                "ニィ",
+                "ヒィ",
+                "ビィ",
+                "ピィ",
+                "ミィ",
+                "リィ",
             ],
         )
 
     def _accent_phrase_marks_base(
-        self, text: str, expected_accent_phrases: List[AccentPhrase]
+        self, text: str, expected_accent_phrases: list[AccentPhrase]
     ) -> None:
         accent_phrases = kana_parser.parse_kana(text)
         self.assertEqual(expected_accent_phrases, accent_phrases)

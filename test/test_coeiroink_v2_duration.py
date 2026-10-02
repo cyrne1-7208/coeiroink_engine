@@ -45,12 +45,15 @@ def test_converts_phonemes_pauses_and_zero_width_markers():
         ("t-o", "と"),
         ("pau", ""),
     ]
-    assert [(p.phoneme, p.wav_range.start, p.wav_range.end)
-            for p in result[1].phoneme_pitches] == [
+    assert [
+        (p.phoneme, p.wav_range.start, p.wav_range.end)
+        for p in result[1].phoneme_pitches
+    ] == [
         ("k", 512, 1280),
         ("o", 1280, 2304),
     ]
-    # '['と'#'は次の意味単位へ割り当て、Nが5+6フレーム、sが7+8フレームを受け取ります。
+    # '[' and '#' are assigned to the following semantic unit: N receives
+    # 5+6 frames and s receives 7+8 frames.
     assert result[2].wav_range == {"start": 2304, "end": 5120}
     assert result[3].wav_range == {"start": 5120, "end": 11264}
     assert result[4].wav_range == {"start": 11264, "end": 13824}
@@ -60,12 +63,14 @@ def test_converts_phonemes_pauses_and_zero_width_markers():
 
 def test_supports_nasal_consonant_cluster_and_question_pause():
     plain = ["^", "sh", "i", "[", "N", "cl", "t", "a", "?"]
-    detail = [[
-        _mora("sh-i", "し"),
-        _mora("N", "ん"),
-        _mora("cl", "っ"),
-        _mora("t-a", "た"),
-    ]]
+    detail = [
+        [
+            _mora("sh-i", "し"),
+            _mora("N", "ん"),
+            _mora("cl", "っ"),
+            _mora("t-a", "た"),
+        ]
+    ]
     frames = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
     result = convert_duration(plain, detail, frames, hop_length=10)
@@ -86,9 +91,7 @@ def test_accepts_mapping_moras_without_mutating_inputs():
     assert result[1].model_dump(by_alias=True) == {
         "mora": "a",
         "hira": "あ",
-        "phonemePitches": [
-            {"phoneme": "a", "wavRange": {"start": 8, "end": 18}}
-        ],
+        "phonemePitches": [{"phoneme": "a", "wavRange": {"start": 8, "end": 18}}],
         "wavRange": {"start": 8, "end": 18},
     }
     assert detail == [[{"phoneme": "a", "hira": "あ", "accent": 1}]]
