@@ -2,7 +2,7 @@ from enum import Enum
 from re import findall, fullmatch
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, conint, validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, conint, field_validator
 
 from .metas.Metas import Speaker, SpeakerInfo
 
@@ -13,8 +13,8 @@ class Mora(BaseModel):
     """
 
     text: str = Field(title="文字")
-    consonant: Optional[str] = Field(title="子音の音素")
-    consonant_length: Optional[float] = Field(title="子音の音長")
+    consonant: Optional[str] = Field(default=None, title="子音の音素")
+    consonant_length: Optional[float] = Field(default=None, title="子音の音長")
     vowel: str = Field(title="母音の音素")
     vowel_length: float = Field(title="母音の音長")
     pitch: float = Field(title="音高")  # デフォルト値をつけるとts側のOpenAPIで生成されたコードの型がOptionalになる
@@ -34,7 +34,9 @@ class AccentPhrase(BaseModel):
 
     moras: List[Mora] = Field(title="モーラのリスト")
     accent: int = Field(title="アクセント箇所")
-    pause_mora: Optional[Mora] = Field(title="後ろに無音を付けるかどうか")
+    pause_mora: Optional[Mora] = Field(
+        default=None, title="後ろに無音を付けるかどうか"
+    )
     is_interrogative: bool = Field(default=False, title="疑問系かどうか")
 
     def __hash__(self):
@@ -57,9 +59,19 @@ class AudioQuery(BaseModel):
     volumeScale: float = Field(title="全体の音量")
     prePhonemeLength: float = Field(title="音声の前の無音時間")
     postPhonemeLength: float = Field(title="音声の後の無音時間")
+    pauseLength: Optional[float] = Field(
+        default=None,
+        title="句読点などの無音時間。nullのときは無視される",
+    )
+    pauseLengthScale: float = Field(
+        default=1, title="句読点などの無音時間（倍率）"
+    )
     outputSamplingRate: int = Field(title="音声データの出力サンプリングレート")
     outputStereo: bool = Field(title="音声データをステレオ出力するか否か")
-    kana: Optional[str] = Field(title="[読み取り専用]AquesTalkライクな読み仮名。音声合成クエリとしては無視される")
+    kana: Optional[str] = Field(
+        default=None,
+        title="[読み取り専用]AquesTalkライクな読み仮名。音声合成クエリとしては無視される",
+    )
 
     def __hash__(self):
         items = [
@@ -109,8 +121,13 @@ class ParseKanaBadRequest(BaseModel):
 class MorphableTargetInfo(BaseModel):
 
     is_morphable: bool = Field(title="指定した話者に対してモーフィングの可否")
-    # FIXME: add reason property
+    # FIXME: is_morphableがfalseの場合の理由プロパティを追加する。
     # reason: Optional[str] = Field(title="is_morphableがfalseである場合、その理由")
+
+
+class ResourceFormat(str, Enum):
+    BASE64 = "base64"
+    URL = "url"
 
 
 class SpeakerNotFoundError(LookupError):
@@ -165,13 +182,12 @@ class UserDictWord(BaseModel):
     yomi: str = Field(title="読み")
     pronunciation: str = Field(title="発音")
     accent_type: int = Field(title="アクセント型")
-    mora_count: Optional[int] = Field(title="モーラ数")
+    mora_count: Optional[int] = Field(default=None, title="モーラ数")
     accent_associative_rule: str = Field(title="アクセント結合規則")
 
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(validate_assignment=True, validate_default=True)
 
-    @validator("surface")
+    @field_validator("surface")
     def convert_to_zenkaku(cls, surface):
         return surface.translate(
             str.maketrans(
@@ -180,7 +196,7 @@ class UserDictWord(BaseModel):
             )
         )
 
-    @validator("pronunciation", pre=True)
+    @field_validator("pronunciation", mode="before")
     def check_is_katakana(cls, pronunciation):
         if not fullmatch(r"[ァ-ヴー]+", pronunciation):
             raise ValueError("発音は有効なカタカナでなくてはいけません。")
@@ -202,16 +218,30 @@ class UserDictWord(BaseModel):
                     raise ValueError("無効な発音です。(「くゎ」「ぐゎ」以外の「ゎ」の使用)")
         return pronunciation
 
-    @validator("mora_count", pre=True, always=True)
-    def check_mora_count_and_accent_type(cls, mora_count, values):
+    @field_validator("mora_count", mode="before")
+    def check_mora_count_and_accent_type(
+        cls, mora_count, info: ValidationInfo
+    ):
+        values = info.data
         if "pronunciation" not in values or "accent_type" not in values:
             # 適切な場所でエラーを出すようにする
             return mora_count
 
         if mora_count is None:
-            rule_others = "[イ][ェ]|[ヴ][ャュョ]|[トド][ゥ]|[テデ][ィャュョ]|[デ][ェ]|[クグ][ヮ]"
-            rule_line_i = "[キシチニヒミリギジビピ][ェャュョ]"
-            rule_line_u = "[ツフヴ][ァ]|[ウスツフヴズ][ィ]|[ウツフヴ][ェォ]"
+            # 辞書のモーラ数をkana_parserの最長一致表と揃えます。
+            # 特にキィやクォなど新しい外来音表記は1モーラとして数えます。
+            rule_others = (
+                "[イ][ェ]|[ヴ][ャュョ]|[ウクグトド][ゥ]|"
+                "[テデ][ィェャュョ]|[クグ][ヮ]"
+            )
+            rule_line_i = (
+                "[キシチニヒミリギジヂビピ][ェャュョ]|"
+                "[キニヒミリギビピ][ィ]"
+            )
+            rule_line_u = (
+                "[クツフヴグ][ァ]|[ウクスツフヴグズ][ィ]|"
+                "[ウクツフヴグ][ェォ]"
+            )
             rule_one_mora = "[ァ-ヴー]"
             mora_count = len(
                 findall(
@@ -239,7 +269,7 @@ class PartOfSpeechDetail(BaseModel):
     part_of_speech_detail_2: str = Field(title="品詞細分類2")
     part_of_speech_detail_3: str = Field(title="品詞細分類3")
     # context_idは辞書の左・右文脈IDのこと
-    # https://github.com/VOICEVOX/open_jtalk/blob/427cfd761b78efb6094bea3c5bb8c968f0d711ab/src/mecab-naist-jdic/_left-id.def # noqa
+    # https://github.com/VOICEVOX/open_jtalk/blob/427cfd761b78efb6094bea3c5bb8c968f0d711ab/src/mecab-naist-jdic/_left-id.def
     context_id: int = Field(title="文脈ID")
     cost_candidates: List[int] = Field(title="コストのパーセンタイル")
     accent_associative_rules: List[str] = Field(title="アクセント結合規則の一覧")

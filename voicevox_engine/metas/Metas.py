@@ -4,6 +4,13 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+class StyleType(str, Enum):
+    TALK = "talk"
+    SINGING_TEACHER = "singing_teacher"
+    FRAME_DECODE = "frame_decode"
+    SING = "sing"
+
+
 class SpeakerStyle(BaseModel):
     """
     スピーカーのスタイル情報
@@ -11,6 +18,14 @@ class SpeakerStyle(BaseModel):
 
     name: str = Field(title="スタイル名")
     id: int = Field(title="スタイルID")
+    type: StyleType = Field(
+        default=StyleType.TALK,
+        title="スタイルの種類",
+        description=(
+            "talk:音声合成クエリの作成と音声合成が可能。"
+            "COEIROINKではtalkのみを提供します。"
+        ),
+    )
 
 
 class SpeakerSupportPermittedSynthesisMorphing(str, Enum):
@@ -41,7 +56,7 @@ class CoreSpeaker(BaseModel):
     name: str = Field(title="名前")
     speaker_uuid: str = Field(title="スピーカーのUUID")
     styles: List[SpeakerStyle] = Field(title="スピーカースタイルの一覧")
-    version: str = Field("スピーカーのバージョン")
+    version: str = Field(title="スピーカーのバージョン")
 
 
 class EngineSpeaker(BaseModel):
@@ -59,7 +74,6 @@ class Speaker(CoreSpeaker, EngineSpeaker):
     スピーカー情報
     """
 
-    pass
 
 
 class StyleInfo(BaseModel):
@@ -69,7 +83,10 @@ class StyleInfo(BaseModel):
 
     id: int = Field(title="スタイルID")
     icon: str = Field(title="当該スタイルのアイコンをbase64エンコードしたもの")
-    portrait: Optional[str] = Field(title="当該スタイルのportrait.pngをbase64エンコードしたもの")
+    portrait: Optional[str] = Field(
+        default=None,
+        title="当該スタイルのportrait.pngをbase64エンコードしたもの",
+    )
     voice_samples: List[str] = Field(title="voice_sampleのwavファイルをbase64エンコードしたもの")
 
 

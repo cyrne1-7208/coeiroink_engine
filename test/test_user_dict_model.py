@@ -95,6 +95,11 @@ class TestUserDictWords(TestCase):
         test_value["pronunciation"] = "ボイボ"
         self.assertEqual(UserDictWord(**test_value).mora_count, 3)
 
+    def test_count_mora_extended_foreign_sounds(self):
+        test_value = deepcopy(self.test_model)
+        test_value["pronunciation"] = "キィクァヂェテェ"
+        self.assertEqual(UserDictWord(**test_value).mora_count, 4)
+
     def test_invalid_accent_type(self):
         test_value = deepcopy(self.test_model)
         test_value["accent_type"] = 4
