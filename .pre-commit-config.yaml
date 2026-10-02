@@ -3,10 +3,10 @@
 repos:
   - repo: local
     hooks:
-      - id: pysen-lint
-        name: pysen-lint
-        entry: pysen run lint
-        language: python
+      - id: ruff-lint
+        name: ruff-lint
+        entry: ruff check run.py voicevox_engine test --select E4,E7,E9
+        language: system
         types: [file, python]
         stages: [push]
         pass_filenames: false
