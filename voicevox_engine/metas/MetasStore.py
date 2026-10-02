@@ -17,15 +17,29 @@ class MetasStore:
 
     def __init__(self, engine_speakers_path: Path) -> None:
         self._engine_speakers_path = engine_speakers_path
-        self._loaded_metas: Dict[str, EngineSpeaker] = {
-            folder.name: EngineSpeaker(
-                **json.loads((folder / "metas.json").read_text(encoding="utf-8"))
-            )
-            for folder in engine_speakers_path.iterdir()
-        }
+        self._loaded_metas: Dict[str, EngineSpeaker] = {}
+        self._speaker_paths: Dict[str, Path] = {}
+
+        # UUIDと物理フォルダの対応は起動時に読み込み、リクエストごとの探索を避けます。
+        for folder in sorted(engine_speakers_path.iterdir()):
+            if not folder.is_dir() or folder.name.startswith("."):
+                continue
+
+            meta = json.loads((folder / "metas.json").read_text(encoding="utf-8"))
+            speaker_uuid = meta.get("speakerUuid")
+            if not isinstance(speaker_uuid, str) or not speaker_uuid:
+                raise ValueError(f"speakerUuid is missing or invalid: {folder}")
+            if speaker_uuid in self._loaded_metas:
+                raise ValueError(f"Duplicate speakerUuid: {speaker_uuid}")
+
+            self._loaded_metas[speaker_uuid] = EngineSpeaker(**meta)
+            self._speaker_paths[speaker_uuid] = folder
 
     def speaker_engine_metas(self, speaker_uuid: str) -> EngineSpeaker:
         return self.loaded_metas[speaker_uuid]
+
+    def speaker_path(self, speaker_uuid: str) -> Path:
+        return self._speaker_paths[speaker_uuid]
 
     def combine_metas(self, core_metas: List[CoreSpeaker]) -> List[Speaker]:
         """
@@ -35,14 +49,13 @@ class MetasStore:
 
         return [
             Speaker(
-                **self.speaker_engine_metas(speaker_meta.speaker_uuid).dict(),
-                **speaker_meta.dict(),
+                **self.speaker_engine_metas(speaker_meta.speaker_uuid).model_dump(),
+                **speaker_meta.model_dump(),
             )
             for speaker_meta in core_metas
         ]
 
-    # FIXME: engineではなくList[CoreSpeaker]を渡す形にすることで
-    # SynthesisEngineBaseによる循環importを修正する
+    # FIXME: engineではなくList[CoreSpeaker]を渡す形にしてSynthesisEngineBaseの循環importを修正する。
     def load_combined_metas(self, engine: "SynthesisEngineBase") -> List[Speaker]:
         """
         与えられたエンジンから、コア・エンジン両方の情報を含んだMetasを返す
