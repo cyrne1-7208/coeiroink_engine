@@ -46,9 +46,9 @@ jobs:
         run: |
           set -euo pipefail
           case "$TARGET" in
-            linux-cpu|windows-cpu) extra=cpu; python=3.14 ;;
-            linux-cuda|windows-cuda) extra=cuda; python=3.14 ;;
-            linux-opencl) extra=opencl; python=3.14 ;;
+            linux-cpu|windows-cpu) extra=cpu; python=3.12 ;;
+            linux-cuda|windows-cuda) extra=cuda; python=3.12 ;;
+            linux-opencl) extra=opencl; python=3.12 ;;
             windows-directml) extra=directml; python=3.12 ;;
             *) echo "unknown target: $TARGET" >&2; exit 2 ;;
           esac

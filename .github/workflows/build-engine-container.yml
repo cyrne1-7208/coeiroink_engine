@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: "GHCRへ保存するイメージの基礎タグ"
+        description: "GHCRへ保存するDocker互換の基礎タグ"
         required: true
         type: string
       push:
@@ -19,10 +19,15 @@ on:
         description: "組み合わせるCoreのブランチ、タグ、またはコミット"
         required: true
         type: string
+      publish_latest:
+        description: "latest-{backend}タグも更新する"
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       tag:
-        description: "GHCRへ保存するイメージの基礎タグ"
+        description: "GHCRへ保存するDocker互換の基礎タグ"
         required: true
         type: string
       push:
@@ -44,6 +49,11 @@ on:
         required: true
         type: string
         default: main
+      publish_latest:
+        description: "latest-{backend}タグも更新する"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: coeiroink-engine-container-${{ github.ref }}-${{ inputs.backend }}
@@ -110,13 +120,22 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           BACKEND: ${{ inputs.backend }}
+          PUBLISH_LATEST: ${{ inputs.publish_latest }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "tag must contain only ASCII letters, digits, '.', '_' or '-': $TAG" >&2
+          versioned_tag="${TAG}-${BACKEND}"
+          if [[ ! "$versioned_tag" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "image tag must contain at most 128 ASCII letters, digits, '.', '_' or '-': $versioned_tag" >&2
             exit 2
           fi
-          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}:${TAG}-${BACKEND}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/${GITHUB_REPOSITORY,,}:${versioned_tag}"
+            if [ "$PUBLISH_LATEST" = true ]; then
+              echo "ghcr.io/${GITHUB_REPOSITORY,,}:latest-${BACKEND}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build the selected Linux container
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -126,6 +145,6 @@ jobs:
           build-args: |
             COEIROINK_BACKEND=${{ inputs.backend }}
           push: ${{ inputs.push }}
-          tags: ${{ steps.image.outputs.name }}
+          tags: ${{ steps.image.outputs.tags }}
           provenance: false
           sbom: false

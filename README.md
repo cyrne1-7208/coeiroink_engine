@@ -2,17 +2,19 @@
 
 Cyrne1によってフォークされたCOEIROINK Engineです。HTTP API、MYCOEIROINKモデルのメタデータ管理、リクエスト処理を担当し、音声合成は隣接する[coeiroink_core](https://github.com/cyrne1-7208/coeiroink_core)へ委譲します。GUIと歌唱機能は対象外です。
 
+バージョンは`vX.Y.Z+coeiroink.1.7.3`形式で表記し、現在のバージョンは`v0.1.1+coeiroink.1.7.3`です。
+
 ## 対象環境
 
 EngineとCoreを同じ親ディレクトリへ配置し、利用するバックエンドを1つ選択します。
 
 | OS | バックエンド | uv extra | 起動時の指定 | Python |
 | --- | --- | --- | --- | --- |
-| Linux x64 | CPU | `cpu` | `--device cpu` | 3.12–3.14 |
-| Linux x64 | CUDA | `cuda` | `--device cuda` | 3.12–3.14 |
-| Linux x64 | OpenCL | `opencl` | `--device opencl` | 3.12–3.14 |
-| Windows x64 | CPU | `cpu` | `--device cpu` | 3.12–3.14 |
-| Windows x64 | CUDA | `cuda` | `--device cuda` | 3.12–3.14 |
+| Linux x64 | CPU | `cpu` | `--device cpu` | 3.12 |
+| Linux x64 | CUDA | `cuda` | `--device cuda` | 3.12 |
+| Linux x64 | OpenCL | `opencl` | `--device opencl` | 3.12 |
+| Windows x64 | CPU | `cpu` | `--device cpu` | 3.12 |
+| Windows x64 | CUDA | `cuda` | `--device cuda` | 3.12 |
 | Windows x64 | DirectML | `directml` | `--device directml` | 3.12 |
 
 ## セットアップ

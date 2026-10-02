@@ -202,7 +202,7 @@ class TestMockSynthesisEngine(TestCase):
                 opencl_platform_index=1,
             )
 
-        self.assertEqual(result, {"0.1.0": engine})
+        self.assertEqual(result, {"v0.1.1+coeiroink.1.7.3": engine})
         engine_class.assert_called_once_with(
             speakers="[]",
             supported_devices='{"cpu": true}',

@@ -6,10 +6,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 engine_dir="$(cd "$script_dir/.." && pwd)"
 venv_dir="$(realpath -m "${1:-$engine_dir/.venv}")"
 core_dir="$(realpath -m "${2:-$engine_dir/../coeiroink_core}")"
-python_bin="${PYTHON_BIN:-python3.14}"
+python_bin="${PYTHON_BIN:-python3.12}"
 uv_bin="${UV_BIN:-uv}"
 
-"$python_bin" -c 'import sys; assert (3, 12) <= sys.version_info[:2] < (3, 15), sys.version'
+"$python_bin" -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
 test -f "$engine_dir/pyproject.toml"
 test -f "$engine_dir/uv.lock"
 test -f "$core_dir/pyproject.toml"
@@ -21,7 +21,7 @@ if [ "$core_dir" != "$expected_core_dir" ]; then
 fi
 
 if [ -x "$venv_dir/bin/python" ]; then
-    "$venv_dir/bin/python" -c 'import sys; assert (3, 12) <= sys.version_info[:2] < (3, 15), sys.version'
+    "$venv_dir/bin/python" -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
 else
     "$uv_bin" venv --allow-existing --python "$python_bin" "$venv_dir"
 fi

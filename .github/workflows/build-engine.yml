@@ -48,11 +48,11 @@ jobs:
           path: coeiroink_core
           persist-credentials: false
 
-      - name: Set up uv and Python 3.14
+      - name: Set up uv and Python 3.12
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: 0.12.5
-          python-version: "3.14"
+          python-version: "3.12"
           activate-environment: true
           working-directory: coeiroink_engine
           enable-cache: true
@@ -105,19 +105,19 @@ jobs:
           set -euo pipefail
           case "$TARGET" in
             linux-cpu)
-              matrix='{"include":[{"target":"linux-cpu","os":"ubuntu-24.04","python":"3.14","extra":"cpu"}]}' ;;
+              matrix='{"include":[{"target":"linux-cpu","os":"ubuntu-24.04","python":"3.12","extra":"cpu"}]}' ;;
             linux-cuda)
-              matrix='{"include":[{"target":"linux-cuda","os":"ubuntu-24.04","python":"3.14","extra":"cuda"}]}' ;;
+              matrix='{"include":[{"target":"linux-cuda","os":"ubuntu-24.04","python":"3.12","extra":"cuda"}]}' ;;
             linux-opencl)
-              matrix='{"include":[{"target":"linux-opencl","os":"ubuntu-24.04","python":"3.14","extra":"opencl"}]}' ;;
+              matrix='{"include":[{"target":"linux-opencl","os":"ubuntu-24.04","python":"3.12","extra":"opencl"}]}' ;;
             windows-cpu)
-              matrix='{"include":[{"target":"windows-cpu","os":"windows-2022","python":"3.14","extra":"cpu"}]}' ;;
+              matrix='{"include":[{"target":"windows-cpu","os":"windows-2022","python":"3.12","extra":"cpu"}]}' ;;
             windows-cuda)
-              matrix='{"include":[{"target":"windows-cuda","os":"windows-2022","python":"3.14","extra":"cuda"}]}' ;;
+              matrix='{"include":[{"target":"windows-cuda","os":"windows-2022","python":"3.12","extra":"cuda"}]}' ;;
             windows-directml)
               matrix='{"include":[{"target":"windows-directml","os":"windows-2022","python":"3.12","extra":"directml"}]}' ;;
             all)
-              matrix='{"include":[{"target":"linux-cpu","os":"ubuntu-24.04","python":"3.14","extra":"cpu"},{"target":"linux-cuda","os":"ubuntu-24.04","python":"3.14","extra":"cuda"},{"target":"linux-opencl","os":"ubuntu-24.04","python":"3.14","extra":"opencl"},{"target":"windows-cpu","os":"windows-2022","python":"3.14","extra":"cpu"},{"target":"windows-cuda","os":"windows-2022","python":"3.14","extra":"cuda"},{"target":"windows-directml","os":"windows-2022","python":"3.12","extra":"directml"}]}' ;;
+              matrix='{"include":[{"target":"linux-cpu","os":"ubuntu-24.04","python":"3.12","extra":"cpu"},{"target":"linux-cuda","os":"ubuntu-24.04","python":"3.12","extra":"cuda"},{"target":"linux-opencl","os":"ubuntu-24.04","python":"3.12","extra":"opencl"},{"target":"windows-cpu","os":"windows-2022","python":"3.12","extra":"cpu"},{"target":"windows-cuda","os":"windows-2022","python":"3.12","extra":"cuda"},{"target":"windows-directml","os":"windows-2022","python":"3.12","extra":"directml"}]}' ;;
             *)
               echo "unknown target: $TARGET" >&2
               exit 2 ;;
