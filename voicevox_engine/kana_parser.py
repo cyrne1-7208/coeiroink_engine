@@ -63,11 +63,11 @@ def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
             stack += phrase[watch_index]
             if stack in text2mora_with_unvoice:
                 matched_text = stack
-        # push mora
+        # 一致したモーラを追加します。
         if matched_text is None:
             raise ParseKanaError(ParseKanaErrorCode.UNKNOWN_TEXT, text=stack)
         else:
-            moras.append(text2mora_with_unvoice[matched_text].copy(deep=True))
+            moras.append(text2mora_with_unvoice[matched_text].model_copy(deep=True))
             base_index += len(matched_text)
             stack = ""
             matched_text = None
@@ -125,22 +125,22 @@ def parse_kana(text: str) -> List[AccentPhrase]:
 
 
 def create_kana(accent_phrases: List[AccentPhrase]) -> str:
-    text = ""
+    parts: List[str] = []
     for i, phrase in enumerate(accent_phrases):
         for j, mora in enumerate(phrase.moras):
             if mora.vowel in ["A", "I", "U", "E", "O"]:
-                text += UNVOICE_SYMBOL
+                parts.append(UNVOICE_SYMBOL)
 
-            text += mora.text
+            parts.append(mora.text)
             if j + 1 == phrase.accent:
-                text += ACCENT_SYMBOL
+                parts.append(ACCENT_SYMBOL)
 
         if phrase.is_interrogative:
-            text += WIDE_INTERROGATION_MARK
+            parts.append(WIDE_INTERROGATION_MARK)
 
         if i < len(accent_phrases) - 1:
             if phrase.pause_mora is None:
-                text += NOPAUSE_DELIMITER
+                parts.append(NOPAUSE_DELIMITER)
             else:
-                text += PAUSE_DELIMITER
-    return text
+                parts.append(PAUSE_DELIMITER)
+    return "".join(parts)

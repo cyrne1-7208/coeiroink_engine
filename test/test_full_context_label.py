@@ -18,15 +18,15 @@ class TestBasePhonemes(TestCase):
         # 出来る限りテスト内で他のライブラリに依存しないため、
         # またテスト内容を透明化するために、テストケースを生成している
         self.test_case_hello_hiho = [
-            # sil (無音)
+            # 無音sil
             "xx^xx-sil+k=o/A:xx+xx+xx/B:xx-xx_xx/C:xx_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:xx_xx#xx_xx@xx_xx|xx_xx/G:5_5%0_xx_xx/H:xx_xx/I:xx-xx"
             + "@xx+xx&xx-xx|xx+xx/J:1_5/K:2+2-9",
-            # k
+            # 音素k
             "xx^sil-k+o=N/A:-4+1+5/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
-            # o
+            # 音素o
             "sil^k-o+N=n/A:-4+1+5/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
@@ -34,59 +34,59 @@ class TestBasePhonemes(TestCase):
             "k^o-N+n=i/A:-3+2+4/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
-            # n
+            # 音素n
             "o^N-n+i=ch/A:-2+3+3/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
-            # i
+            # 音素i
             "N^n-i+ch=i/A:-2+3+3/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
-            # ch
+            # 音素ch
             "n^i-ch+i=w/A:-1+4+2/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
-            # i
+            # 音素i
             "i^ch-i+w=a/A:-1+4+2/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
-            # w
+            # 音素w
             "ch^i-w+a=pau/A:0+5+1/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
-            # a
+            # 音素a
             "i^w-a+pau=h/A:0+5+1/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
             + "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
             + "@1+2&1-2|1+9/J:1_4/K:2+2-9",
-            # pau (読点)
+            # 句読点pau
             "w^a-pau+h=i/A:xx+xx+xx/B:09-xx_xx/C:xx_xx+xx/D:09+xx_xx/E:5_5!0_xx-xx"
             + "/F:xx_xx#xx_xx@xx_xx|xx_xx/G:4_1%0_xx_xx/H:1_5/I:xx-xx"
             + "@xx+xx&xx-xx|xx+xx/J:1_4/K:2+2-9",
-            # h
+            # 音素h
             "a^pau-h+i=h/A:0+1+4/B:09-xx_xx/C:09_xx+xx/D:22+xx_xx/E:5_5!0_xx-0"
             + "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
             + "@2+1&2-1|6+4/J:xx_xx/K:2+2-9",
-            # i
+            # 音素i
             "pau^h-i+h=o/A:0+1+4/B:09-xx_xx/C:09_xx+xx/D:22+xx_xx/E:5_5!0_xx-0"
             + "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
             + "@2+1&2-1|6+4/J:xx_xx/K:2+2-9",
-            # h
+            # 音素h
             "h^i-h+o=d/A:1+2+3/B:09-xx_xx/C:22_xx+xx/D:10+7_2/E:5_5!0_xx-0"
             + "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
             + "@2+1&2-1|6+4/J:xx_xx/K:2+2-9",
-            # o
+            # 音素o
             "i^h-o+d=e/A:1+2+3/B:09-xx_xx/C:22_xx+xx/D:10+7_2/E:5_5!0_xx-0"
             + "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
             + "@2+1&2-1|6+4/J:xx_xx/K:2+2-9",
-            # d
+            # 音素d
             "h^o-d+e=s/A:2+3+2/B:22-xx_xx/C:10_7+2/D:xx+xx_xx/E:5_5!0_xx-0"
             + "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
             + "@2+1&2-1|6+4/J:xx_xx/K:2+2-9",
-            # e
+            # 音素e
             "o^d-e+s=U/A:2+3+2/B:22-xx_xx/C:10_7+2/D:xx+xx_xx/E:5_5!0_xx-0"
             + "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
             + "@2+1&2-1|6+4/J:xx_xx/K:2+2-9",
-            # s
+            # 音素s
             "d^e-s+U=sil/A:3+4+1/B:22-xx_xx/C:10_7+2/D:xx+xx_xx/E:5_5!0_xx-0"
             + "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
             + "@2+1&2-1|6+4/J:xx_xx/K:2+2-9",
@@ -94,7 +94,7 @@ class TestBasePhonemes(TestCase):
             "e^s-U+sil=xx/A:3+4+1/B:22-xx_xx/C:10_7+2/D:xx+xx_xx/E:5_5!0_xx-0"
             + "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
             + "@2+1&2-1|6+4/J:xx_xx/K:2+2-9",
-            # sil (無音)
+            # 無音sil
             "s^U-sil+xx=xx/A:xx+xx+xx/B:10-7_2/C:xx_xx+xx/D:xx+xx_xx/E:4_1!0_xx-xx"
             + "/F:xx_xx#xx_xx@xx_xx|xx_xx/G:xx_xx%xx_xx_xx/H:1_4/I:xx-xx"
             + "@xx+xx&xx-xx|xx+xx/J:xx_xx/K:2+2-9",
@@ -115,26 +115,26 @@ class TestPhoneme(TestBasePhonemes):
         self.assertEqual(
             [phoneme.is_pause() for phoneme in self.phonemes_hello_hiho],
             [
-                True,  # sil
-                False,  # k
-                False,  # o
-                False,  # N
-                False,  # n
-                False,  # i
-                False,  # ch
-                False,  # i
-                False,  # w
-                False,  # a
-                True,  # pau
-                False,  # h
-                False,  # i
-                False,  # h
-                False,  # o
-                False,  # d
-                False,  # e
-                False,  # s
-                False,  # u
-                True,  # sil
+                True,  # 無音sil
+                False,  # 音素k
+                False,  # 音素o
+                False,  # 音素N
+                False,  # 音素n
+                False,  # 音素i
+                False,  # 音素ch
+                False,  # 音素i
+                False,  # 音素w
+                False,  # 音素a
+                True,  # 句読点pau
+                False,  # 音素h
+                False,  # 音素i
+                False,  # 音素h
+                False,  # 音素o
+                False,  # 音素d
+                False,  # 音素e
+                False,  # 音素s
+                False,  # 音素u
+                True,  # 無音sil
             ],
         )
 
@@ -148,37 +148,37 @@ class TestPhoneme(TestBasePhonemes):
 class TestMora(TestBasePhonemes):
     def setUp(self) -> None:
         super().setUp()
-        # contexts["a2"] == "1" ko
+        # contexts["a2"] == "1"（ko）
         self.mora_hello_1 = Mora(
             consonant=self.phonemes_hello_hiho[1], vowel=self.phonemes_hello_hiho[2]
         )
-        # contexts["a2"] == "2" N
+        # contexts["a2"] == "2"（N）
         self.mora_hello_2 = Mora(consonant=None, vowel=self.phonemes_hello_hiho[3])
-        # contexts["a2"] == "3" ni
+        # contexts["a2"] == "3"（ni）
         self.mora_hello_3 = Mora(
             consonant=self.phonemes_hello_hiho[4], vowel=self.phonemes_hello_hiho[5]
         )
-        # contexts["a2"] == "4" chi
+        # contexts["a2"] == "4"（chi）
         self.mora_hello_4 = Mora(
             consonant=self.phonemes_hello_hiho[6], vowel=self.phonemes_hello_hiho[7]
         )
-        # contexts["a2"] == "5" wa
+        # contexts["a2"] == "5"（wa）
         self.mora_hello_5 = Mora(
             consonant=self.phonemes_hello_hiho[8], vowel=self.phonemes_hello_hiho[9]
         )
-        # contexts["a2"] == "1" hi
+        # contexts["a2"] == "1"（hi）
         self.mora_hiho_1 = Mora(
             consonant=self.phonemes_hello_hiho[11], vowel=self.phonemes_hello_hiho[12]
         )
-        # contexts["a2"] == "2" ho
+        # contexts["a2"] == "2"（ho）
         self.mora_hiho_2 = Mora(
             consonant=self.phonemes_hello_hiho[13], vowel=self.phonemes_hello_hiho[14]
         )
-        # contexts["a2"] == "3" de
+        # contexts["a2"] == "3"（de）
         self.mora_hiho_3 = Mora(
             consonant=self.phonemes_hello_hiho[15], vowel=self.phonemes_hello_hiho[16]
         )
-        # contexts["a2"] == "1" sU
+        # contexts["a2"] == "1"（sU）
         self.mora_hiho_4 = Mora(
             consonant=self.phonemes_hello_hiho[17], vowel=self.phonemes_hello_hiho[18]
         )

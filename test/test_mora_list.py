@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from voicevox_engine.mora_list import openjtalk_mora2text
+from voicevox_engine.mora_list import openjtalk_mora2text, openjtalk_text2mora
 
 
 class TestOpenJTalkMoraList(TestCase):
@@ -9,7 +9,7 @@ class TestOpenJTalkMoraList(TestCase):
         self.assertEqual("ティ", openjtalk_mora2text["ti"])
         self.assertEqual("トゥ", openjtalk_mora2text["tu"])
         self.assertEqual("ディ", openjtalk_mora2text["di"])
-        # GitHub issue #60
+        # GitHub issue #60の回帰テスト
         self.assertEqual("ギェ", openjtalk_mora2text["gye"])
         self.assertEqual("イェ", openjtalk_mora2text["ye"])
 
@@ -18,3 +18,22 @@ class TestOpenJTalkMoraList(TestCase):
         values = list(openjtalk_mora2text.values())
         uniq_values = list(set(values))
         self.assertCountEqual(values, uniq_values)
+
+    def test_extended_foreign_moras_are_available_in_both_directions(self):
+        expected = {
+            "キィ": ("ky", "i"),
+            "クァ": ("kw", "a"),
+            "クォ": ("kw", "o"),
+            "グェ": ("gw", "e"),
+            "テェ": ("ty", "e"),
+            "ニィ": ("ny", "i"),
+            "ヂョ": ("j", "o"),
+        }
+
+        for text, mora in expected.items():
+            with self.subTest(text=text):
+                self.assertEqual(openjtalk_text2mora[text], mora)
+
+        self.assertEqual(openjtalk_mora2text["kyi"], "キィ")
+        self.assertEqual(openjtalk_mora2text["kwa"], "クァ")
+        self.assertEqual(openjtalk_mora2text["gwe"], "グェ")

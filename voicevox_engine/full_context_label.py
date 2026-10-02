@@ -36,7 +36,7 @@ class Phoneme:
         """
 
         # フルコンテキストラベルの仕様は、
-        # http://hts.sp.nitech.ac.jp/?Download の HTS-2.3のJapanese tar.bz2 (126 MB)をダウンロードして、data/lab_format.pdfを見るとリストが見つかります。 # noqa
+        # http://hts.sp.nitech.ac.jp/?Download の HTS-2.3のJapanese tar.bz2 (126 MB)をダウンロードして、data/lab_format.pdfを見るとリストが見つかります。
         contexts = re.search(
             r"^(?P<p1>.+?)\^(?P<p2>.+?)\-(?P<p3>.+?)\+(?P<p4>.+?)\=(?P<p5>.+?)"
             r"/A\:(?P<a1>.+?)\+(?P<a2>.+?)\+(?P<a3>.+?)"
@@ -44,10 +44,10 @@ class Phoneme:
             r"/C\:(?P<c1>.+?)\_(?P<c2>.+?)\+(?P<c3>.+?)"
             r"/D\:(?P<d1>.+?)\+(?P<d2>.+?)\_(?P<d3>.+?)"
             r"/E\:(?P<e1>.+?)\_(?P<e2>.+?)\!(?P<e3>.+?)\_(?P<e4>.+?)\-(?P<e5>.+?)"
-            r"/F\:(?P<f1>.+?)\_(?P<f2>.+?)\#(?P<f3>.+?)\_(?P<f4>.+?)\@(?P<f5>.+?)\_(?P<f6>.+?)\|(?P<f7>.+?)\_(?P<f8>.+?)"  # noqa
+            r"/F\:(?P<f1>.+?)\_(?P<f2>.+?)\#(?P<f3>.+?)\_(?P<f4>.+?)\@(?P<f5>.+?)\_(?P<f6>.+?)\|(?P<f7>.+?)\_(?P<f8>.+?)"
             r"/G\:(?P<g1>.+?)\_(?P<g2>.+?)\%(?P<g3>.+?)\_(?P<g4>.+?)\_(?P<g5>.+?)"
             r"/H\:(?P<h1>.+?)\_(?P<h2>.+?)"
-            r"/I\:(?P<i1>.+?)\-(?P<i2>.+?)\@(?P<i3>.+?)\+(?P<i4>.+?)\&(?P<i5>.+?)\-(?P<i6>.+?)\|(?P<i7>.+?)\+(?P<i8>.+?)"  # noqa
+            r"/I\:(?P<i1>.+?)\-(?P<i2>.+?)\@(?P<i3>.+?)\+(?P<i4>.+?)\&(?P<i5>.+?)\-(?P<i6>.+?)\|(?P<i7>.+?)\+(?P<i8>.+?)"
             r"/J\:(?P<j1>.+?)\_(?P<j2>.+?)"
             r"/K\:(?P<k1>.+?)\+(?P<k2>.+?)\-(?P<k3>.+?)$",
             label,
@@ -196,7 +196,7 @@ class AccentPhrase:
 
         mora_phonemes: List[Phoneme] = []
         for phoneme, next_phoneme in zip(phonemes, phonemes[1:] + [None]):
-            # workaround for Hihosiba/voicevox_engine#57
+            # Hihosiba/voicevox_engine#57への回避策です。
             # (py)openjtalk によるアクセント句内のモーラへの附番は 49 番目まで
             # 49 番目のモーラについて、続く音素のモーラ番号を単一モーラの特定に使えない
             if int(phoneme.contexts["a2"]) == 49:
@@ -219,7 +219,7 @@ class AccentPhrase:
                 mora_phonemes = []
 
         accent = int(moras[0].vowel.contexts["f2"])
-        # workaround for Hihosiba/voicevox_engine#55
+        # Hihosiba/voicevox_engine#55への回避策です。
         # アクセント位置とするキー f2 の値がアクセント句内のモーラ数を超える場合がある
         accent = accent if accent <= len(moras) else len(moras)
         is_interrogative = moras[-1].vowel.contexts["f3"] == "1"

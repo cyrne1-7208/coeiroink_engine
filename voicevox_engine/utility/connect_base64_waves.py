@@ -9,6 +9,7 @@ from scipy.signal import resample
 
 class ConnectBase64WavesException(Exception):
     def __init__(self, message: str):
+        super().__init__(message)
         self.message = message
 
 
@@ -31,12 +32,16 @@ def decode_base64_waves(waves: List[str]) -> List[Tuple[np.ndarray, int]]:
     for wave in waves:
         try:
             wav_bin = base64.standard_b64decode(wave)
-        except ValueError:
-            raise ConnectBase64WavesException("base64デコードに失敗しました")
+        except (TypeError, ValueError) as error:
+            raise ConnectBase64WavesException(
+                "base64デコードに失敗しました"
+            ) from error
         try:
             _data = soundfile.read(io.BytesIO(wav_bin))
-        except Exception:
-            raise ConnectBase64WavesException("wavファイルを読み込めませんでした")
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            raise ConnectBase64WavesException(
+                "wavファイルを読み込めませんでした"
+            ) from error
         waves_nparray_sr.append(_data)
 
     return waves_nparray_sr

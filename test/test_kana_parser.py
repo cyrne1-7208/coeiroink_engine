@@ -56,6 +56,24 @@ class TestParseKana(TestCase):
         for text in ["ヲ'", "ェ'"]:
             self.assertEqual(create_kana(parse_kana(text)), text)
 
+    def test_extended_foreign_moras_are_single_moras(self):
+        text = (
+            "ウゥキィギィクァクィクゥクェクォ"
+            "グァグィグゥグェグォヂェヂャヂュヂョ"
+            "テェニィヒィビィピィミィリィ'"
+        )
+        phrase = parse_kana(text)[0]
+
+        self.assertEqual(len(phrase.moras), 24)
+        self.assertEqual(
+            [mora.text for mora in phrase.moras],
+            [
+                "ウゥ", "キィ", "ギィ", "クァ", "クィ", "クゥ", "クェ", "クォ",
+                "グァ", "グィ", "グゥ", "グェ", "グォ", "ヂェ", "ヂャ", "ヂュ",
+                "ヂョ", "テェ", "ニィ", "ヒィ", "ビィ", "ピィ", "ミィ", "リィ",
+            ],
+        )
+
     def _accent_phrase_marks_base(
         self, text: str, expected_accent_phrases: List[AccentPhrase]
     ) -> None:
