@@ -119,11 +119,12 @@ def _build_prosody(
     core_query = _to_core_query(accent_phrases)
     plain = query2tokens_prosody(core_query)
     detail: list[list[ProsodyMora]] = []
-    for phrase in accent_phrases:
+    for index, phrase in enumerate(accent_phrases):
         detail.append(_to_prosody_moras(phrase))
         if phrase.pause_mora is not None:
             detail.append(_special_detail("_", "、"))
-        if phrase.is_interrogative:
+        # Coreのトークン列では疑問符は文末記号。途中の疑問文は休止として表す。
+        if index == len(accent_phrases) - 1 and phrase.is_interrogative:
             detail.append(_special_detail("?", "？"))
     return Prosody(plain=plain, detail=detail)
 

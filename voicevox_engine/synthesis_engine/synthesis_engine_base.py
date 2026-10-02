@@ -186,9 +186,9 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         wave : numpy.ndarray
             音声合成結果
         """
-        # モーフィング時などに同一参照のqueryで複数回呼ばれる可能性があるので、元の引数のqueryに破壊的変更を行わない
-        query = copy.deepcopy(query)
         if enable_interrogative_upspeak:
+            # 語尾を変更するときだけ複製し、呼び出し元のクエリは保持する。
+            query = copy.deepcopy(query)
             query.accent_phrases = adjust_interrogative_accent_phrases(
                 query.accent_phrases
             )

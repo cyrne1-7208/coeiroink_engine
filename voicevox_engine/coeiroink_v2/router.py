@@ -4,6 +4,7 @@
 音声合成と波形処理はCoreの公開APIまたはこのパッケージのv2ヘルパーへ委譲する。
 """
 
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,6 +91,8 @@ from .wave_processing import (
 CatalogCallback = Callable[[], Any]
 DictionaryCallback = Callable[[DictionaryWords], Any]
 
+_LOGGER = logging.getLogger(__name__)
+
 
 def _allow_mutation() -> None:
     """単独利用されるv2ルーターでは従来どおり変更APIを許可する。"""
@@ -148,9 +151,10 @@ def _as_http_error(error: Exception, default_status: int = 500) -> HTTPException
         ),
     ):
         return HTTPException(status_code=422, detail=str(error))
-    if isinstance(error, MetadataError):
-        return HTTPException(status_code=500, detail=str(error))
-    return HTTPException(status_code=default_status, detail=str(error))
+    status = 500 if isinstance(error, MetadataError) else default_status
+    if status >= 500:
+        _LOGGER.error("COEIROINK request failed", exc_info=error)
+    return HTTPException(status_code=status, detail=str(error))
 
 
 def _mora_phonemes(mora: Any) -> list[str]:
@@ -667,7 +671,7 @@ def _add_prosody_routes(router: APIRouter, context: _V2RouterContext) -> None:
     def estimate_f0(param: WavWithDuration) -> WorldF0:
         try:
             wave, sampling_rate = audio_helpers.decode_pcm_wav_base64(param.wav_base64)
-            f0, _, _ = audio_manager.get_world(wave.astype(np.float64), sampling_rate)
+            f0 = audio_manager.get_world_f0(wave.astype(np.float64), sampling_rate)
             f0_array = np.asarray(f0, dtype=np.float32).reshape(-1)
             if not np.isfinite(f0_array).all():
                 raise audio_helpers.AudioProcessingError(

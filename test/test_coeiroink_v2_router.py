@@ -3,7 +3,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from coeirocore.coeiro_manager import InvalidSynthesisParameterError, PredictionResult
+from coeirocore.coeiro_manager import (
+    InvalidSynthesisParameterError,
+    PredictionResult,
+    SynthesisError,
+)
 from coeirocore.pyworld_compat import load_pyworld
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -82,9 +86,9 @@ class FakeAudioManager:
         return 2
 
     @staticmethod
-    def get_world(wave, sampling_rate):
+    def get_world_f0(wave, sampling_rate):
         assert sampling_rate == 16000
-        return np.array([110.0, 120.0], dtype=np.float64), None, None
+        return np.array([110.0, 120.0], dtype=np.float64)
 
     @staticmethod
     def trim(wave):
@@ -285,7 +289,7 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
     assert client.get("/").json() == {"status": "start"}
     assert client.get("/v1/engine_info").json() == {
         "device": "cpu",
-        "version": "0.2.0+coeiroink.1.7.3",
+        "version": "0.2.1+coeiroink.1.7.3",
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
     assert client.get("/v1/speakers_path_variant").status_code == 200
@@ -757,6 +761,45 @@ def test_unexpected_value_error_is_not_reported_as_request_validation() -> None:
 
     with pytest.raises(ValueError, match="implementation defect"):
         TestClient(app).post("/v1/predict", json=_making_payload())
+
+
+def test_synthesis_error_logs_the_original_cause(caplog) -> None:
+    app, manager, _ = _app()
+
+    def fail_prediction(*args, **kwargs):
+        try:
+            raise RuntimeError("inference failure")
+        except RuntimeError as error:
+            raise SynthesisError("synthesis failed") from error
+
+    manager.predict = fail_prediction
+    response = TestClient(app).post("/v1/predict", json=_making_payload())
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "synthesis failed"}
+    assert "RuntimeError: inference failure" in caplog.text
+    assert len(caplog.records) == 1
+
+
+def test_question_in_middle_can_be_predicted_with_or_without_prosody_detail():
+    app, manager, _ = _app()
+    client = TestClient(app)
+    text = "お元気ですか？今日は晴れです。"
+    estimated = client.post("/v1/estimate_prosody", json={"text": text})
+    assert estimated.status_code == 200
+
+    for detail in (estimated.json()["detail"], []):
+        response = client.post(
+            "/v1/predict",
+            json={**_making_payload(), "text": text, "prosodyDetail": detail},
+        )
+        assert response.status_code == 200
+
+    tokens = manager.prediction_calls[0]["text"]
+    assert tokens == manager.prediction_calls[1]["text"]
+    assert "_" in tokens
+    assert "?" not in tokens
+    assert tokens[-1] == "$"
 
 
 def test_core_parameter_error_is_reported_as_request_validation() -> None:

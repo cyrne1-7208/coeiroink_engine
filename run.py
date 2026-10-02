@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import multiprocessing
 import os
 import re
@@ -64,6 +65,8 @@ from voicevox_engine.voicevox_compat.router import (
     VoicevoxRouterDependencies,
     create_voicevox_router,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _version_key(version: str) -> Version:
@@ -162,6 +165,7 @@ def _add_exception_handlers(app: FastAPI) -> None:
     async def synthesis_error_handler(
         _request: Request, err: RuntimeError
     ) -> JSONResponse:
+        _LOGGER.error("Core synthesis failed", exc_info=err)
         return JSONResponse(status_code=500, content={"detail": str(err)})
 
     @app.exception_handler(InvalidSynthesisParameterError)

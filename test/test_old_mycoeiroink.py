@@ -243,16 +243,16 @@ def test_v2_routes_use_the_public_core_audio_manager(tmp_path: Path):
 
     assert client.get("/").json() == {"status": "start"}
     assert (
-        client.get("/openapi.json").json()["info"]["version"] == "0.2.0+coeiroink.1.7.3"
+        client.get("/openapi.json").json()["info"]["version"] == "0.2.1+coeiroink.1.7.3"
     )
-    assert client.get("/voicevox/version").json() == "0.2.0+coeiroink.1.7.3"
+    assert client.get("/voicevox/version").json() == "0.2.1+coeiroink.1.7.3"
     assert (
         client.get("/voicevox/engine_manifest").json()["version"]
-        == "0.2.0+coeiroink.1.7.3"
+        == "0.2.1+coeiroink.1.7.3"
     )
     assert client.get("/v1/engine_info").json() == {
         "device": "cpu",
-        "version": "0.2.0+coeiroink.1.7.3",
+        "version": "0.2.1+coeiroink.1.7.3",
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
 
@@ -284,11 +284,18 @@ def test_v2_engine_info_uses_selected_device(tmp_path: Path):
     assert client.get("/v1/engine_info").json()["device"] == "directml"
 
 
-def test_corrupt_old_mycoeiroink_returns_explicit_error(tmp_path: Path):
+def test_corrupt_old_mycoeiroink_returns_explicit_error(tmp_path: Path, caplog):
     client, audio_manager = create_test_client(tmp_path)
-    audio_manager.synthesis.side_effect = ModelLoadError(
-        f"Failed to load MYCOEIROINK style {STYLE_ID}"
-    )
+
+    def fail_loading(*args, **kwargs):
+        try:
+            raise RuntimeError("invalid model weights")
+        except RuntimeError as error:
+            raise ModelLoadError(
+                f"Failed to load MYCOEIROINK style {STYLE_ID}"
+            ) from error
+
+    audio_manager.synthesis.side_effect = fail_loading
     query = client.post(
         "/voicevox/audio_query",
         params={"text": "テストです", "speaker": STYLE_ID},
@@ -300,6 +307,8 @@ def test_corrupt_old_mycoeiroink_returns_explicit_error(tmp_path: Path):
 
     assert response.status_code == 500
     assert response.json() == {"detail": f"Failed to load MYCOEIROINK style {STYLE_ID}"}
+    assert "RuntimeError: invalid model weights" in caplog.text
+    assert len(caplog.records) == 1
 
 
 def test_invalid_synthesis_parameter_returns_422(tmp_path: Path):

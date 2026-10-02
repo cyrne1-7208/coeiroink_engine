@@ -474,7 +474,7 @@ def process_td_psola(
         raise TDPSOLAProcessingError(
             "TD-PSOLA produced a non-finite or malformed waveform"
         )
-    return result.copy()
+    return result
 
 
 def apply_td_psola(

@@ -214,6 +214,10 @@ class _CompatibilityWaveProcessor:
     """旧Python APIから、モデルを生成せずCoreの波形プリミティブだけを利用する。"""
 
     @staticmethod
+    def get_world_f0(wave: np.ndarray, sampling_rate: int):
+        return _core_audio_manager().get_world_f0(wave, sampling_rate)
+
+    @staticmethod
     def get_world(wave: np.ndarray, sampling_rate: int):
         return _core_audio_manager().get_world(wave, sampling_rate)
 
@@ -426,7 +430,7 @@ def replace_pause_segments(
     result = np.concatenate(chunks).astype(np.float32, copy=False)
     if result.size == 0 or not np.isfinite(result).all():
         raise AudioProcessingError("pause processing produced invalid samples")
-    return result.copy()
+    return result
 
 
 def pitch_shift_resampling(
@@ -528,9 +532,7 @@ def estimate_world_f0(wave: np.ndarray, sampling_rate: int) -> np.ndarray:
     wave = _require_waveform(wave)
     sampling_rate = _require_sampling_rate(sampling_rate, "sampling_rate")
     try:
-        f0, _, _ = _core_audio_manager().get_world(
-            wave.astype(np.float64), sampling_rate
-        )
+        f0 = _core_audio_manager().get_world_f0(wave.astype(np.float64), sampling_rate)
     except Exception as error:
         raise AudioProcessingError("failed to estimate WORLD F0") from error
     f0 = np.asarray(f0, dtype=np.float32).reshape(-1)

@@ -80,12 +80,8 @@ def _validated_f0(value: Sequence[float]) -> np.ndarray:
 def _manager_world_f0(
     audio_manager: AudioManager, wave: np.ndarray, sampling_rate: int
 ) -> np.ndarray:
-    result = audio_manager.get_world(wave.astype(np.float64), sampling_rate)
-    if not isinstance(result, (tuple, list)) or not result:
-        raise audio_helpers.AudioProcessingError(
-            "audio manager returned an invalid WORLD result"
-        )
-    return _validated_f0(result[0])
+    f0 = audio_manager.get_world_f0(wave.astype(np.float64), sampling_rate)
+    return _validated_f0(f0)
 
 
 def _fit_f0_track(track: np.ndarray, size: int) -> np.ndarray:
