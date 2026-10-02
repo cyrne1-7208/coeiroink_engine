@@ -1,19 +1,24 @@
 import argparse
 import asyncio
 import queue
-from distutils.version import LooseVersion
 from multiprocessing import Pipe, Process
 from multiprocessing.connection import Connection
 from tempfile import NamedTemporaryFile
 from typing import List, Optional, Tuple
 
 import soundfile
+from packaging.version import Version
 
-# FIXME: remove FastAPI dependency
+# FIXME: FastAPI依存を削除する。
 from fastapi import HTTPException, Request
 
 from .model import AudioQuery
 from .synthesis_engine import make_synthesis_engines
+
+
+def _version_key(version: str) -> Version:
+    """+cpuなどのローカルサフィックスを含むCoreバージョン比較用の値を返します。"""
+    return Version(version)
 
 
 class CancellableEngine:
@@ -101,22 +106,38 @@ class CancellableEngine:
         try:
             self.watch_con_list.remove((req, proc))
         except ValueError:
-            pass
+            # 切断監視と合成完了が同時に後処理しても、ワーカを二重補充しない。
+            return
+
         try:
-            if not proc.is_alive() or sub_proc_con is None:
-                proc.close()
-                raise ValueError
-            # プロセスが死んでいない場合は再利用する
-            self.procs_and_cons.put((proc, sub_proc_con))
+            reusable = sub_proc_con is not None and proc.is_alive()
         except ValueError:
-            # プロセスが死んでいるので新しく作り直す
-            self.procs_and_cons.put(self.start_new_proc())
+            reusable = False
+
+        if reusable:
+            self.procs_and_cons.put((proc, sub_proc_con))
+            return
+
+        if sub_proc_con is not None:
+            try:
+                sub_proc_con.close()
+            except (OSError, ValueError):
+                pass
+        try:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join()
+            proc.close()
+        except ValueError:
+            pass
+        self.procs_and_cons.put(self.start_new_proc())
 
     def _synthesis_impl(
         self,
         query: AudioQuery,
         speaker_id: int,
         request: Request,
+        enable_interrogative_upspeak: bool,
         core_version: Optional[str],
     ) -> str:
         """
@@ -141,9 +162,21 @@ class CancellableEngine:
         proc, sub_proc_con1 = self.procs_and_cons.get()
         self.watch_con_list.append((request, proc))
         try:
-            sub_proc_con1.send((query, speaker_id, core_version))
+            sub_proc_con1.send(
+                (
+                    query,
+                    speaker_id,
+                    enable_interrogative_upspeak,
+                    core_version,
+                )
+            )
             f_name = sub_proc_con1.recv()
         except EOFError:
+            try:
+                sub_proc_con1.close()
+            except (OSError, ValueError):
+                pass
+            self.finalize_con(request, proc, None)
             raise HTTPException(status_code=422, detail="既にサブプロセスは終了されています")
         except Exception:
             self.finalize_con(request, proc, sub_proc_con1)
@@ -158,7 +191,7 @@ class CancellableEngine:
         """
         while True:
             await asyncio.sleep(1)
-            for con in self.watch_con_list:
+            for con in list(self.watch_con_list):
                 req, proc = con
                 if await req.is_disconnected():
                     try:
@@ -194,13 +227,16 @@ def start_synthesis_subprocess(
         voicevox_dir=args.voicevox_dir,
         runtime_dirs=args.runtime_dir,
         cpu_num_threads=args.cpu_num_threads,
+        speaker_info_dir=getattr(args, "speaker_info_dir", None),
         enable_mock=args.enable_mock,
     )
     assert len(synthesis_engines) != 0, "音声合成エンジンがありません。"
-    latest_core_version = str(max([LooseVersion(ver) for ver in synthesis_engines]))
+    latest_core_version = max(synthesis_engines, key=_version_key)
     while True:
         try:
-            query, speaker_id, core_version = sub_proc_con.recv()
+            query, speaker_id, enable_interrogative_upspeak, core_version = (
+                sub_proc_con.recv()
+            )
             if core_version is None:
                 _engine = synthesis_engines[latest_core_version]
             elif core_version in synthesis_engines:
@@ -209,7 +245,11 @@ def start_synthesis_subprocess(
                 # バージョンが見つからないエラー
                 sub_proc_con.send("")
                 continue
-            wave = _engine._synthesis_impl(query, speaker_id)
+            wave = _engine.synthesis(
+                query,
+                speaker_id,
+                enable_interrogative_upspeak=enable_interrogative_upspeak,
+            )
             with NamedTemporaryFile(delete=False) as f:
                 soundfile.write(
                     file=f, data=wave, samplerate=query.outputSamplingRate, format="WAV"
