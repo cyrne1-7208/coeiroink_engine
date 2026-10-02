@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import List
 
 import yaml
-from pydantic import ValidationError, parse_obj_as
+from pydantic import TypeAdapter, ValidationError
 
 from .Preset import Preset
 from .PresetError import PresetError
@@ -41,7 +41,7 @@ class PresetManager:
                 raise PresetError("プリセットの設定ファイルが空の内容です")
 
         try:
-            _presets = parse_obj_as(List[Preset], obj)
+            _presets = TypeAdapter(List[Preset]).validate_python(obj)
         except ValidationError:
             raise PresetError("プリセットの設定ファイルにミスがあります")
 
@@ -82,7 +82,7 @@ class PresetManager:
         try:
             with open(self.preset_path, mode="w", encoding="utf-8") as f:
                 yaml.safe_dump(
-                    [preset.dict() for preset in self.presets],
+                    [preset.model_dump() for preset in self.presets],
                     f,
                     allow_unicode=True,
                     sort_keys=False,
@@ -128,7 +128,7 @@ class PresetManager:
         try:
             with open(self.preset_path, mode="w", encoding="utf-8") as f:
                 yaml.safe_dump(
-                    [preset.dict() for preset in self.presets],
+                    [preset.model_dump() for preset in self.presets],
                     f,
                     allow_unicode=True,
                     sort_keys=False,
@@ -176,7 +176,7 @@ class PresetManager:
         try:
             with open(self.preset_path, mode="w", encoding="utf-8") as f:
                 yaml.safe_dump(
-                    [preset.dict() for preset in self.presets],
+                    [preset.model_dump() for preset in self.presets],
                     f,
                     allow_unicode=True,
                     sort_keys=False,

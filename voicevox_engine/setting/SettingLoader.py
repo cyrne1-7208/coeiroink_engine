@@ -27,7 +27,7 @@ class SettingLoader:
         return setting
 
     def dump_setting_file(self, settings: Setting) -> None:
-        settings_dict = settings.dict()
+        settings_dict = settings.model_dump()
 
         with open(self.setting_file_path, mode="w", encoding="utf-8") as f:
             yaml.safe_dump(settings_dict, f)
