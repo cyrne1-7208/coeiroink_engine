@@ -12,7 +12,7 @@ class EngineManifestLoader:
     def __init__(self, manifest_path: Path, root_dir: Path):
         self.manifest_path = manifest_path
         self.root_dir = root_dir
-        # マニフェストとライセンス・アイコン資産はプロセス稼働中に不変なので、機能確認のたびに再読込・再エンコードしない。
+        # マニフェスト、ライセンス、アイコンは実行中に変わらないため、一度だけ読み込む。
         self._raw_manifest: dict[str, Any] | None = None
         self._manifest: EngineManifest | None = None
 
@@ -69,5 +69,5 @@ class EngineManifestLoader:
                     for key, item in manifest["supported_features"].items()
                 },
             )
-        # 呼出元による変更をプロセス共通キャッシュへ持ち込まない。
+        # 呼び出し側の変更がキャッシュへ影響しないよう、コピーを返す。
         return self._manifest.model_copy(deep=True)

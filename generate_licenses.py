@@ -6,13 +6,13 @@ import sys
 import urllib.request
 from dataclasses import asdict, dataclass
 from importlib import metadata
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 URL_TIMEOUT_SECONDS = 30
 UNKNOWN_LICENSE = "UNKNOWN"
 LEGAL_FILE_PATTERN = re.compile(
-    r"^(?:licen[cs]e|copying|notice)(?:$|[._-].*)", re.IGNORECASE
+    r"^(?:licen[cs]es?|copying|notice|copyright)(?:$|[._-].*)", re.IGNORECASE
 )
 
 # パッケージ側のメタデータが空でも、一次配布元から識別できるものだけSPDX名を補う。
@@ -20,7 +20,7 @@ KNOWN_LICENSE_NAMES = {
     "coeiroink-engine": "LGPL-3.0-only",
     "coeirocore": "LGPL-3.0-only",
     "coeiroink-opencl": "LGPL-3.0-only",
-    "kaldiio": "LGPL-3.0-only",
+    "espnet-tts-frontend": "Apache-2.0",
     "nvidia-nvshmem-cu12": "LicenseRef-NVIDIA-NVSHMEM",
     "pyworld": "MIT",
     "sentencepiece": "Apache-2.0",
@@ -86,7 +86,7 @@ def _read_package_snapshot(path: Path) -> dict[str, tuple[str, str]]:
 
 
 def _read_url(url: str) -> str:
-    """ネットワーク障害で生成処理が無期限に停止しないよう、上限時間付きで本文を取得する。"""
+    """通信障害で処理が止まり続けないよう、タイムアウトを設けて本文を取得する。"""
 
     with urllib.request.urlopen(url, timeout=URL_TIMEOUT_SECONDS) as response:
         return response.read().decode()
@@ -122,14 +122,22 @@ def _unknown_license_text(name: str, version: str | None) -> str:
                 ),
             ]
         )
+    if normalized_name == "espnet-tts-frontend":
+        return _combine_legal_documents(
+            [
+                (
+                    "licenses/Apache-2.0.txt",
+                    Path("licenses/Apache-2.0.txt").read_text(encoding="utf-8"),
+                ),
+                (
+                    "licenses/espnet_tts_frontend/ATTRIBUTION.txt",
+                    Path("licenses/espnet_tts_frontend/ATTRIBUTION.txt").read_text(
+                        encoding="utf-8"
+                    ),
+                ),
+            ]
+        )
     if normalized_name == "coeirocore":
-        return _coeirocore_license_text()
-    if normalized_name == "kaldiio" and version is not None:
-        # 評価用途に限定された上流kaldiioを公開配布物へ混入させないため、ローカル互換ガード以外は生成時に拒否する。
-        if not version.endswith("+coeiroink.guard1"):
-            raise LicenseGenerationError(
-                f"Unexpected external kaldiio distribution: {version}"
-            )
         return _coeirocore_license_text()
     if normalized_name == "siphash24" and version is not None:
         license_root = f"https://raw.githubusercontent.com/dnicolodi/python-siphash24/v{version}/LICENSES"
@@ -159,7 +167,7 @@ def _unknown_license_text(name: str, version: str | None) -> str:
         "lockfile": "https://opendev.org/openstack/pylockfile/raw/tag/0.12.2/LICENSE",
         "platformdirs": "https://raw.githubusercontent.com/platformdirs/platformdirs/aa671aaa97913c7b948567f4d9c77d4f98bfa134/LICENSE",
         "webencodings": "https://raw.githubusercontent.com/gsnedders/python-webencodings/fa2cb5d75ab41e63ace691bc0825d3432ba7d694/LICENSE",
-        "espnet": "https://raw.githubusercontent.com/espnet/espnet/v.202604-patch1/LICENSE",
+        "espnet": "https://raw.githubusercontent.com/espnet/espnet/v.202609/LICENSE",
         "sentencepiece": "https://raw.githubusercontent.com/google/sentencepiece/v0.2.1/LICENSE",
         "sudachipy": "https://raw.githubusercontent.com/WorksApplications/sudachi.rs/90fd6068c80c2fc3b63e0dbab0e341475bad4d8f/LICENSE",
         "torch-directml": "https://raw.githubusercontent.com/microsoft/DirectML/8700779fe7a09ea7a007cf3d7ab4293c78e41017/LICENSE",
@@ -261,8 +269,28 @@ def _bundled_licenses() -> list[License]:
     ]
 
 
+def _matches_declared_license_file(
+    path: PurePosixPath, declared_path: PurePosixPath
+) -> bool:
+    """wheelの`.dist-info/licenses`へ移されたLicense-Fileも元の相対パスで照合する。"""
+
+    if path == declared_path:
+        return True
+    # 一部のeditable metadataはサブディレクトリを保たず、ライセンス関連ファイルを`.dist-info`直下へ配置する。
+    if path.name == declared_path.name and any(
+        part.endswith(".dist-info") for part in path.parts[:-1]
+    ):
+        return True
+    if len(path.parts) < len(declared_path.parts):
+        return False
+    if path.parts[-len(declared_path.parts) :] != declared_path.parts:
+        return False
+    parent_parts = path.parts[: -len(declared_path.parts)]
+    return any(part.endswith(".dist-info") for part in parent_parts)
+
+
 def _legal_documents(package_name: str) -> list[tuple[str, str]]:
-    """wheelまたはeditable metadataに含まれる全ライセンス・NOTICE本文を返す。"""
+    """メタデータで指定されたファイルと、一般的なライセンス・NOTICEファイルを返す。"""
 
     try:
         distribution = metadata.distribution(package_name)
@@ -271,24 +299,62 @@ def _legal_documents(package_name: str) -> list[tuple[str, str]]:
             f"Installed distribution metadata not found: {package_name}"
         ) from error
 
+    distribution_files = tuple(distribution.files or ())
+    declared_paths = {
+        PurePosixPath(path.replace("\\", "/"))
+        for path in distribution.metadata.get_all("License-File", [])
+    }
+    invalid_paths = sorted(
+        str(path) for path in declared_paths if path.is_absolute() or ".." in path.parts
+    )
+    if invalid_paths:
+        raise LicenseGenerationError(
+            f"Invalid License-File path for {package_name}: {', '.join(invalid_paths)}"
+        )
+
     documents: list[tuple[str, str]] = []
     seen_texts: set[str] = set()
-    for relative_path in distribution.files or ():
-        if LEGAL_FILE_PATTERN.fullmatch(relative_path.name) is None:
+    matched_declared_paths: set[PurePosixPath] = set()
+    for relative_path in distribution_files:
+        normalized_path = PurePosixPath(str(relative_path).replace("\\", "/"))
+        matched_paths = {
+            declared_path
+            for declared_path in declared_paths
+            if _matches_declared_license_file(normalized_path, declared_path)
+        }
+        if (
+            not matched_paths
+            and LEGAL_FILE_PATTERN.fullmatch(relative_path.name) is None
+        ):
             continue
         absolute_path = Path(distribution.locate_file(relative_path))
         if not absolute_path.is_file():
             continue
-        text = absolute_path.read_text(encoding="utf-8", errors="backslashreplace")
+        matched_declared_paths.update(matched_paths)
+        try:
+            text = absolute_path.read_text(encoding="utf-8", errors="backslashreplace")
+        except OSError as error:
+            raise LicenseGenerationError(
+                f"Could not read legal document for {package_name}: {relative_path}"
+            ) from error
         if not text.strip() or text in seen_texts:
             continue
         seen_texts.add(text)
         documents.append((str(relative_path), text))
+
+    missing_paths = sorted(
+        str(path) for path in declared_paths - matched_declared_paths
+    )
+    if missing_paths:
+        raise LicenseGenerationError(
+            f"License-File metadata points to missing files for {package_name}: "
+            f"{', '.join(missing_paths)}"
+        )
     return sorted(documents, key=lambda item: item[0].lower())
 
 
 def _combine_legal_documents(documents: list[tuple[str, str]]) -> str:
-    """複数の法的文書を改変せず、元ファイル名が分かる区切りだけ付けて収録する。"""
+    """複数のライセンス関連ファイルを改変せず、元のファイル名が分かる形で結合する。"""
 
     if len(documents) == 1:
         return documents[0][1]
@@ -298,7 +364,7 @@ def _combine_legal_documents(documents: list[tuple[str, str]]) -> str:
 def _pip_license_rows(
     runtime_packages: dict[str, tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """pip-licensesを実行し、配布対象だけのメタデータ行を返す。"""
+    """pip-licensesを実行し、配布パッケージに含まれるライブラリだけを返す。"""
 
     command = [
         sys.executable,
@@ -338,7 +404,7 @@ def _validate_runtime_package(
     canonical_name: str,
     runtime_packages: dict[str, tuple[str, str]] | None,
 ) -> None:
-    """ライセンス対象の名前と版が、配布前に保存した依存一覧と一致するか確認する。"""
+    """パッケージ名とバージョンが、事前に保存した依存一覧と一致するか確認する。"""
 
     if runtime_packages is None:
         return

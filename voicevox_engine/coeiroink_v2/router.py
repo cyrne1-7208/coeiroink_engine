@@ -121,7 +121,7 @@ def _model_value(value: Any, *names: str, default: Any = None) -> Any:
 
 
 def _as_http_error(error: Exception, default_status: int = 500) -> HTTPException:
-    """既知の公開例外だけを安定したHTTPエラーへ変換し、未知の障害はこの関数へ渡さない。"""
+    """既知の例外だけをHTTPエラーへ変換する。未知の例外は呼び出し側で再送出する。"""
 
     if isinstance(error, HTTPException):
         return error
@@ -784,23 +784,34 @@ def _add_processing_routes(router: APIRouter, context: _V2RouterContext) -> None
         },
     )
     def synthesis(param: SynthesisParam) -> Response:
-        """生波形を推論し、休止長変更に必要な場合だけ継続長を取得してから後処理する。"""
+        """生波形を一度推論し、音声補正または休止長変更が必要な場合だけ継続長も取得する。"""
 
         try:
-            needs_duration = param.pause_length is not None
+            voice_smoothing = audio_manager.voice_smoothing
+            needs_pause_durations = param.pause_length is not None
+            needs_duration = voice_smoothing or needs_pause_durations
             wave, frames, plain, detail, sampling_rate = predict_request(
                 param, with_duration=needs_duration
             )
-            mora_durations = (
-                convert_duration(
-                    plain,
-                    detail,
-                    frames,
-                    _hop_length(audio_manager, param.style_id, param.speaker_uuid),
+            mora_durations = None
+            if needs_duration:
+                hop_length = _hop_length(
+                    audio_manager, param.style_id, param.speaker_uuid
                 )
-                if needs_duration
-                else None
-            )
+                if voice_smoothing:
+                    wave = audio_manager.smooth_voice(
+                        wave,
+                        plain,
+                        frames,
+                        hop_length=hop_length,
+                    )
+                if needs_pause_durations:
+                    mora_durations = convert_duration(
+                        plain,
+                        detail,
+                        frames,
+                        hop_length,
+                    )
             output, output_sampling_rate = _process_wave(
                 audio_manager,
                 wave,
@@ -1095,7 +1106,7 @@ def create_v2_router(
         settings=settings,
         verify_mutability_allowed=verify_mutability_allowed,
     )
-    # 各ルート群には必要な依存だけを共有コンテキストから渡す。
+    # 各ルートには必要な設定と依存だけをcontextから渡す。
     _add_status_routes(router)
     _add_speaker_list_routes(router, context)
     _add_prosody_routes(router, context)

@@ -16,11 +16,6 @@ class TestPresetManager(TestCase):
     def tearDown(self):
         self.tmp_dir.cleanup()
 
-    def test_validation(self):
-        preset_manager = PresetManager(preset_path=Path("test/presets-test-1.yaml"))
-        presets = preset_manager.load_presets()
-        self.assertFalse(presets is None)
-
     def test_validation_same(self):
         preset_manager = PresetManager(preset_path=Path("test/presets-test-1.yaml"))
         presets = preset_manager.load_presets()

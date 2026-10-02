@@ -32,9 +32,11 @@ class FakeAudioManager:
     fs = 16000
     device = "cpu"
 
-    def __init__(self):
+    def __init__(self, *, voice_smoothing=False):
+        self.voice_smoothing = voice_smoothing
         self.prediction_calls = []
         self.dictionary_calls = []
+        self.smoothing_calls = []
 
     def predict(self, text, style_id, speed_scale, speaker_uuid):
         self.prediction_calls.append(
@@ -62,6 +64,17 @@ class FakeAudioManager:
             wav=np.linspace(-0.25, 0.25, 8, dtype=np.float32),
             duration_frames=[1, 2, 1],
         )
+
+    def smooth_voice(self, wave, tokens, duration_frames, *, hop_length):
+        self.smoothing_calls.append(
+            {
+                "wave": np.array(wave, copy=True),
+                "tokens": list(tokens),
+                "duration_frames": list(duration_frames),
+                "hop_length": hop_length,
+            }
+        )
+        return wave + np.float32(0.5)
 
     @staticmethod
     def get_hop_length(style_id, speaker_uuid):
@@ -177,8 +190,8 @@ class FakeMetadata:
         return SpeakerPolicy(policy="policy", license="license")
 
 
-def _app():
-    manager = FakeAudioManager()
+def _app(*, voice_smoothing=False):
+    manager = FakeAudioManager(voice_smoothing=voice_smoothing)
     dictionary_calls = []
 
     def set_dictionary(words):
@@ -236,6 +249,18 @@ def _processing_wav_base64():
     ).decode("ascii")
 
 
+def _synthesis_payload():
+    return {
+        **_making_payload(),
+        "volumeScale": 1.0,
+        "pitchScale": 0.0,
+        "intonationScale": 1.0,
+        "prePhonemeLength": 0.0,
+        "postPhonemeLength": 0.0,
+        "outputSamplingRate": 16000,
+    }
+
+
 def _mora_duration(mora, start, end):
     return {
         "mora": mora,
@@ -260,7 +285,7 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
     assert client.get("/").json() == {"status": "start"}
     assert client.get("/v1/engine_info").json() == {
         "device": "cpu",
-        "version": "0.1.3+coeiroink.1.7.3",
+        "version": "0.2.0+coeiroink.1.7.3",
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
     assert client.get("/v1/speakers_path_variant").status_code == 200
@@ -430,23 +455,42 @@ def test_v2_router_prediction_process_and_redirect_contract():
 
     synthesis = client.post(
         "/v1/synthesis",
-        json={
-            **_making_payload(),
-            "volumeScale": 1.0,
-            "pitchScale": 0.0,
-            "intonationScale": 1.0,
-            "prePhonemeLength": 0.0,
-            "postPhonemeLength": 0.0,
-            "outputSamplingRate": 16000,
-        },
+        json=_synthesis_payload(),
     )
     assert synthesis.status_code == 200
     assert synthesis.headers["content-type"] == "audio/wav"
+    assert manager.prediction_calls[-1]["kind"] == "predict"
+    assert manager.smoothing_calls == []
 
     redirected = client.post("/v1/process_with_pitch", follow_redirects=False)
     assert redirected.status_code == 307
     assert redirected.headers["location"] == "/v1/process"
     assert redirected.content == b""
+
+
+def test_v2_synthesis_voice_smoothing_gets_duration_and_runs_once():
+    app, manager, _ = _app(voice_smoothing=True)
+
+    response = TestClient(app).post("/v1/synthesis", json=_synthesis_payload())
+
+    assert response.status_code == 200
+    assert manager.prediction_calls == [
+        {
+            "kind": "predict_with_duration",
+            "text": ["^", "a", "$"],
+            "style_id": STYLE_ID,
+            "speed_scale": 1.0,
+            "speaker_uuid": SPEAKER_UUID,
+        }
+    ]
+    assert len(manager.smoothing_calls) == 1
+    call = manager.smoothing_calls[0]
+    np.testing.assert_array_equal(
+        call["wave"], np.linspace(-0.25, 0.25, 8, dtype=np.float32)
+    )
+    assert call["tokens"] == ["^", "a", "$"]
+    assert call["duration_frames"] == [1, 2, 1]
+    assert call["hop_length"] == 2
 
 
 @pytest.mark.parametrize(

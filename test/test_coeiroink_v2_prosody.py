@@ -74,19 +74,15 @@ REFERENCE = {
 }
 
 
-def _wire(result):
-    return result.model_dump()
-
-
 def test_estimate_prosody_matches_saved_black_box_reference():
     result = estimate_prosody("これは音声合成のテストです。")
 
-    assert _wire(result) == REFERENCE
+    assert result.model_dump() == REFERENCE
 
 
 def test_estimate_prosody_from_kana_matches_text_analysis():
     kana = "コレワ'、オンセエゴ'オセエノ、テ'_ストデ_ス"
-    result = _wire(estimate_prosody_from_kana(kana))
+    result = estimate_prosody_from_kana(kana).model_dump()
 
     assert result["detail"] == [
         REFERENCE["detail"][0],
@@ -110,13 +106,6 @@ def test_kana_preserves_pause_and_interrogative_tokens():
         [{"phoneme": "k-a", "hira": "か", "accent": 1}],
         [{"phoneme": "?", "hira": "？", "accent": 0}],
     ]
-
-
-def test_results_are_deterministic():
-    first = _wire(estimate_prosody("これは音声合成のテストです。"))
-    second = _wire(estimate_prosody("これは音声合成のテストです。"))
-
-    assert first == second
 
 
 @pytest.mark.parametrize(

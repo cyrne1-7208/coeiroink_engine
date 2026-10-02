@@ -58,9 +58,10 @@ def make_audio_manager(
     cpu_num_threads: int | None = None,
     resampler: str = "resampy",
     max_loaded_models: int | None = 1,
-    generator_only: bool = False,
+    generator_only: bool = True,
+    voice_smoothing: bool = False,
 ) -> AudioManager:
-    """起動設定を正規化し、ネイティブAPIと互換APIが共有するCoreを生成する。"""
+    """起動設定を整理し、ネイティブAPIと互換APIで共有するCoreを作る。"""
 
     selected_device = resolve_device(device=device, use_gpu=use_gpu)
     return AudioManager(
@@ -74,11 +75,12 @@ def make_audio_manager(
         resampler=resampler,
         max_loaded_models=max_loaded_models,
         generator_only=generator_only,
+        voice_smoothing=voice_smoothing,
     )
 
 
 def _core_metas(audio_manager: AudioManager) -> str:
-    """Coreが検証済みのメタデータを再走査せずVOICEVOX形式へ渡す。"""
+    """Coreで検証済みのメタデータを再走査せず、VOICEVOX互換のJSONに変換する。"""
 
     return json.dumps(
         audio_manager.meta_manager.get_metas_dict(),
@@ -108,16 +110,17 @@ def make_synthesis_engines(
     cpu_num_threads: int | None = None,
     enable_mock: bool = True,
     max_loaded_models: int | None = 1,
-    generator_only: bool = False,
+    generator_only: bool = True,
     speaker_info_dir: Path | None = None,
     device: str | None = None,
     device_index: int = 0,
     opencl_platform_index: int = 0,
     resampler: str = "resampy",
     audio_manager: AudioManager | None = None,
+    voice_smoothing: bool = False,
 ) -> dict[str, SynthesisEngineBase]:
     """
-    音声ライブラリをロードして、音声合成エンジンを生成する
+    Coreを準備し、音声合成エンジンを生成する。
 
     Parameters
     ----------
@@ -133,11 +136,13 @@ def make_synthesis_engines(
         音声ライブラリが推論に用いるCPUスレッド数を設定する
         Noneのとき、ライブラリ側の挙動により論理コア数の半分、または物理コア数が指定される
     enable_mock: bool, optional, default=True
-        旧Engineとの呼び出し互換性のために受け取る。
+        旧Engineとの互換用。指定しても動作に影響しない。
     max_loaded_models: int | None, optional, default=1
         直近に使ったMYCOEIROINKモデルの保持上限。Noneでは全モデルを起動時に読み込む。
-    generator_only: bool, optional, default=False
-        VITSの推論用generatorだけを読み込む実験機能。
+    generator_only: bool, optional, default=True
+        VITSの推論用generatorだけを読み込む。非対応モデルではFalseを指定する。
+    voice_smoothing: bool, optional, default=False
+        Coreの実験的な音声補正を有効化する。
     speaker_info_dir: Path, optional, default=None
         MYCOEIROINKを展開したspeaker_infoディレクトリ
     device: str, optional, default=None
@@ -149,7 +154,7 @@ def make_synthesis_engines(
     resampler: str, optional, default="resampy"
         出力サンプリングレート変換に使う実装。
     audio_manager: AudioManager, optional, default=None
-        ネイティブAPIと共有する生成済みCore。未指定時は旧呼び出し互換のためこのfactoryで生成する。
+        ネイティブAPIと共有するCore。未指定の場合はこの関数で生成する。
     """
     if audio_manager is None:
         speaker_info_dir = _resolve_speaker_info_dir(speaker_info_dir, voicevox_dir)
@@ -163,11 +168,12 @@ def make_synthesis_engines(
             resampler=resampler,
             max_loaded_models=max_loaded_models,
             generator_only=generator_only,
+            voice_smoothing=voice_smoothing,
         )
     elif max_loaded_models is None:
         audio_manager.initialize_all_speakers()
 
-    # VOICEVOX互換層には生成済みCoreだけを渡し、デバイス初期化やモデル管理を持たせない。
+    # デバイス初期化とモデル管理はCoreに集約し、VOICEVOX互換層には生成済みのCoreだけを渡す。
     return {
         coeirocore_version: CoeiroinkVoicevoxAdapter(
             speakers=_core_metas(audio_manager),

@@ -130,7 +130,7 @@ class OfficialSiteCatalogClient:
             try:
                 # 外部JSONとの境界でPydantic 2による型・制約検証を完了させる。
                 parsed.append(model_type.model_validate(item))
-            except (PydanticValidationError, TypeError, ValueError) as exc:
+            except PydanticValidationError as exc:
                 raise CatalogSchemaError(
                     f"invalid catalog item at index {index} from {endpoint!r}: {exc}"
                 ) from exc
@@ -146,49 +146,40 @@ class OfficialSiteCatalogClient:
             raise CatalogNetworkError(f"catalog request failed: {url}") from exc
 
         try:
-            status_code = getattr(response, "status_code", None)
-            if not isinstance(status_code, int):
-                raise CatalogResponseError(
-                    f"catalog response has no valid HTTP status: {url}"
-                )
+            status_code = response.status_code
             if status_code < 200 or status_code >= 300:
                 raise CatalogHTTPError(
                     status_code, url, self._read_error_preview(response)
                 )
 
-            headers = getattr(response, "headers", {}) or {}
-            content_type = str(headers.get("Content-Type", "")).lower()
+            content_type = response.headers.get("Content-Type", "").lower()
             if content_type and "json" not in content_type:
                 raise CatalogResponseError(
                     f"catalog response is not JSON ({content_type}): {url}"
                 )
 
-            body = self._read_bounded(response, url, headers)
+            body = self._read_bounded(response, url)
             try:
                 return json.loads(body.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise CatalogResponseError(
                     f"catalog response is not valid UTF-8 JSON: {url}"
                 ) from exc
-        except CatalogClientError:
-            raise
         except requests.RequestException as exc:
             raise CatalogNetworkError(
                 f"catalog response could not be read: {url}"
             ) from exc
         finally:
-            close = getattr(response, "close", None)
-            if callable(close):
-                close()
+            response.close()
 
-    def _read_bounded(self, response: Any, url: str, headers: dict[str, Any]) -> bytes:
+    def _read_bounded(self, response: requests.Response, url: str) -> bytes:
         """Content-Lengthの有無にかかわらず、ストリームを設定上限以内で読み取る。"""
 
-        content_length = headers.get("Content-Length", headers.get("content-length"))
+        content_length = response.headers.get("Content-Length")
         if content_length is not None:
             try:
                 declared_size = int(content_length)
-            except (TypeError, ValueError) as exc:
+            except ValueError as exc:
                 raise CatalogResponseError(
                     f"catalog response has invalid Content-Length: {url}"
                 ) from exc
@@ -201,50 +192,30 @@ class OfficialSiteCatalogClient:
                     url, declared_size, self.max_response_bytes
                 )
 
-        iterator = getattr(response, "iter_content", None)
-        if not callable(iterator):
-            raise CatalogResponseError(
-                f"catalog response does not support bounded streaming: {url}"
-            )
-
         chunks: list[bytes] = []
         total = 0
-        try:
-            for chunk in iterator(chunk_size=self.CHUNK_SIZE):
-                if not chunk:
-                    continue
-                if not isinstance(chunk, (bytes, bytearray)):
-                    raise CatalogResponseError(
-                        f"catalog response yielded non-byte data: {url}"
-                    )
-                total += len(chunk)
-                if total > self.max_response_bytes:
-                    raise CatalogResponseTooLarge(url, total, self.max_response_bytes)
-                chunks.append(bytes(chunk))
-        except CatalogClientError:
-            raise
-        except requests.RequestException as exc:
-            raise CatalogNetworkError(
-                f"catalog response could not be read: {url}"
-            ) from exc
+        for chunk in response.iter_content(chunk_size=self.CHUNK_SIZE):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > self.max_response_bytes:
+                raise CatalogResponseTooLarge(url, total, self.max_response_bytes)
+            chunks.append(chunk)
         return b"".join(chunks)
 
-    def _read_error_preview(self, response: Any) -> str:
-        iterator = getattr(response, "iter_content", None)
-        if not callable(iterator):
-            return ""
-        preview = bytearray()
+    def _read_error_preview(self, response: requests.Response) -> str:
         try:
-            for chunk in iterator(chunk_size=self.ERROR_PREVIEW_BYTES):
-                if not chunk:
-                    continue
-                if isinstance(chunk, (bytes, bytearray)):
-                    remaining = self.ERROR_PREVIEW_BYTES - len(preview)
-                    preview.extend(bytes(chunk)[:remaining])
-                break
+            for chunk in response.iter_content(chunk_size=self.ERROR_PREVIEW_BYTES):
+                if chunk:
+                    return (
+                        chunk[: self.ERROR_PREVIEW_BYTES]
+                        .decode("utf-8", errors="replace")
+                        .replace("\n", " ")
+                    )
         except requests.RequestException:
+            # 補足の本文を読めなくても、受信済みのHTTPステータスを主原因として報告する。
             return ""
-        return bytes(preview).decode("utf-8", errors="replace").replace("\n", " ")
+        return ""
 
 
 CatalogClient = OfficialSiteCatalogClient

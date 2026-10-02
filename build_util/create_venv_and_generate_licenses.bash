@@ -32,8 +32,7 @@ test -f "$core_dir/pyproject.toml"
         SETUPTOOLS_SCM_PRETEND_VERSION=0.4.1 \
         PATH="$venv_path/bin:/usr/bin:/bin" \
         "$uv_bin" sync --locked --extra cpu --no-dev
-    UV_PROJECT_ENVIRONMENT="$venv_path" \
-        "$uv_bin" pip list --format json > "$snapshot_path"
+    "$uv_bin" pip list --python "$venv_path/bin/python" --format json > "$snapshot_path"
     UV_PROJECT_ENVIRONMENT="$venv_path" \
         SETUPTOOLS_SCM_PRETEND_VERSION=0.4.1 \
         PATH="$venv_path/bin:/usr/bin:/bin" \

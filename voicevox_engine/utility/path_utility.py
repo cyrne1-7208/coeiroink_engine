@@ -34,7 +34,7 @@ def delete_file(file_path: str) -> None:
 
 
 def atomic_write_text(path: Path, content: str) -> None:
-    """同じディレクトリの一時ファイルを同期してから、既存テキストを原子的に置換する。"""
+    """同じディレクトリの一時ファイルを同期し、既存のファイルを原子的に置き換える。"""
 
     temporary_path: Path | None = None
     try:

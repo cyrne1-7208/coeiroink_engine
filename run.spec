@@ -7,7 +7,7 @@ import sys
 from argparse import ArgumentParser
 from importlib.util import find_spec
 from pathlib import Path
-from shutil import copy2, copytree
+from shutil import copy2, copytree, ignore_patterns
 
 from PyInstaller.utils.hooks import (
     collect_all,
@@ -47,18 +47,32 @@ collect_package("pyopenjtalk")
 collect_package("pyworld")
 # Typeguard 4はデコレータ適用時にESPnetのソースを読むため、凍結モジュールと一緒に.pyも配置する。
 datas.extend(collect_data_files("espnet2", include_py_files=True))
+if backend in ("cuda", "opencl"):
+    hiddenimports.append("coeirocore.voice_smoothing_gpu")
+    datas.extend(
+        collect_data_files(
+            "coeirocore",
+            includes=["voice_smoothing_kernels/*.cl", "voice_smoothing_kernels/*.h"],
+        )
+    )
+else:
+    if find_spec("parselmouth") is None:
+        raise ModuleNotFoundError(
+            f"parselmouth is required for voice smoothing in the {backend} standalone package"
+        )
+    hiddenimports.append("coeirocore.voice_smoothing")
 
 for distribution in (
     "coeiroink-engine",
     "coeirocore",
     "espnet",
-    "kaldiio",
     "pyopenjtalk",
     "pyworld",
 ):
     datas.extend(copy_metadata(distribution))
 
 optional_packages = {
+    "cuda": ("cupy",),
     "directml": ("torch_directml",),
     "opencl": ("pytorch_ocl", "pyopencl"),
 }
@@ -68,6 +82,9 @@ for package in optional_packages.get(backend, ()):
             f"{package} is required for the {backend} standalone package"
         )
     collect_package(package)
+
+if backend == "cuda":
+    datas.extend(copy_metadata("cupy-cuda12x"))
 
 a = Analysis(
     ["run.py"],
@@ -120,8 +137,15 @@ for source in (
     "README.md",
 ):
     copy2(source, target_dir)
-for source in ("engine_manifest_assets", "licenses", "ui_template"):
+for source in ("engine_manifest_assets", "ui_template"):
     copytree(source, target_dir / source, dirs_exist_ok=True)
+# uvはコンテナだけに同梱されるため、その表示文書を通常のstandalone成果物から除外する。
+copytree(
+    "licenses",
+    target_dir / "licenses",
+    dirs_exist_ok=True,
+    ignore=ignore_patterns("container"),
+)
 
 # 配布元のマニフェストは共通のまま保ち、Windows成果物だけ実行ファイル名を調整する。
 if sys.platform == "win32":

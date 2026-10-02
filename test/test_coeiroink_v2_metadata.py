@@ -195,11 +195,14 @@ def test_sample_voice_lookup_is_zero_based_and_deterministic(metadata_store):
 
 def test_policy_and_license_reading(metadata_store):
     policy = metadata_store.speaker_policy(SECOND_SPEAKER_UUID)
-    assert policy.policy == (
-        metadata_store.speaker_info_dir / "speaker_ver1.0" / "policy.md"
-    ).read_text(encoding="utf-8")
+    speaker_folder = metadata_store.speaker_info_dir / "speaker_ver1.0"
+    assert policy.policy == (speaker_folder / "policy.md").read_text(encoding="utf-8")
     assert policy.license == (
-        metadata_store.speaker_info_dir / "speaker_ver1.0" / "LICENSE.txt"
+        f"## LICENSE.txt\n\n{(speaker_folder / 'LICENSE.txt').read_text(encoding='utf-8')}\n\n"
+        f"## LICENSE_extra.txt\n\n{(speaker_folder / 'LICENSE_extra.txt').read_text(encoding='utf-8')}"
+    )
+    assert metadata_store.read_license(FIRST_SPEAKER_UUID) == (
+        metadata_store.speaker_info_dir / FIRST_SPEAKER_UUID / "LICENSE.txt"
     ).read_text(encoding="utf-8")
     assert [
         path.name for path in metadata_store.license_paths(SECOND_SPEAKER_UUID)

@@ -1,0 +1,5 @@
+Component: uv
+Source: https://github.com/astral-sh/uv
+License: MIT OR Apache-2.0
+
+The Docker image distributes uv under the MIT license reproduced in LICENSE-MIT.
