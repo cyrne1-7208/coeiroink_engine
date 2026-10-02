@@ -1,6 +1,6 @@
 import json
+import importlib
 import shutil
-import sys
 import threading
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -31,11 +31,37 @@ mutex_user_dict = threading.Lock()
 mutex_openjtalk_dict = threading.Lock()
 
 
+def _create_user_dict(source_path: Path, compiled_path: Path) -> None:
+    """複数世代のpyopenjtalk APIに対応してユーザー辞書を構築します。"""
+    if hasattr(pyopenjtalk, "mecab_dict_index"):
+        pyopenjtalk.mecab_dict_index(str(source_path), str(compiled_path))
+    else:
+        pyopenjtalk.create_user_dict(str(source_path), str(compiled_path))
+
+
+def _set_user_dict(compiled_path: Path) -> None:
+    """複数世代のpyopenjtalk APIに対応してコンパイル済み辞書を適用します。"""
+    if hasattr(pyopenjtalk, "update_global_jtalk_with_user_dict"):
+        pyopenjtalk.update_global_jtalk_with_user_dict(str(compiled_path))
+    else:
+        pyopenjtalk.set_user_dict(str(compiled_path))
+
+
+def reset_user_dict() -> None:
+    """ユーザー辞書更新後にpyopenjtalkの既定辞書へ戻します。"""
+    if hasattr(pyopenjtalk, "unset_user_dict"):
+        pyopenjtalk.unset_user_dict()
+    else:
+        # pyopenjtalk 0.4以降は辞書適用APIを公開しますが、解除APIはありません。
+        # モジュールを再読み込みして既定のOpenJTalkインスタンスを作り直し、非公開実装へ依存しません。
+        importlib.reload(pyopenjtalk)
+
+
 @mutex_wrapper(mutex_user_dict)
 def write_to_json(user_dict: Dict[str, UserDictWord], user_dict_path: Path):
     converted_user_dict = {}
     for word_uuid, word in user_dict.items():
-        word_dict = word.dict()
+        word_dict = word.model_dump()
         word_dict["cost"] = priority2cost(
             word_dict["context_id"], word_dict["priority"]
         )
@@ -52,13 +78,17 @@ def update_dict(
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
 ):
+    temporary_source_path: Optional[Path] = None
+    temporary_compiled_path: Optional[Path] = None
     try:
         with NamedTemporaryFile(
             encoding="utf-8", mode="w", delete=False, dir=save_dir
         ) as f:
+            temporary_source_path = Path(f.name).resolve()
             if not default_dict_path.is_file():
-                print("Warning: Cannot find default dictionary.", file=sys.stderr)
-                return
+                raise FileNotFoundError(
+                    f"default dictionary was not found: {default_dict_path}"
+                )
             default_dict = default_dict_path.read_text(encoding="utf-8")
             if default_dict == default_dict.rstrip():
                 default_dict += "\n"
@@ -91,27 +121,26 @@ def update_dict(
                         accent_associative_rule=word.accent_associative_rule,
                     )
                 )
-        tmp_dict_path = Path(
-            NamedTemporaryFile(delete=False, dir=save_dir).name
-        ).resolve()
-        pyopenjtalk.create_user_dict(
-            str(Path(f.name).resolve(strict=True)),
-            str(tmp_dict_path),
-        )
-        delete_file(f.name)
-        if not tmp_dict_path.is_file():
+        with NamedTemporaryFile(delete=False, dir=save_dir) as compiled_file:
+            temporary_compiled_path = Path(compiled_file.name).resolve()
+        _create_user_dict(temporary_source_path, temporary_compiled_path)
+        if temporary_source_path.is_file():
+            delete_file(str(temporary_source_path))
+        if not temporary_compiled_path.is_file():
             raise RuntimeError("辞書のコンパイル時にエラーが発生しました。")
-        pyopenjtalk.unset_user_dict()
+        reset_user_dict()
         try:
-            shutil.move(tmp_dict_path, compiled_dict_path)  # ドライブを跨ぐためPath.replaceが使えない
+            shutil.move(
+                temporary_compiled_path, compiled_dict_path
+            )  # ドライブを跨ぐためPath.replaceが使えない
         finally:
             if compiled_dict_path.is_file():
-                pyopenjtalk.set_user_dict(str(compiled_dict_path.resolve(strict=True)))
+                _set_user_dict(compiled_dict_path.resolve(strict=True))
     finally:
-        if Path(f.name).exists():
-            delete_file(f.name)
-        if tmp_dict_path.exists():
-            delete_file(str(tmp_dict_path))
+        if temporary_source_path is not None and temporary_source_path.exists():
+            delete_file(str(temporary_source_path))
+        if temporary_compiled_path is not None and temporary_compiled_path.exists():
+            delete_file(str(temporary_compiled_path))
 
 
 @mutex_wrapper(mutex_user_dict)
@@ -241,7 +270,7 @@ def import_user_dict(
     # 念のため型チェックを行う
     for word_uuid, word in dict_data.items():
         UUID(word_uuid)
-        assert type(word) == UserDictWord
+        assert type(word) is UserDictWord
         for pos_detail in part_of_speech_data.values():
             if word.context_id == pos_detail.context_id:
                 assert word.part_of_speech == pos_detail.part_of_speech

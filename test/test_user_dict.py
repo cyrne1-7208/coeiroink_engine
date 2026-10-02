@@ -6,7 +6,7 @@ from typing import Dict
 from unittest import TestCase
 
 from fastapi import HTTPException
-from pyopenjtalk import g2p, unset_user_dict
+from pyopenjtalk import g2p
 
 from voicevox_engine.model import UserDictWord, WordTypes
 from voicevox_engine.part_of_speech_data import MAX_PRIORITY, part_of_speech_data
@@ -17,6 +17,7 @@ from voicevox_engine.user_dict import (
     import_user_dict,
     read_dict,
     rewrite_word,
+    reset_user_dict,
     update_dict,
 )
 
@@ -78,7 +79,7 @@ class TestUserDict(TestCase):
         self.tmp_dir_path = Path(self.tmp_dir.name)
 
     def tearDown(self):
-        unset_user_dict()
+        reset_user_dict()
         self.tmp_dir.cleanup()
 
     def test_read_not_exist_json(self):
@@ -86,6 +87,14 @@ class TestUserDict(TestCase):
             read_dict(user_dict_path=(self.tmp_dir_path / "not_exist.json")),
             {},
         )
+
+    def test_update_dict_missing_default_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            update_dict(
+                default_dict_path=self.tmp_dir_path / "missing.csv",
+                user_dict_path=self.tmp_dir_path / "user_dict.json",
+                compiled_dict_path=self.tmp_dir_path / "user.dic",
+            )
 
     def test_create_word(self):
         # 将来的に品詞などが追加された時にテストを増やす
@@ -340,7 +349,7 @@ class TestUserDict(TestCase):
         self.assertEqual(g2p(text=test_text, kana=True), success_pronunciation)
 
         # 疑似的にエンジンを再起動する
-        unset_user_dict()
+        reset_user_dict()
         update_dict(
             user_dict_path=user_dict_path, compiled_dict_path=compiled_dict_path
         )
