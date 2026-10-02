@@ -1,6 +1,7 @@
 import json
 from base64 import b64encode
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 from .EngineManifest import EngineManifest, LicenseInfo, UpdateInfo
 
@@ -9,17 +10,40 @@ class EngineManifestLoader:
     def __init__(self, manifest_path: Path, root_dir: Path):
         self.manifest_path = manifest_path
         self.root_dir = root_dir
+        # マニフェストとライセンス・アイコンはサーバーの起動中に変化しません。
+        # 機能確認のたびに再読込・再エンコードせず、プロセス内に保持します。
+        self._raw_manifest: Optional[Dict[str, Any]] = None
+        self._manifest: Optional[EngineManifest] = None
+
+    def _load_json(self) -> Dict[str, Any]:
+        if self._raw_manifest is None:
+            self._raw_manifest = json.loads(
+                self.manifest_path.read_text(encoding="utf-8")
+            )
+        return self._raw_manifest
+
+    @property
+    def downloadable_libraries_path(self):
+        return self._load_json().get("downloadable_libraries_path")
+
+    @property
+    def downloadable_libraries_url(self):
+        return self._load_json().get("downloadable_libraries_url")
 
     def load_manifest(self) -> EngineManifest:
-        manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        if self._manifest is not None:
+            return self._manifest
 
-        manifest = EngineManifest(
+        manifest = self._load_json()
+
+        self._manifest = EngineManifest(
             manifest_version=manifest["manifest_version"],
             name=manifest["name"],
             brand_name=manifest["brand_name"],
             uuid=manifest["uuid"],
             url=manifest["url"],
             default_sampling_rate=manifest["default_sampling_rate"],
+            frame_rate=manifest.get("frame_rate", 93.75),
             icon=b64encode((self.root_dir / manifest["icon"]).read_bytes()).decode(
                 "utf-8"
             ),
@@ -38,11 +62,12 @@ class EngineManifestLoader:
                     (self.root_dir / manifest["dependency_licenses"]).read_text("utf-8")
                 )
             ],
-            downloadable_libraries_path=manifest["downloadable_libraries_path"],
-            downloadable_libraries_url=manifest["downloadable_libraries_url"],
+            supported_vvlib_manifest_version=None,
             supported_features={
                 key: item["value"]
                 for key, item in manifest["supported_features"].items()
             },
         )
-        return manifest
+        # 初回構築時は共有キャッシュを直接公開せず、防御的コピーを返します。
+        # 次回以降は既存のキャッシュを返すため、呼び出し元は応答を変更しないでください。
+        return self._manifest.model_copy(deep=True)
