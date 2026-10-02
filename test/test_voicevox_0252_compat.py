@@ -3,10 +3,20 @@ import threading
 from pathlib import Path
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 
 import run as engine_run
 from test.test_old_mycoeiroink import SPEAKER_UUID, STYLE_ID, create_test_client
+from voicevox_engine.engine_manifest import EngineManifestLoader
+from voicevox_engine.katakana_english import (
+    text_to_full_context_labels as current_katakana_english,
+)
+from voicevox_engine.preset import Preset
+from voicevox_engine.voicevox_compat import router as voicevox_compat_router
+from voicevox_engine.voicevox_compat.katakana_english import (
+    text_to_full_context_labels as legacy_katakana_english,
+)
 
 LEGACY_VOICEVOX_PATHS = {
     "/accent_phrases",
@@ -50,6 +60,20 @@ SINGING_PATHS = {
 }
 
 
+def test_legacy_katakana_english_import_uses_shared_implementation():
+    assert legacy_katakana_english is current_katakana_english
+
+
+def test_manifest_cache_is_not_mutable_from_callers():
+    root_dir = Path(__file__).parents[1]
+    loader = EngineManifestLoader(root_dir / "engine_manifest.json", root_dir)
+
+    manifest = loader.load_manifest()
+    manifest.supported_features.sing = True
+
+    assert loader.load_manifest().supported_features.sing is False
+
+
 def _audio_query(client):
     response = client.post(
         "/voicevox/audio_query",
@@ -79,7 +103,7 @@ def _preset(**overrides):
         "pauseLengthScale": 1,
     }
     values.update(overrides)
-    return engine_run.Preset(**values)
+    return Preset(**values)
 
 
 def test_voicevox_routes_are_prefixed_without_moving_coeiroink_v1(tmp_path: Path):
@@ -139,6 +163,33 @@ def test_audio_query_matches_voicevox_0252_defaults_and_legacy_body(tmp_path: Pa
     assert response.content.startswith(b"RIFF")
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("outputSamplingRate", 384_001),
+        ("prePhonemeLength", 60.001),
+        ("postPhonemeLength", 60.001),
+        ("pauseLength", 60.001),
+    ],
+)
+def test_voicevox_audio_query_rejects_allocation_heavy_numeric_values(
+    tmp_path: Path, field: str, value: float
+):
+    client, audio_manager = create_test_client(tmp_path)
+    query = _audio_query(client)
+    audio_manager.synthesis.reset_mock()
+    query[field] = value
+
+    response = client.post(
+        "/voicevox/synthesis",
+        params={"speaker": STYLE_ID},
+        json=query,
+    )
+
+    assert response.status_code == 422
+    audio_manager.synthesis.assert_not_called()
+
+
 def test_katakana_english_parameter_changes_only_unknown_english_reading(
     tmp_path: Path,
 ):
@@ -184,6 +235,23 @@ def test_audio_query_from_legacy_preset_adds_0252_pause_defaults(
     assert response.status_code == 200
     assert response.json()["pauseLength"] is None
     assert response.json()["pauseLengthScale"] == 1
+
+
+def test_audio_query_from_preset_rejects_duplicate_style_id(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        engine_run.PresetManager, "load_presets", lambda _self: [_preset()]
+    )
+    client, _ = create_test_client(tmp_path, duplicate_style=True)
+
+    response = client.post(
+        "/voicevox/audio_query_from_preset",
+        params={"text": "テストです", "preset_id": 1},
+    )
+
+    assert response.status_code == 422
+    assert "ambiguous" in response.json()["detail"]
 
 
 def test_audio_query_from_preset_preserves_pause_controls(tmp_path: Path, monkeypatch):
@@ -244,12 +312,14 @@ def test_multi_synthesis_removes_partial_zip_after_failure(tmp_path: Path, monke
     query = _audio_query(client)
     temporary_dir = tmp_path / "multi-synthesis-temp"
     temporary_dir.mkdir()
-    original_named_temporary_file = engine_run.NamedTemporaryFile
+    original_named_temporary_file = voicevox_compat_router.NamedTemporaryFile
 
     def temporary_file_in_test_dir(**kwargs):
         return original_named_temporary_file(dir=temporary_dir, **kwargs)
 
-    monkeypatch.setattr(engine_run, "NamedTemporaryFile", temporary_file_in_test_dir)
+    monkeypatch.setattr(
+        voicevox_compat_router, "NamedTemporaryFile", temporary_file_in_test_dir
+    )
     audio_manager.synthesis.side_effect = RuntimeError("test synthesis failure")
 
     with pytest.raises(RuntimeError, match="test synthesis failure"):
@@ -257,6 +327,36 @@ def test_multi_synthesis_removes_partial_zip_after_failure(tmp_path: Path, monke
             "/voicevox/multi_synthesis",
             params={"speaker": STYLE_ID},
             json=[query],
+        )
+
+    assert list(temporary_dir.iterdir()) == []
+
+
+def test_wave_response_removes_temporary_file_after_write_failure(
+    tmp_path: Path, monkeypatch
+):
+    temporary_dir = tmp_path / "wave-response-temp"
+    temporary_dir.mkdir()
+    original_named_temporary_file = voicevox_compat_router.NamedTemporaryFile
+
+    def temporary_file_in_test_dir(**kwargs):
+        return original_named_temporary_file(dir=temporary_dir, **kwargs)
+
+    def fail_write(*_args, **_kwargs):
+        raise RuntimeError("write failed")
+
+    monkeypatch.setattr(
+        voicevox_compat_router, "NamedTemporaryFile", temporary_file_in_test_dir
+    )
+    monkeypatch.setattr(
+        voicevox_compat_router.soundfile,
+        "write",
+        fail_write,
+    )
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        voicevox_compat_router._wave_file_response(
+            np.zeros(8, dtype=np.float32), 16_000
         )
 
     assert list(temporary_dir.iterdir()) == []
@@ -311,6 +411,7 @@ def test_cancellable_disconnection_monitor_follows_app_lifespan(tmp_path: Path):
         def __init__(self):
             self.started = threading.Event()
             self.stopped = threading.Event()
+            self.shutdown = threading.Event()
 
         async def catch_disconnection(self):
             self.started.set()
@@ -318,6 +419,9 @@ def test_cancellable_disconnection_monitor_follows_app_lifespan(tmp_path: Path):
                 await asyncio.Event().wait()
             finally:
                 self.stopped.set()
+
+        async def shutdown_async(self):
+            self.shutdown.set()
 
     cancellable_engine = MonitoringCancellableEngine()
     client, _ = create_test_client(
@@ -329,6 +433,7 @@ def test_cancellable_disconnection_monitor_follows_app_lifespan(tmp_path: Path):
         assert cancellable_engine.started.wait(timeout=1)
 
     assert cancellable_engine.stopped.wait(timeout=1)
+    assert cancellable_engine.shutdown.wait(timeout=1)
 
 
 @pytest.mark.parametrize(
@@ -423,6 +528,29 @@ def test_manifest_disabled_morphing_returns_501(tmp_path: Path):
     audio_manager.synthesis.assert_not_called()
 
 
+def test_manifest_disabled_interrogative_upspeak_is_not_enabled_implicitly(
+    tmp_path: Path,
+):
+    client, audio_manager = create_test_client(tmp_path)
+    query = _audio_query(client)
+    audio_manager.synthesis.reset_mock()
+
+    default_response = client.post(
+        "/voicevox/synthesis",
+        params={"speaker": STYLE_ID},
+        json=query,
+    )
+    explicit_response = client.post(
+        "/voicevox/synthesis",
+        params={"speaker": STYLE_ID, "enable_interrogative_upspeak": True},
+        json=query,
+    )
+
+    assert default_response.status_code == 200
+    assert explicit_response.status_code == 501
+    assert audio_manager.synthesis.call_count == 1
+
+
 def test_validate_kana_matches_voicevox_0252_contract(tmp_path: Path):
     client, _ = create_test_client(tmp_path)
 
@@ -506,6 +634,23 @@ def test_disable_mutable_api_returns_403_before_mutation(
     client, _ = create_test_client(tmp_path, disable_mutable_api=True)
 
     response = client.request(method, path)
+
+    assert response.status_code == 403
+    assert "無効化" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/set_dictionary",
+        "/v1/set_default_processing_algorithm",
+        "/v1/set_default_trim_buffer",
+    ],
+)
+def test_disable_mutable_api_also_guards_native_routes(tmp_path: Path, path: str):
+    client, _ = create_test_client(tmp_path, disable_mutable_api=True)
+
+    response = client.post(path)
 
     assert response.status_code == 403
     assert "無効化" in response.json()["detail"]

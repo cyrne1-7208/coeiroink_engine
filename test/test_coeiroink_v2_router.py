@@ -3,11 +3,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from coeirocore.coeiro_manager import InvalidSynthesisParameterError, PredictionResult
 from coeirocore.pyworld_compat import load_pyworld
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import voicevox_engine.coeiroink_v2.router as router_module
+from voicevox_engine.coeiroink_v2 import wave_processing
 from voicevox_engine.coeiroink_v2.audio import (
     MAX_PAUSE_LENGTH_SECONDS,
     MAX_SAMPLING_RATE,
@@ -28,7 +30,7 @@ STYLE_ID = 7
 
 class FakeAudioManager:
     fs = 16000
-    hop_length = 2
+    device = "cpu"
 
     def __init__(self):
         self.prediction_calls = []
@@ -56,10 +58,15 @@ class FakeAudioManager:
                 "speaker_uuid": speaker_uuid,
             }
         )
-        return {
-            "wav": np.linspace(-0.25, 0.25, 8, dtype=np.float32),
-            "duration_frames": [1, 2, 1],
-        }
+        return PredictionResult(
+            wav=np.linspace(-0.25, 0.25, 8, dtype=np.float32),
+            duration_frames=[1, 2, 1],
+        )
+
+    @staticmethod
+    def get_hop_length(style_id, speaker_uuid):
+        assert (style_id, speaker_uuid) == (STYLE_ID, SPEAKER_UUID)
+        return 2
 
     @staticmethod
     def get_world(wave, sampling_rate):
@@ -89,7 +96,7 @@ class FakeAudioManager:
         )
 
     @staticmethod
-    def resampling(wave, sampling_rate, output_sampling_rate):
+    def resample_output(wave, sampling_rate, output_sampling_rate):
         return np.repeat(wave, output_sampling_rate // sampling_rate)
 
 
@@ -183,11 +190,9 @@ def _app():
             manager,
             FakeMetadata(),
             dictionary_callback=set_dictionary,
-            catalog={
-                "download_info": [],
-                "downloadable_speakers": [],
-                "update_info": [],
-            },
+            download_info_callback=list,
+            downloadable_speakers_callback=list,
+            update_info_callback=list,
             default_trim_buffer={
                 "startTrimBuffer": 0.0,
                 "endTrimBuffer": 0.0,
@@ -255,7 +260,7 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
     assert client.get("/").json() == {"status": "start"}
     assert client.get("/v1/engine_info").json() == {
         "device": "cpu",
-        "version": "0.1.2+coeiroink.1.7.3",
+        "version": "0.1.3+coeiroink.1.7.3",
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
     assert client.get("/v1/speakers_path_variant").status_code == 200
@@ -567,31 +572,33 @@ def test_v2_process_applies_adjusted_f0_before_pause_replacement_with_fake(
         manager.events.append("pause")
         return current
 
-    monkeypatch.setattr(router_module, "_world_process", fake_world)
+    monkeypatch.setattr(wave_processing, "_world_process", fake_world)
     monkeypatch.setattr(
         router_module.audio_helpers,
         "replace_pause_segments",
         fake_pause,
     )
 
-    result, sampling_rate = router_module._process_wave(
+    result, sampling_rate = wave_processing.process_wave(
         manager,
         wave,
         16000,
-        volume_scale=1.0,
-        pitch_scale=0.0,
-        intonation_scale=1.0,
-        pre_phoneme_length=0.0,
-        post_phoneme_length=0.0,
-        output_sampling_rate=16000,
-        start_trim_buffer=0.0,
-        end_trim_buffer=0.0,
-        processing_algorithm="world",
-        adjusted_f0=[110.0, 120.0],
-        pause_length=0.3,
-        pause_start_trim_buffer=0.0,
-        pause_end_trim_buffer=0.0,
-        mora_durations=_internal_pause_durations(),
+        wave_processing.WaveProcessingOptions(
+            volume_scale=1.0,
+            pitch_scale=0.0,
+            intonation_scale=1.0,
+            pre_phoneme_length=0.0,
+            post_phoneme_length=0.0,
+            output_sampling_rate=16000,
+            start_trim_buffer=0.0,
+            end_trim_buffer=0.0,
+            processing_algorithm="world",
+            adjusted_f0=[110.0, 120.0],
+            pause_length=0.3,
+            pause_start_trim_buffer=0.0,
+            pause_end_trim_buffer=0.0,
+            mora_durations=_internal_pause_durations(),
+        ),
     )
 
     assert sampling_rate == 16000
@@ -618,7 +625,7 @@ def test_world_processing_preserves_unvoiced_f0_frames(monkeypatch):
     manager.get_world = fake_world
     monkeypatch.setattr(load_pyworld(), "synthesize", fake_synthesize)
 
-    result = router_module._world_process(
+    result = wave_processing._world_process(
         manager,
         wave,
         16000,
@@ -664,7 +671,13 @@ def test_missing_sample_voice_uses_official_error_contract(tmp_path):
     manager = FakeAudioManager()
     missing_app = FastAPI()
     missing_app.include_router(
-        create_v2_router(manager, MissingSampleMetadata(), catalog={})
+        create_v2_router(
+            manager,
+            MissingSampleMetadata(),
+            download_info_callback=list,
+            downloadable_speakers_callback=list,
+            update_info_callback=list,
+        )
     )
     response = TestClient(missing_app).get(
         "/v1/sample_voice",
@@ -673,3 +686,47 @@ def test_missing_sample_voice_uses_official_error_contract(tmp_path):
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Sample voice file not found"}
+
+
+def test_sample_voice_rejects_negative_index() -> None:
+    app, _, _ = _app()
+
+    response = TestClient(app).get(
+        "/v1/sample_voice",
+        params={
+            "speakerUuid": SPEAKER_UUID,
+            "styleId": STYLE_ID,
+            "index": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_unexpected_value_error_is_not_reported_as_request_validation() -> None:
+    app, manager, _ = _app()
+
+    def fail_prediction(*args, **kwargs):
+        raise ValueError("implementation defect")
+
+    manager.predict = fail_prediction
+
+    with pytest.raises(ValueError, match="implementation defect"):
+        TestClient(app).post("/v1/predict", json=_making_payload())
+
+
+def test_core_parameter_error_is_reported_as_request_validation() -> None:
+    app, manager, _ = _app()
+
+    def reject_parameter(*args, **kwargs):
+        raise InvalidSynthesisParameterError("speed_scale must be positive")
+
+    manager.predict = reject_parameter
+
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/v1/predict",
+        json=_making_payload(),
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "speed_scale must be positive"}

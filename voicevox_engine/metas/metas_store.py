@@ -6,7 +6,12 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from voicevox_engine.metas.metas import CoreSpeaker, EngineSpeaker, Speaker, StyleInfo
+from voicevox_engine.metas.metas import (
+    CoreSpeaker,
+    EngineSpeaker,
+    Speaker,
+    SpeakerStyle,
+)
 
 if TYPE_CHECKING:
     from voicevox_engine.synthesis_engine.synthesis_engine_base import (
@@ -45,10 +50,7 @@ class MetasStore:
         return self._speaker_paths[speaker_uuid]
 
     def combine_metas(self, core_metas: list[CoreSpeaker]) -> list[Speaker]:
-        """
-        与えられたmetaにエンジンのコア情報を付加して返す
-        core_metas: コアのmetas()が返すJSONのModel
-        """
+        """Coreの話者メタデータに、Engineが管理する対応機能を結合する。"""
 
         return [
             Speaker(
@@ -58,8 +60,7 @@ class MetasStore:
             for speaker_meta in core_metas
         ]
 
-    # FIXME: engineではなくList[CoreSpeaker]を渡す形にすることで
-    # SynthesisEngineBaseによる循環importを修正する
+    # FIXME: CoreSpeakerの一覧を直接受け取る形に変更し、SynthesisEngineBaseへの型依存を解消する。
     def load_combined_metas(self, engine: SynthesisEngineBase) -> list[Speaker]:
         """
         与えられたエンジンから、コア・エンジン両方の情報を含んだMetasを返す
@@ -77,10 +78,10 @@ class MetasStore:
         return self._loaded_metas
 
 
-def construct_lookup(speakers: list[Speaker]) -> dict[int, tuple[Speaker, StyleInfo]]:
-    """
-    `{style.id: StyleInfo}`の変換テーブル
-    """
+def construct_lookup(
+    speakers: list[Speaker],
+) -> dict[int, tuple[Speaker, SpeakerStyle]]:
+    """スタイルIDから話者とスタイルを引くための変換テーブルを作る。"""
 
     lookup_table = {}
     for speaker in speakers:

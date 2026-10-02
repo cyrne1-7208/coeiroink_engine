@@ -16,7 +16,7 @@ test -f "$core_dir/pyproject.toml"
 
 expected_core_dir="$(realpath -m "$engine_dir/../coeiroink_core")"
 if [ "$core_dir" != "$expected_core_dir" ]; then
-  echo "CoreはEngineの隣接するcoeiroink_coreでなければなりません: $expected_core_dir" >&2
+  echo "CoreはEngineに隣接するcoeiroink_coreでなければなりません: $expected_core_dir" >&2
   exit 1
 fi
 
@@ -37,8 +37,7 @@ venv_python="$venv_dir/bin/python"
     "$uv_bin" sync --locked --extra cpu --group build --no-dev
 )
 
-# 一部のLinuxカーネルがPyTorch共有ライブラリの実行スタック属性を拒否するため、
-# wheelに含まれる共有ライブラリだけ属性を明示的に解除する。
+# 一部のLinuxカーネルがPyTorch共有ライブラリの実行スタック属性を拒否するため、wheelに含まれる共有ライブラリだけ属性を明示的に解除する。
 purelib="$("$venv_python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 torch_cpu_library="$purelib/torch/lib/libtorch_cpu.so"
 test -f "$torch_cpu_library"

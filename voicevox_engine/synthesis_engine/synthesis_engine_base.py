@@ -3,29 +3,21 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 
-from .. import full_context_label
-from ..full_context_label import extract_full_context_label
 from ..model import AccentPhrase, AudioQuery, Mora
 from ..mora_list import openjtalk_mora2text
+from ..text_analysis import (
+    analyze_text,
+    full_context_label_moras_to_moras,
+    mora_to_text,
+)
 
-
-def mora_to_text(mora: str) -> str:
-    if mora[-1:] in ["A", "I", "U", "E", "O"]:
-        # 無声化母音を小文字に
-        mora = mora[:-1] + mora[-1].lower()
-    if mora in openjtalk_mora2text:
-        return openjtalk_mora2text[mora]
-    return mora
+__all__ = ["SynthesisEngineBase", "full_context_label_moras_to_moras", "mora_to_text"]
 
 
 def adjust_interrogative_accent_phrases(
     accent_phrases: list[AccentPhrase],
 ) -> list[AccentPhrase]:
-    """
-    enable_interrogative_upspeakが有効になっていて与えられたaccent_phrasesに疑問系のものがあった場合、
-    各accent_phraseの末尾にある疑問系発音用のMoraに対して直前のMoraより少し音を高くすることで疑問文ぽくする
-    NOTE: リファクタリング時に適切な場所へ移動させること
-    """
+    """疑問文に指定されたアクセント句の末尾へ、音高を上げた疑問形発音用モーラを追加する。"""
     return [
         AccentPhrase(
             moras=adjust_interrogative_moras(accent_phrase),
@@ -50,8 +42,13 @@ def make_interrogative_mora(last_mora: Mora) -> Mora:
     fix_vowel_length = 0.15
     adjust_pitch = 0.3
     max_pitch = 6.5
+    vowel_key = last_mora.vowel
+    if vowel_key not in openjtalk_mora2text:
+        vowel_key = vowel_key.lower()
+    if vowel_key not in openjtalk_mora2text:
+        raise ValueError(f"unsupported interrogative mora vowel: {last_mora.vowel!r}")
     return Mora(
-        text=openjtalk_mora2text[last_mora.vowel],
+        text=openjtalk_mora2text[vowel_key],
         consonant=None,
         consonant_length=None,
         vowel=last_mora.vowel,
@@ -60,24 +57,8 @@ def make_interrogative_mora(last_mora: Mora) -> Mora:
     )
 
 
-def full_context_label_moras_to_moras(
-    full_context_moras: list[full_context_label.Mora],
-) -> list[Mora]:
-    return [
-        Mora(
-            text=mora_to_text("".join([p.phoneme for p in mora.phonemes])),
-            consonant=(mora.consonant.phoneme if mora.consonant is not None else None),
-            consonant_length=0 if mora.consonant is not None else None,
-            vowel=mora.vowel.phoneme,
-            vowel_length=0,
-            pitch=0,
-        )
-        for mora in full_context_moras
-    ]
-
-
 class SynthesisEngineBase(metaclass=ABCMeta):
-    # FIXME: jsonではなくModelを返すようにする
+    # FIXME: JSON文字列ではなくモデルを返すようにする。
     @property
     @abstractmethod
     def speakers(self) -> str:
@@ -97,7 +78,7 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         speaker_id : int
             話者ID
         skip_reinit : bool
-            True の場合, 既に初期化済みの話者の再初期化をスキップします
+            Trueの場合、既に初期化済みの話者の再初期化をスキップする
         """
         return
 
@@ -158,6 +139,8 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         accent_phrases: list[AccentPhrase],
         speaker_id: int,
     ) -> list[AccentPhrase]:
+        """音素長、モーラ音高の順に推論結果をアクセント句へ反映する。"""
+
         return self.replace_mora_pitch(
             accent_phrases=self.replace_phoneme_length(
                 accent_phrases=accent_phrases,
@@ -174,43 +157,11 @@ class SynthesisEngineBase(metaclass=ABCMeta):
     ) -> list[AccentPhrase]:
         """Open JTalkのフルコンテキストラベルをアクセント句へ変換し、継続長と音高を補完する。"""
 
-        if len(text.strip()) == 0:
-            return []
-
-        utterance = extract_full_context_label(
-            text,
-            enable_katakana_english=enable_katakana_english,
-        )
-        if len(utterance.breath_groups) == 0:
-            return []
-
         return self.replace_mora_data(
-            accent_phrases=[
-                AccentPhrase(
-                    moras=full_context_label_moras_to_moras(accent_phrase.moras),
-                    accent=accent_phrase.accent,
-                    pause_mora=(
-                        Mora(
-                            text="、",
-                            consonant=None,
-                            consonant_length=None,
-                            vowel="pau",
-                            vowel_length=0,
-                            pitch=0,
-                        )
-                        if (
-                            i_accent_phrase == len(breath_group.accent_phrases) - 1
-                            and i_breath_group != len(utterance.breath_groups) - 1
-                        )
-                        else None
-                    ),
-                    is_interrogative=accent_phrase.is_interrogative,
-                )
-                for i_breath_group, breath_group in enumerate(utterance.breath_groups)
-                for i_accent_phrase, accent_phrase in enumerate(
-                    breath_group.accent_phrases
-                )
-            ],
+            accent_phrases=analyze_text(
+                text,
+                enable_katakana_english=enable_katakana_english,
+            ),
             speaker_id=speaker_id,
         )
 
@@ -218,11 +169,10 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         self,
         query: AudioQuery,
         speaker_id: int,
-        enable_interrogative_upspeak: bool = True,
+        enable_interrogative_upspeak: bool = False,
     ) -> np.ndarray:
         """
-        音声合成クエリ内の疑問文指定されたMoraを変形した後、
-        継承先における実装`_synthesis_impl`を使い音声合成を行う
+        音声合成クエリ内で疑問文に指定されたMoraを変形した後、継承先の`_synthesis_impl`を使って音声合成を行う
         Parameters
         ----------
         query : AudioQuery
@@ -230,7 +180,7 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         speaker_id : int
             話者ID
         enable_interrogative_upspeak : bool
-            疑問系のテキストの語尾を自動調整する機能を有効にするか
+            疑問形のテキストの語尾を自動調整する機能を有効にするか
         Returns
         -------
         wave : numpy.ndarray

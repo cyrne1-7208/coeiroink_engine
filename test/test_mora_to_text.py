@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-# TODO: import from voicevox_engine.synthesis_engine.mora
+# TODO: voicevox_engine.synthesis_engine.moraからインポートする。
 from voicevox_engine.synthesis_engine.synthesis_engine_base import mora_to_text
 
 
@@ -24,6 +24,6 @@ class TestMoraToText(TestCase):
         self.assertEqual(mora_to_text("wO"), "ウォ")
 
     def test_invalid_mora(self):
-        """変なモーラが来ても例外を投げない"""
+        """不正なモーラが指定されても例外を送出しない"""
         self.assertEqual(mora_to_text("x"), "x")
         self.assertEqual(mora_to_text(""), "")

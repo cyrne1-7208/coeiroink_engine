@@ -9,7 +9,7 @@ class UpdateInfo(BaseModel):
     """
 
     version: str = Field(title="エンジンのバージョン名")
-    descriptions: list[str] = Field(title="アップデートの詳細についての説明")
+    descriptions: list[str] = Field(title="アップデート内容の詳細説明")
     contributors: list[str] | None = Field(default=None, title="貢献者名")
 
 

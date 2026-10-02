@@ -12,6 +12,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 engine_dir="$(cd "$script_dir/.." && pwd)"
 core_dir="$(cd "$engine_dir/../coeiroink_core" && pwd)"
 venv_path="$engine_dir/licenses_venv"
+snapshot_path="$venv_path/runtime-packages.json"
+trap 'rm -rf "$venv_path"' EXIT
 
 python_bin="${PYTHON_BIN:-python3.12}"
 uv_bin="${UV_BIN:-uv}"
@@ -29,13 +31,19 @@ test -f "$core_dir/pyproject.toml"
     UV_PROJECT_ENVIRONMENT="$venv_path" \
         SETUPTOOLS_SCM_PRETEND_VERSION=0.4.1 \
         PATH="$venv_path/bin:/usr/bin:/bin" \
+        "$uv_bin" sync --locked --extra cpu --no-dev
+    UV_PROJECT_ENVIRONMENT="$venv_path" \
+        "$uv_bin" pip list --format json > "$snapshot_path"
+    UV_PROJECT_ENVIRONMENT="$venv_path" \
+        SETUPTOOLS_SCM_PRETEND_VERSION=0.4.1 \
+        PATH="$venv_path/bin:/usr/bin:/bin" \
         "$uv_bin" sync --locked --extra cpu --group licenses --no-dev
 )
 
 output_license_path="$(realpath -m "$OUTPUT_LICENSE_JSON_PATH")"
 (
     cd "$engine_dir"
-    "$venv_path/bin/python" generate_licenses.py > "$output_license_path"
+    "$venv_path/bin/python" generate_licenses.py \
+        --package-snapshot "$snapshot_path" \
+        --output-path "$output_license_path"
 )
-
-rm -rf "$venv_path"

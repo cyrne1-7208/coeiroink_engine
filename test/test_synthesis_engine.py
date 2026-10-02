@@ -10,7 +10,7 @@ from voicevox_engine.acoustic_feature_extractor import OjtPhoneme
 from voicevox_engine.model import AccentPhrase, AudioQuery, Mora
 from voicevox_engine.synthesis_engine import SynthesisEngine
 
-# TODO: import from voicevox_engine.synthesis_engine.mora
+# TODO: voicevox_engine.synthesis_engine.moraからインポートする。
 from voicevox_engine.synthesis_engine.synthesis_engine import (
     mora_phoneme_list,
     pre_process,
@@ -28,7 +28,6 @@ def _speaker_value(speaker_id):
 def yukarin_s_mock(length: int, phoneme_list: numpy.ndarray, speaker_id: numpy.ndarray):
     result = []
     speaker_value = _speaker_value(speaker_id)
-    # mockとしての適当な処理、特に意味はない
     for i in range(length):
         result.append(float(phoneme_list[i] * 0.5 + speaker_value))
     return numpy.array(result)
@@ -46,7 +45,6 @@ def yukarin_sa_mock(
 ):
     result = []
     speaker_value = _speaker_value(speaker_id)
-    # mockとしての適当な処理、特に意味はない
     for i in range(length):
         result.append(
             float(
@@ -74,9 +72,8 @@ def decode_mock(
 ):
     result = []
     speaker_value = _speaker_value(speaker_id)
-    # mockとしての適当な処理、特に意味はない
     for i in range(length):
-        # decode forwardはデータサイズがlengthの256倍になるのでとりあえず256回データをresultに入れる
+        # 実際のデコーダーと同じく、1フレームから256サンプルを生成する。
         for _ in range(256):
             result.append(
                 float(
@@ -390,7 +387,7 @@ class TestSynthesisEngine(TestCase):
         )
         self.assertEqual(yukarin_s_args["speaker_id"], 1)
 
-        # flatten_morasを使わずに愚直にaccent_phrasesにデータを反映させてみる
+        # flatten_morasを使わずに、ループ処理で直接accent_phrasesへデータを反映して検証する
         true_result = deepcopy(self.accent_phrases_hello_hiho)
         index = 1
 
@@ -494,7 +491,7 @@ class TestSynthesisEngine(TestCase):
             end_accent_phrase_list, numpy.array([0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0])
         )
 
-        # flatten_morasを使わずに愚直にaccent_phrasesにデータを反映させてみる
+        # テスト対象と同じ補助関数を使わず、期待値をアクセント句へ直接反映する。
         true_result = deepcopy(self.accent_phrases_hello_hiho)
         index = 1
 
@@ -528,7 +525,7 @@ class TestSynthesisEngine(TestCase):
     def synthesis_test_base(self, audio_query: AudioQuery):
         accent_phrases = audio_query.accent_phrases
 
-        # decode forwardのために適当にpitchとlengthを設定し、リストで持っておく
+        # デコーダーへ渡す長さと音高の期待値を固定値で組み立てる。
         phoneme_length_list = [0.0]
         phoneme_id_list = [0]
         f0_list = [0.0]
@@ -576,7 +573,7 @@ class TestSynthesisEngine(TestCase):
             OjtPhoneme(p, 0, 0).phoneme_id for p in mora_phoneme_list
         ]
 
-        # numpy.repeatをfor文でやる
+        # 実装と独立したループで期待配列を組み立て、numpy.repeatの結果を検証する。
         f0 = []
         phoneme = []
         f0_index = 0
@@ -607,7 +604,7 @@ class TestSynthesisEngine(TestCase):
 
         phoneme = numpy.array(phoneme, dtype=numpy.float32)
 
-        # 乱数の影響で数値の位置がずれが生じるので、大半(4/5)があっていればよしとする
+        # 乱数の影響で数値の位置にずれが生じるので、大半(4/5)が合っていればよしとする
         # また、上の部分のint(round(phoneme_length * (24000 / 256)))の影響で
         # 本来のf0/phonemeとテスト生成したf0/phonemeの長さが変わることがあり、
         # テスト生成したものが若干長くなることがあるので、本来のものの長さを基準にassertする

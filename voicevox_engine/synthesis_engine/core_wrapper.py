@@ -40,7 +40,7 @@ def load_runtime_lib(runtime_dirs: list[Path]):
         lib_file_names = ["libonnxruntime.dylib"]
         lib_names = ["onnxruntime"]
     else:
-        raise RuntimeError("不明なOSです")
+        raise RuntimeError("未対応のOSです")
     # 候補の欠落は正常系であり、実際に選択されたCore本体を読めない場合はload_coreが詳細を報告する。
     for lib_path in runtime_dirs:
         for file_name in lib_file_names:
@@ -217,15 +217,12 @@ CORENAME_DICT = {
 
 def find_version_0_12_core_or_later(core_dir: Path) -> str | None:
     """
-    core_dir で指定したディレクトリにあるコアライブラリが Version 0.12 以降である場合、
-    見つかった共有ライブラリの名前を返す。
+    core_dir で指定したディレクトリにあるコアライブラリが Version 0.12 以降である場合、見つかった共有ライブラリの名前を返す。
 
-    Version 0.12 以降と判定する条件は、
+    Version 0.12以降と判定する条件は次の両方を満たすことである。
 
     - core_dir に metas.json が存在しない
     - コアライブラリの名前が CORENAME_DICT の定義に従っている
-
-    の両方が真のときである。
     cf. https://github.com/VOICEVOX/voicevox_engine/issues/385
     """
     if (core_dir / "metas.json").exists():
@@ -240,8 +237,7 @@ def find_version_0_12_core_or_later(core_dir: Path) -> str | None:
 
 def get_arch_name() -> str | None:
     """
-    platform.machine() が特定のアーキテクチャ上で複数パターンの文字列を返し得るので、
-    一意な文字列に変換する
+    platform.machine() が特定のアーキテクチャ上で複数パターンの文字列を返し得るので、一意な文字列に変換する。
     サポート外のアーキテクチャである場合、None を返す
     """
     machine = platform.machine()
@@ -329,7 +325,7 @@ def load_core(core_dir: Path, use_gpu: bool) -> CDLL:
         if loaded_core is not None:
             return loaded_core
         raise RuntimeError(
-            f"コアの読み込みに失敗しました：{'; '.join(load_errors)}"
+            f"コアの読み込みに失敗しました: {'; '.join(load_errors)}"
         ) from last_load_error
 
     model_type = check_core_type(core_dir)
@@ -358,7 +354,7 @@ def load_core(core_dir: Path, use_gpu: bool) -> CDLL:
                 if loaded_core is not None:
                     return loaded_core
         raise RuntimeError(
-            f"コアの読み込みに失敗しました：{'; '.join(load_errors)}"
+            f"コアの読み込みに失敗しました: {'; '.join(load_errors)}"
         ) from last_load_error
     raise RuntimeError(
         f"このコンピュータのアーキテクチャ {platform.machine()} で利用可能なコアがありません"

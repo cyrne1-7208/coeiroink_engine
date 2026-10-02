@@ -2,8 +2,8 @@
 
 The helpers in this module deliberately operate on a ``speaker_info``
 directory.  A directory name is not a speaker identity: the identity comes
-from ``metas.json``.  This matters for MYCOEIROINK packages such as
-``rintos_ver1.0`` whose directory name is different from its speaker UUID.
+from ``metas.json``.  This matters when a MYCOEIROINK package directory name
+is different from its speaker UUID.
 
 This module contains no HTTP or download code.  It provides the file-system
 operations that v2 routes can use for speaker metadata and assets.
@@ -247,11 +247,6 @@ class SpeakerMetadataStore:
 
         return self._record(speaker_uuid).folder
 
-    def lookup_speaker_folder(self, speaker_uuid: str) -> Path:
-        """Alias for :meth:`speaker_path` used by route adapters."""
-
-        return self.speaker_path(speaker_uuid)
-
     def _style(self, speaker_uuid: str, style_id: int) -> SpeakerMetaStyle:
         style_id = _style_id(style_id)
         record = self._record(speaker_uuid)
@@ -368,11 +363,6 @@ class SpeakerMetadataStore:
 
         return [self.speaker_meta(uuid) for uuid in self.speaker_uuids]
 
-    def speakers(self) -> list[SpeakerMeta]:
-        """Convenience alias for :meth:`list_speakers`."""
-
-        return self.list_speakers()
-
     def _speaker_meta_path_variant(
         self, record: _SpeakerRecord
     ) -> SpeakerMetaPathVariant:
@@ -413,11 +403,6 @@ class SpeakerMetadataStore:
             self._speaker_meta_path_variant(self._records[uuid])
             for uuid in self.speaker_uuids
         ]
-
-    def speakers_path_variant(self) -> list[SpeakerMetaPathVariant]:
-        """Convenience alias for :meth:`list_speakers_path_variant`."""
-
-        return self.list_speakers_path_variant()
 
     def voice_sample_paths(self, speaker_uuid: str, style_id: int) -> list[Path]:
         """Return all voice samples for a style, ordered by numeric suffix."""
@@ -507,11 +492,6 @@ class SpeakerMetadataStore:
             _read_text(policy_path, "speaker policy") if policy_path.is_file() else None
         )
         return SpeakerPolicy(policy=policy, license=self.read_license(speaker_uuid))
-
-    def read_policy_license(self, speaker_uuid: str) -> SpeakerPolicy:
-        """Convenience alias for :meth:`speaker_policy`."""
-
-        return self.speaker_policy(speaker_uuid)
 
     def speaker_info(self, speaker_uuid: str) -> SpeakerInfo:
         """Build the legacy-style additional speaker information object."""

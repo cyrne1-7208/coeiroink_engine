@@ -1,12 +1,23 @@
 """プリセットの永続化と検証を管理する。"""
 
 from pathlib import Path
+from threading import RLock
 
 import yaml
 from pydantic import TypeAdapter, ValidationError
 
+from ..utility import atomic_write_text
 from .preset import Preset
 from .preset_error import PresetError
+
+_PRESET_LOCK = RLock()
+
+
+def _atomic_write_yaml(path: Path, data: object) -> None:
+    atomic_write_text(
+        path,
+        yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+    )
 
 
 class PresetManager:
@@ -16,7 +27,7 @@ class PresetManager:
     ):
         self.presets = []
         self.last_modified_time = 0
-        self.preset_path = preset_path
+        self.preset_path = Path(preset_path)
 
     def load_presets(self):
         """
@@ -28,73 +39,77 @@ class PresetManager:
             プリセットのリスト
         """
 
-        # 設定ファイルのタイムスタンプを確認
-        try:
-            _last_modified_time = self.preset_path.stat().st_mtime
-            if _last_modified_time == self.last_modified_time:
-                return self.presets
-        except OSError as error:
-            raise PresetError("プリセットの設定ファイルが見つかりません") from error
+        with _PRESET_LOCK:
+            # 外部編集がなければ検証済みのプリセットを再利用する。
+            try:
+                _last_modified_time = self.preset_path.stat().st_mtime_ns
+                if _last_modified_time == self.last_modified_time:
+                    return self.presets
+            except OSError as error:
+                raise PresetError("プリセットの設定ファイルが見つかりません") from error
 
-        with open(self.preset_path, encoding="utf-8") as f:
-            obj = yaml.safe_load(f)
-            if obj is None:
-                raise PresetError("プリセットの設定ファイルが空の内容です")
+            with self.preset_path.open(encoding="utf-8") as file:
+                obj = yaml.safe_load(file)
+                if obj is None:
+                    raise PresetError("プリセットの設定ファイルの内容が空です")
 
-        try:
-            _presets = TypeAdapter(list[Preset]).validate_python(obj)
-        except ValidationError as error:
-            raise PresetError("プリセットの設定ファイルにミスがあります") from error
+            try:
+                _presets = TypeAdapter(list[Preset]).validate_python(obj)
+            except ValidationError as error:
+                raise PresetError(
+                    "プリセットの設定ファイルの形式に誤りがあります"
+                ) from error
 
-        # idが一意か確認
-        if len(_presets) != len({preset.id for preset in _presets}):
-            raise PresetError("プリセットのidに重複があります")
+            if len(_presets) != len({preset.id for preset in _presets}):
+                raise PresetError("プリセットIDに重複があります")
 
-        self.presets = _presets
-        self.last_modified_time = _last_modified_time
-        return self.presets
+            self.presets = _presets
+            self.last_modified_time = _last_modified_time
+            return self.presets
+
+    def _write_presets(self) -> None:
+        _atomic_write_yaml(
+            self.preset_path,
+            [stored_preset.model_dump() for stored_preset in self.presets],
+        )
 
     def add_preset(self, preset: Preset):
-        """
-        YAMLファイルに新規のプリセットを追加する
+        """プリセットを追加してYAMLファイルへ永続化し、登録されたIDを返す。
+
+        IDが負数または既存IDと重複する場合は、上書きを防ぐため`preset.id`を未使用IDへ書き換える。
 
         Parameters
         ----------
         preset : Preset
-            追加するプリセットを渡す
+            追加するプリセット
 
         Returns
         -------
-        ret: int
-            追加したプリセットのプリセットID
+        int
+            登録されたプリセットID
         """
 
-        # 手動でファイルが更新されているかも知れないので、最新のYAMLファイルを読み直す
-        self.load_presets()
+        with _PRESET_LOCK:
+            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す
+            self.load_presets()
 
-        # IDが0未満、または存在するIDなら新しいIDを決定し、配列に追加
-        if preset.id < 0 or preset.id in {preset.id for preset in self.presets}:
-            preset.id = max(preset.id for preset in self.presets) + 1
-        self.presets.append(preset)
+            # 負のIDと重複IDは自動採番し、既存プリセットの上書きを防ぐ。
+            preset_ids = {stored_preset.id for stored_preset in self.presets}
+            if preset.id < 0 or preset.id in preset_ids:
+                preset.id = max(preset_ids, default=0) + 1
+            self.presets.append(preset)
 
-        # ファイルに書き込み
-        try:
-            with open(self.preset_path, mode="w", encoding="utf-8") as f:
-                yaml.safe_dump(
-                    [preset.model_dump() for preset in self.presets],
-                    f,
-                    allow_unicode=True,
-                    sort_keys=False,
-                )
-        except Exception as err:
-            self.presets.pop()
-            if isinstance(err, FileNotFoundError):
-                raise PresetError(
-                    "プリセットの設定ファイルに書き込み失敗しました"
-                ) from err
-            raise
+            try:
+                self._write_presets()
+            except Exception as err:
+                self.presets.pop()
+                if isinstance(err, FileNotFoundError):
+                    raise PresetError(
+                        "プリセットの設定ファイルへの書き込みに失敗しました"
+                    ) from err
+                raise
 
-        return preset.id
+            return preset.id
 
     def update_preset(self, preset: Preset):
         """
@@ -111,38 +126,31 @@ class PresetManager:
             更新したプリセットのプリセットID
         """
 
-        # 手動でファイルが更新されているかも知れないので、最新のYAMLファイルを読み直す
-        self.load_presets()
+        with _PRESET_LOCK:
+            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す
+            self.load_presets()
 
-        # IDが存在するか探索
-        prev_preset = (-1, None)
-        for i in range(len(self.presets)):
-            if self.presets[i].id == preset.id:
-                prev_preset = (i, self.presets[i])
-                self.presets[i] = preset
-                break
-        else:
-            raise PresetError("更新先のプリセットが存在しません")
+            prev_preset = (-1, None)
+            for i in range(len(self.presets)):
+                if self.presets[i].id == preset.id:
+                    prev_preset = (i, self.presets[i])
+                    self.presets[i] = preset
+                    break
+            else:
+                raise PresetError("更新先のプリセットが存在しません")
 
-        # ファイルに書き込み
-        try:
-            with open(self.preset_path, mode="w", encoding="utf-8") as f:
-                yaml.safe_dump(
-                    [preset.model_dump() for preset in self.presets],
-                    f,
-                    allow_unicode=True,
-                    sort_keys=False,
-                )
-        except Exception as err:
-            if prev_preset != (-1, None):
-                self.presets[prev_preset[0]] = prev_preset[1]
-            if isinstance(err, FileNotFoundError):
-                raise PresetError(
-                    "プリセットの設定ファイルに書き込み失敗しました"
-                ) from err
-            raise
+            try:
+                self._write_presets()
+            except Exception as err:
+                if prev_preset != (-1, None):
+                    self.presets[prev_preset[0]] = prev_preset[1]
+                if isinstance(err, FileNotFoundError):
+                    raise PresetError(
+                        "プリセットの設定ファイルへの書き込みに失敗しました"
+                    ) from err
+                raise
 
-        return preset.id
+            return preset.id
 
     def delete_preset(self, id: int):
         """
@@ -159,33 +167,28 @@ class PresetManager:
             削除したプリセットのプリセットID
         """
 
-        # 手動でファイルが更新されているかも知れないので、最新のYAMLファイルを読み直す
-        self.load_presets()
+        with _PRESET_LOCK:
+            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す
+            self.load_presets()
 
-        # IDが存在するか探索
-        buf = None
-        buf_index = -1
-        for i in range(len(self.presets)):
-            if self.presets[i].id == id:
-                buf = self.presets.pop(i)
-                buf_index = i
-                break
-        else:
-            raise PresetError("削除対象のプリセットが存在しません")
+            buf = None
+            buf_index = -1
+            for i in range(len(self.presets)):
+                if self.presets[i].id == id:
+                    buf = self.presets.pop(i)
+                    buf_index = i
+                    break
+            else:
+                raise PresetError("削除対象のプリセットが存在しません")
 
-        # ファイルに書き込み
-        try:
-            with open(self.preset_path, mode="w", encoding="utf-8") as f:
-                yaml.safe_dump(
-                    [preset.model_dump() for preset in self.presets],
-                    f,
-                    allow_unicode=True,
-                    sort_keys=False,
-                )
-        except FileNotFoundError as error:
-            self.presets.insert(buf_index, buf)
-            raise PresetError(
-                "プリセットの設定ファイルに書き込み失敗しました"
-            ) from error
+            try:
+                self._write_presets()
+            except Exception as err:
+                self.presets.insert(buf_index, buf)
+                if isinstance(err, FileNotFoundError):
+                    raise PresetError(
+                        "プリセットの設定ファイルへの書き込みに失敗しました"
+                    ) from err
+                raise
 
-        return id
+            return id

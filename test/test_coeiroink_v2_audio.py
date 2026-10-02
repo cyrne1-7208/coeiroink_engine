@@ -17,6 +17,7 @@ from voicevox_engine.coeiroink_v2.audio import (
     estimate_world_f0,
     pitch_shift_resampling,
     prepare_world_f0,
+    process_wav,
     process_wave,
     replace_pause_segments,
 )
@@ -121,10 +122,14 @@ def test_trim_buffer_retains_context_outside_detected_sound():
     np.testing.assert_array_equal(buffered[800:-1600], unbuffered)
 
 
-def test_processing_identity_and_finite_output():
+def test_legacy_process_wave_delegates_to_current_processing():
     wave = _sine(seconds=0.2, sampling_rate=16000)
 
-    identity, identity_rate = process_wave(wave, 16000, output_sampling_rate=16000)
+    identity, identity_rate = process_wave(
+        wave,
+        16000,
+        output_sampling_rate=16000,
+    )
     np.testing.assert_array_equal(identity, wave)
     assert identity_rate == 16000
 
@@ -141,7 +146,7 @@ def test_processing_identity_and_finite_output():
     assert np.isfinite(processed).all()
 
 
-def test_pitch_and_intonation_processing_is_deterministic_and_finite():
+def test_legacy_pitch_and_intonation_processing_is_deterministic():
     wave = _sine(seconds=0.4, sampling_rate=16000)
 
     first, first_rate = process_wave(
@@ -161,6 +166,41 @@ def test_pitch_and_intonation_processing_is_deterministic_and_finite():
     assert first.size > 0
     assert np.isfinite(first).all()
     np.testing.assert_array_equal(first, second)
+
+
+def test_legacy_process_wav_keeps_pcm_contract():
+    source = encode_pcm_wav(_sine(seconds=0.1, sampling_rate=16000), 16000)
+
+    result = process_wav(source, sampling_rate=16000, volume_scale=0.5)
+    wave, sampling_rate = decode_pcm_wav(result)
+
+    assert sampling_rate == 16000
+    assert wave.size == 1600
+    assert np.isfinite(wave).all()
+
+
+@pytest.mark.parametrize(
+    "sampling_rate, processing, message",
+    [
+        (0, {}, "sampling_rate"),
+        (
+            16000,
+            {"output_sampling_rate": MAX_SAMPLING_RATE + 1},
+            "output_sampling_rate",
+        ),
+        (16000, {"pre_phoneme_length": -0.001}, "pre_phoneme_length"),
+        (16000, {"post_phoneme_length": -0.001}, "post_phoneme_length"),
+        (16000, {"volume_scale": -0.001}, "volume_scale"),
+        (16000, {"intonation_scale": -0.001}, "intonation_scale"),
+    ],
+)
+def test_legacy_process_wave_rejects_invalid_values(sampling_rate, processing, message):
+    with pytest.raises(AudioValidationError, match=message):
+        process_wave(
+            _sine(seconds=0.02),
+            sampling_rate,
+            **processing,
+        )
 
 
 def test_resampling_pitch_shift_preserves_length_and_changes_pitch():
@@ -235,32 +275,6 @@ def test_pause_replacement_rejects_a_zero_length_internal_pau():
             sampling_rate=16000,
             mora_durations=durations,
             pause_length=0.3,
-        )
-
-
-@pytest.mark.parametrize(
-    "sampling_rate, processing, message",
-    [
-        (0, {}, "sampling_rate"),
-        (
-            16000,
-            {"output_sampling_rate": MAX_SAMPLING_RATE + 1},
-            "output_sampling_rate",
-        ),
-        (16000, {"pre_phoneme_length": -0.001}, "pre_phoneme_length"),
-        (16000, {"post_phoneme_length": -0.001}, "post_phoneme_length"),
-        (16000, {"volume_scale": -0.001}, "volume_scale"),
-        (16000, {"intonation_scale": -0.001}, "intonation_scale"),
-    ],
-)
-def test_process_wave_rejects_invalid_sampling_and_processing_values(
-    sampling_rate, processing, message
-):
-    with pytest.raises(AudioValidationError, match=message):
-        process_wave(
-            _sine(seconds=0.02),
-            sampling_rate,
-            **processing,
         )
 
 

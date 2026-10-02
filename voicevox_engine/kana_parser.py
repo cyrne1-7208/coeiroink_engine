@@ -33,7 +33,7 @@ for text, (consonant, vowel) in openjtalk_text2mora.items():
 
 def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
     """
-    longest matchにより読み仮名からAccentPhraseを生成
+    最長一致（longest match）により読み仮名からAccentPhraseを生成する
     入力長Nに対し計算量O(N^2)
     """
     accent_index: int | None = None
@@ -57,7 +57,6 @@ def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
         for watch_index in range(base_index, len(phrase)):
             if phrase[watch_index] == ACCENT_SYMBOL:
                 break
-            # 普通の文字の場合
             stack += phrase[watch_index]
             if stack in text2mora_with_unvoice:
                 matched_text = stack
@@ -77,7 +76,7 @@ def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
 
 def parse_kana(text: str) -> list[AccentPhrase]:
     """
-    AquesTalkライクな読み仮名をパースして音長・音高未指定のaccent phraseに変換
+    AquesTalkライクな読み仮名をパースして音長・音高未指定のAccentPhraseのリストに変換する
     """
 
     parsed_results: list[AccentPhrase] = []

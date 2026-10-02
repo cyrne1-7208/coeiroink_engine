@@ -120,7 +120,7 @@ for source in (
     "README.md",
 ):
     copy2(source, target_dir)
-for source in ("engine_manifest_assets", "ui_template"):
+for source in ("engine_manifest_assets", "licenses", "ui_template"):
     copytree(source, target_dir / source, dirs_exist_ok=True)
 
 # 配布元のマニフェストは共通のまま保ち、Windows成果物だけ実行ファイル名を調整する。
