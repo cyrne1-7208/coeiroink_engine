@@ -1,11 +1,10 @@
-import json
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from ..utility import engine_root, get_save_dir
-from .core_wrapper import CoreWrapper, load_runtime_lib
-from .synthesis_engine import SynthesisEngine, SynthesisEngineBase
+from ..utility import engine_root
+from .core_wrapper import load_runtime_lib
+from .synthesis_engine import SynthesisEngineBase
 
 
 def make_synthesis_engines(
@@ -16,6 +15,7 @@ def make_synthesis_engines(
     cpu_num_threads: Optional[int] = None,
     enable_mock: bool = True,
     load_all_models: bool = False,
+    speaker_info_dir: Optional[Path] = None,
 ) -> Dict[str, SynthesisEngineBase]:
     """
     音声ライブラリをロードして、音声合成エンジンを生成
@@ -38,6 +38,8 @@ def make_synthesis_engines(
         コア読み込みに失敗したとき、代わりにmockを使用するかどうか
     load_all_models: bool, optional, default=False
         起動時に全てのモデルを読み込むかどうか
+    speaker_info_dir: Path, optional, default=None
+        MYCOEIROINKを展開したspeaker_infoディレクトリ
     """
     if cpu_num_threads == 0 or cpu_num_threads is None:
         print(
@@ -70,12 +72,22 @@ def make_synthesis_engines(
 
     synthesis_engines = {}
 
+    if speaker_info_dir is None:
+        speaker_info_dir = (
+            voicevox_dir if voicevox_dir is not None else engine_root()
+        ) / "speaker_info"
+    speaker_info_dir = speaker_info_dir.expanduser().resolve()
+
     from ..dev.core import metas as mock_metas
     from ..dev.core import supported_devices as mock_supported_devices
     from ..dev.synthesis_engine import MockSynthesisEngine
 
+    # Linux OSS構成では公開CoreのAudioManagerを使うEngineを唯一の合成エンジンとして登録します。
     synthesis_engines["0.0.0"] = MockSynthesisEngine(
-        speakers=mock_metas(), supported_devices=mock_supported_devices()
+        speakers=mock_metas(speaker_info_dir=speaker_info_dir),
+        supported_devices=mock_supported_devices(),
+        speaker_info_dir=speaker_info_dir,
+        cpu_num_threads=cpu_num_threads,
     )
 
     return synthesis_engines

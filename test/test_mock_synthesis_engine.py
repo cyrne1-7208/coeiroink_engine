@@ -1,4 +1,7 @@
 from unittest import TestCase
+from unittest.mock import Mock
+
+import numpy as np
 
 from voicevox_engine.dev.synthesis_engine import MockSynthesisEngine
 from voicevox_engine.kana_parser import create_kana
@@ -102,7 +105,13 @@ class TestMockSynthesisEngine(TestCase):
                 pause_mora=None,
             ),
         ]
-        self.engine = MockSynthesisEngine(speakers="", supported_devices="")
+        self.audio_manager = Mock()
+        self.audio_manager.synthesis.return_value = np.zeros(32, dtype=np.float32)
+        self.engine = MockSynthesisEngine(
+            speakers="",
+            supported_devices="",
+            audio_manager=self.audio_manager,
+        )
 
     def test_replace_phoneme_length(self):
         self.assertEqual(
@@ -123,7 +132,7 @@ class TestMockSynthesisEngine(TestCase):
         )
 
     def test_synthesis(self):
-        self.engine.synthesis(
+        wave = self.engine.synthesis(
             AudioQuery(
                 accent_phrases=self.accent_phrases_hello_hiho,
                 speedScale=1,
@@ -138,3 +147,5 @@ class TestMockSynthesisEngine(TestCase):
             ),
             speaker_id=0,
         )
+        self.audio_manager.synthesis.assert_called_once()
+        self.assertEqual(wave.shape, (32,))

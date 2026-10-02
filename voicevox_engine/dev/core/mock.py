@@ -1,5 +1,6 @@
 import json
 from logging import getLogger
+from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
@@ -68,8 +69,11 @@ def decode_forward(length: int, **kwargs: Dict[str, Any]) -> np.ndarray:
     return wave
 
 
-def metas() -> str:
-    return json.dumps(MetaManager().get_metas_dict())
+def metas(speaker_info_dir: Path = Path("speaker_info")) -> str:
+    return json.dumps(
+        MetaManager(speaker_info_dir=speaker_info_dir).get_metas_dict(),
+        ensure_ascii=False,
+    )
 
 
 def supported_devices() -> str:
@@ -77,5 +81,6 @@ def supported_devices() -> str:
         {
             "cpu": True,
             "cuda": False,
+            "dml": False,
         }
     )

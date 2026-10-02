@@ -10,8 +10,7 @@ import numpy
 from voicevox_engine.acoustic_feature_extractor import OjtPhoneme
 from voicevox_engine.model import AccentPhrase, AudioQuery, Mora
 from voicevox_engine.synthesis_engine import SynthesisEngine
-
-# TODO: import from voicevox_engine.synthesis_engine.mora
+# TODO: voicevox_engine.synthesis_engine.moraからimportする。
 from voicevox_engine.synthesis_engine.synthesis_engine import (
     mora_phoneme_list,
     pre_process,
@@ -22,11 +21,16 @@ from voicevox_engine.synthesis_engine.synthesis_engine import (
 )
 
 
+def _speaker_value(speaker_id):
+    return numpy.asarray(speaker_id).item()
+
+
 def yukarin_s_mock(length: int, phoneme_list: numpy.ndarray, speaker_id: numpy.ndarray):
     result = []
+    speaker_value = _speaker_value(speaker_id)
     # mockとしての適当な処理、特に意味はない
     for i in range(length):
-        result.append(float(phoneme_list[i] * 0.5 + speaker_id))
+        result.append(float(phoneme_list[i] * 0.5 + speaker_value))
     return numpy.array(result)
 
 
@@ -41,6 +45,7 @@ def yukarin_sa_mock(
     speaker_id: numpy.ndarray,
 ):
     result = []
+    speaker_value = _speaker_value(speaker_id)
     # mockとしての適当な処理、特に意味はない
     for i in range(length):
         result.append(
@@ -54,7 +59,7 @@ def yukarin_sa_mock(
                     + end_accent_phrase_list[0][i]
                 )
                 * 0.5
-                + speaker_id
+                + speaker_value
             )
         )
     return numpy.array(result)[numpy.newaxis]
@@ -68,14 +73,16 @@ def decode_mock(
     speaker_id: Union[numpy.ndarray, int],
 ):
     result = []
+    speaker_value = _speaker_value(speaker_id)
     # mockとしての適当な処理、特に意味はない
     for i in range(length):
         # decode forwardはデータサイズがlengthの256倍になるのでとりあえず256回データをresultに入れる
         for _ in range(256):
             result.append(
                 float(
-                    f0[i][0] * (numpy.where(phoneme[i] == 1)[0] / phoneme_size)
-                    + speaker_id
+                    f0[i][0]
+                    * (numpy.where(phoneme[i] == 1)[0].item() / phoneme_size)
+                    + speaker_value
                 )
             )
     return numpy.array(result)
@@ -542,7 +549,7 @@ class TestSynthesisEngine(TestCase):
                 phoneme_s = []
                 for _ in range(num_phoneme):
                     phoneme_s.append(0)
-                # one hot
+                # one-hot化
                 phoneme_s[phoneme_id_list[i]] = 1
                 phoneme.append(phoneme_s)
             # consonantとvowelを判別し、vowelであればf0_indexを一つ進める

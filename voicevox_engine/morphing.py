@@ -4,15 +4,17 @@ from itertools import chain
 from typing import Dict, List, Tuple
 
 import numpy as np
-import pyworld as pw
+from coeirocore.pyworld_compat import load_pyworld
 
 from .metas.Metas import Speaker, SpeakerSupportPermittedSynthesisMorphing, StyleInfo
 from .metas.MetasStore import construct_lookup
 from .model import AudioQuery, MorphableTargetInfo, SpeakerNotFoundError
 from .synthesis_engine import SynthesisEngine
 
+pw = load_pyworld()
 
-# FIXME: ndarray type hint, https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/blob/2b64f86197573497c685c785c6e0e743f407b63e/pyworld/pyworld.pyx#L398  # noqa
+
+# FIXME: ndarrayの型ヒントを追加する。https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/blob/2b64f86197573497c685c785c6e0e743f407b63e/pyworld/pyworld.pyx#L398
 @dataclass(frozen=True)
 class MorphingParameter:
     fs: float
@@ -131,16 +133,23 @@ def synthesis_morphing_parameter(
     query: AudioQuery,
     base_speaker: int,
     target_speaker: int,
+    enable_interrogative_upspeak: bool = True,
 ) -> MorphingParameter:
     query = deepcopy(query)
 
     # WORLDに掛けるため合成はモノラルで行う
     query.outputStereo = False
 
-    base_wave = engine.synthesis(query=query, speaker_id=base_speaker).astype("float")
-    target_wave = engine.synthesis(query=query, speaker_id=target_speaker).astype(
-        "float"
-    )
+    base_wave = engine.synthesis(
+        query=query,
+        speaker_id=base_speaker,
+        enable_interrogative_upspeak=enable_interrogative_upspeak,
+    ).astype("float")
+    target_wave = engine.synthesis(
+        query=query,
+        speaker_id=target_speaker,
+        enable_interrogative_upspeak=enable_interrogative_upspeak,
+    ).astype("float")
 
     return create_morphing_parameter(
         base_wave=base_wave,

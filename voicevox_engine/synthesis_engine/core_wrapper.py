@@ -65,7 +65,7 @@ class CoreInfo:
 
 # version 0.12 より前のコアの情報
 CORE_INFOS = [
-    # Windows
+    # Windows向け
     CoreInfo(
         name="core.dll",
         platform="Windows",
@@ -143,7 +143,7 @@ CORE_INFOS = [
         core_type="onnxruntime",
         gpu_type=GPUType.DIRECT_ML,
     ),
-    # Linux
+    # Linux向け
     CoreInfo(
         name="libcore.so",
         platform="Linux",
@@ -186,7 +186,7 @@ CORE_INFOS = [
         core_type="onnxruntime",
         gpu_type=GPUType.NONE,
     ),
-    # macOS
+    # macOS向け
     CoreInfo(
         name="libcore_cpu_universal2.dylib",
         platform="Darwin",
@@ -302,14 +302,28 @@ def check_core_type(core_dir: Path) -> Optional[str]:
 
 
 def load_core(core_dir: Path, use_gpu: bool) -> CDLL:
-    core_name = find_version_0_12_core_or_later(core_dir)
-    if core_name:
+    load_errors: List[str] = []
+    last_load_error: Optional[OSError] = None
+
+    def try_load(core_name: str) -> Optional[CDLL]:
+        nonlocal last_load_error
         try:
             # NOTE: CDLL クラスのコンストラクタの引数 name には文字列を渡す必要がある。
             #       Windows 環境では PathLike オブジェクトを引数として渡すと初期化に失敗する。
             return CDLL(str((core_dir / core_name).resolve(strict=True)))
-        except OSError as err:
-            raise RuntimeError(f"コアの読み込みに失敗しました：{err}")
+        except OSError as error:
+            last_load_error = error
+            load_errors.append(f"{core_name}: {error}")
+            return None
+
+    core_name = find_version_0_12_core_or_later(core_dir)
+    if core_name:
+        loaded_core = try_load(core_name)
+        if loaded_core is not None:
+            return loaded_core
+        raise RuntimeError(
+            f"コアの読み込みに失敗しました：{'; '.join(load_errors)}"
+        ) from last_load_error
 
     model_type = check_core_type(core_dir)
     if model_type is None:
@@ -317,31 +331,31 @@ def load_core(core_dir: Path, use_gpu: bool) -> CDLL:
     if use_gpu or model_type == "onnxruntime":
         core_name = get_suitable_core_name(model_type, gpu_type=GPUType.CUDA)
         if core_name:
-            try:
-                return CDLL(str((core_dir / core_name).resolve(strict=True)))
-            except OSError:
-                pass
+            loaded_core = try_load(core_name)
+            if loaded_core is not None:
+                return loaded_core
         core_name = get_suitable_core_name(model_type, gpu_type=GPUType.DIRECT_ML)
         if core_name:
-            try:
-                return CDLL(str((core_dir / core_name).resolve(strict=True)))
-            except OSError:
-                pass
+            loaded_core = try_load(core_name)
+            if loaded_core is not None:
+                return loaded_core
     core_name = get_suitable_core_name(model_type, gpu_type=GPUType.NONE)
     if core_name:
-        try:
-            return CDLL(str((core_dir / core_name).resolve(strict=True)))
-        except OSError as err:
-            if model_type == "libtorch":
-                core_name = get_suitable_core_name(model_type, gpu_type=GPUType.CUDA)
-                if core_name:
-                    try:
-                        return CDLL(str((core_dir / core_name).resolve(strict=True)))
-                    except OSError as err_:
-                        err = err_
-            raise RuntimeError(f"コアの読み込みに失敗しました：{err}")
-    else:
-        raise RuntimeError(f"このコンピュータのアーキテクチャ {platform.machine()} で利用可能なコアがありません")
+        loaded_core = try_load(core_name)
+        if loaded_core is not None:
+            return loaded_core
+        if model_type == "libtorch":
+            core_name = get_suitable_core_name(model_type, gpu_type=GPUType.CUDA)
+            if core_name:
+                loaded_core = try_load(core_name)
+                if loaded_core is not None:
+                    return loaded_core
+        raise RuntimeError(
+            f"コアの読み込みに失敗しました：{'; '.join(load_errors)}"
+        ) from last_load_error
+    raise RuntimeError(
+        f"このコンピュータのアーキテクチャ {platform.machine()} で利用可能なコアがありません"
+    )
 
 
 class CoreWrapper:

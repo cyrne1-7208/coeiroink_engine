@@ -8,11 +8,16 @@ from voicevox_engine.model import AccentPhrase, AudioQuery, Mora
 from voicevox_engine.synthesis_engine import SynthesisEngine
 
 
+def _speaker_value(speaker_id):
+    return numpy.asarray(speaker_id).item()
+
+
 def yukarin_s_mock(length: int, phoneme_list: numpy.ndarray, speaker_id: numpy.ndarray):
     result = []
+    speaker_value = _speaker_value(speaker_id)
     # mockとしての適当な処理、特に意味はない
     for i in range(length):
-        result.append(round(float(phoneme_list[i] * 0.0625 + speaker_id), 2))
+        result.append(round(float(phoneme_list[i] * 0.0625 + speaker_value), 2))
     return numpy.array(result)
 
 
@@ -27,6 +32,7 @@ def yukarin_sa_mock(
     speaker_id: numpy.ndarray,
 ):
     result = []
+    speaker_value = _speaker_value(speaker_id)
     # mockとしての適当な処理、特に意味はない
     for i in range(length):
         result.append(
@@ -41,7 +47,7 @@ def yukarin_sa_mock(
                         + end_accent_phrase_list[0][i]
                     )
                     * 0.0625
-                    + speaker_id
+                    + speaker_value
                 ),
                 2,
             )
@@ -57,14 +63,16 @@ def decode_mock(
     speaker_id: Union[numpy.ndarray, int],
 ):
     result = []
+    speaker_value = _speaker_value(speaker_id)
     # mockとしての適当な処理、特に意味はない
     for i in range(length):
         # decode forwardはデータサイズがlengthの256倍になるのでとりあえず256回データをresultに入れる
         for _ in range(256):
             result.append(
                 float(
-                    f0[i][0] * (numpy.where(phoneme[i] == 1)[0] / phoneme_size)
-                    + speaker_id
+                    f0[i][0]
+                    * (numpy.where(phoneme[i] == 1)[0].item() / phoneme_size)
+                    + speaker_value
                 )
             )
     return numpy.array(result)

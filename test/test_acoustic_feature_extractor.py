@@ -262,5 +262,5 @@ class TestOjtPhoneme(TestBasePhoneme):
         self.assertEqual(parsed_ojt_1.phoneme_id, 0)
         self.assertEqual(parsed_ojt_2.phoneme_id, 14)
 
-    def tes_lab_list(self):
+    def test_lab_list(self):
         self.lab_test_base("./ojt_lab_test", self.ojt_hello_hiho, OjtPhoneme)

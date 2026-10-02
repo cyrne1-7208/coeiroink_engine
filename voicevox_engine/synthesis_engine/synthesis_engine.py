@@ -14,7 +14,7 @@ unvoiced_mora_phoneme_list = ["A", "I", "U", "E", "O", "cl", "pau"]
 mora_phoneme_list = ["a", "i", "u", "e", "o", "N"] + unvoiced_mora_phoneme_list
 
 
-# TODO: move mora utility to mora module
+# TODO: モーラ処理をmoraモジュールへ移す。
 def to_flatten_moras(accent_phrases: List[AccentPhrase]) -> List[Mora]:
     """
     accent_phrasesに含まれるMora(とpause_moraがあればそれも)を
@@ -183,21 +183,26 @@ class SynthesisEngine(SynthesisEngineBase):
         return self._supported_devices
 
     def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool):
-        try:
-            with self.mutex:
-                # 以下の条件のいずれかを満たす場合, 初期化を実行する
-                # 1. 引数 skip_reinit が False の場合
-                # 2. 話者が初期化されていない場合
-                if (not skip_reinit) or (not self.core.is_model_loaded(speaker_id)):
-                    self.core.load_model(speaker_id)
-        except OldCoreError:
-            pass  # コアが古い場合はどうしようもないので何もしない
+        # 旧Coreは合成ごとにモデルを読み込み、明示的なモデルライフサイクルAPIを公開しません。
+        # 初期化に成功したように見せるためOldCoreErrorを握りつぶさず、機能フラグで判定します。
+        if not getattr(self.core, "exist_load_model", True):
+            return
+        with self.mutex:
+            # 以下の条件のいずれかを満たす場合, 初期化を実行する
+            # 1. 引数 skip_reinit が False の場合
+            # 2. 話者が初期化されていない場合
+            if not skip_reinit:
+                self.core.load_model(speaker_id)
+            elif not getattr(self.core, "exist_is_model_loaded", True):
+                self.core.load_model(speaker_id)
+            elif not self.core.is_model_loaded(speaker_id):
+                self.core.load_model(speaker_id)
 
     def is_initialized_speaker_synthesis(self, speaker_id: int) -> bool:
-        try:
-            return self.core.is_model_loaded(speaker_id)
-        except OldCoreError:
-            return True  # コアが古い場合はどうしようもないのでTrueを返す
+        if not getattr(self.core, "exist_is_model_loaded", True):
+            # 旧Coreは外部から確認できるモデル読込状態を保持せず、合成時に必要な読込を行います。
+            return True
+        return self.core.is_model_loaded(speaker_id)
 
     def replace_phoneme_length(
         self, accent_phrases: List[AccentPhrase], speaker_id: int
@@ -217,13 +222,13 @@ class SynthesisEngine(SynthesisEngineBase):
         """
         # モデルがロードされていない場合はロードする
         self.initialize_speaker_synthesis(speaker_id, skip_reinit=True)
-        # phoneme
+    # 音素処理
         # AccentPhraseをすべてMoraおよびOjtPhonemeの形に分解し、処理可能な形にする
         flatten_moras, phoneme_data_list = pre_process(accent_phrases)
         # OjtPhonemeの形に分解されたもの(phoneme_data_list)から、vowel(母音)の位置を抜き出す
         _, _, vowel_indexes_data = split_mora(phoneme_data_list)
 
-        # yukarin_s
+    # 音素長推定
         # OjtPhonemeのリストからOjtPhonemeのPhoneme ID(OpenJTalkにおける音素のID)のリストを作る
         phoneme_list_s = numpy.array(
             [p.phoneme_id for p in phoneme_data_list], dtype=numpy.int64
@@ -270,11 +275,11 @@ class SynthesisEngine(SynthesisEngineBase):
         if len(accent_phrases) == 0:
             return []
 
-        # phoneme
+    # 音素処理
         # AccentPhraseをすべてMoraおよびOjtPhonemeの形に分解し、処理可能な形にする
         flatten_moras, phoneme_data_list = pre_process(accent_phrases)
 
-        # accent
+    # アクセント処理
         def _create_one_hot(accent_phrase: AccentPhrase, position: int):
             """
             単位行列(numpy.eye)を応用し、accent_phrase内でone hotな配列(リスト)を作る
@@ -352,7 +357,7 @@ class SynthesisEngine(SynthesisEngineBase):
             _,
         ) = split_mora(phoneme_data_list)
 
-        # yukarin_sa
+    # 音高推定
         # Phoneme関連のデータをyukarin_sa_forwarderに渡すための最終処理、リスト内のデータをint64に変換する
         vowel_phoneme_list = numpy.array(
             [p.phoneme_id for p in vowel_phoneme_data_list], dtype=numpy.int64
@@ -406,7 +411,7 @@ class SynthesisEngine(SynthesisEngineBase):
         """
         # モデルがロードされていない場合はロードする
         self.initialize_speaker_synthesis(speaker_id, skip_reinit=True)
-        # phoneme
+    # 音素処理
         # AccentPhraseをすべてMoraおよびOjtPhonemeの形に分解し、処理可能な形にする
         flatten_moras, phoneme_data_list = pre_process(query.accent_phrases)
 
@@ -415,7 +420,7 @@ class SynthesisEngine(SynthesisEngineBase):
             [p.phoneme_id for p in phoneme_data_list], dtype=numpy.int64
         )
 
-        # length
+    # 音素長
         # 音素の長さをリストに展開・結合する。ここには前後の無音時間も含まれる
         phoneme_length_list = (
             [query.prePhonemeLength]
@@ -435,7 +440,7 @@ class SynthesisEngine(SynthesisEngineBase):
         # lengthにSpeed Scale(話速)を適用する
         phoneme_length /= query.speedScale
 
-        # pitch
+    # 音高
         # モーラの音高(ピッチ)を展開・結合し、floatにキャストする
         f0_list = [0] + [mora.pitch for mora in flatten_moras] + [0]
         f0 = numpy.array(f0_list, dtype=numpy.float32)
@@ -455,7 +460,7 @@ class SynthesisEngine(SynthesisEngineBase):
         _, _, vowel_indexes_data = split_mora(phoneme_data_list)
         vowel_indexes = numpy.array(vowel_indexes_data)
 
-        # forward decode
+    # 波形デコード
         # 音素の長さにrateを掛け、intにキャストする
         rate = 24000 / 256
         phoneme_bin_num = numpy.round(phoneme_length * rate).astype(numpy.int32)
@@ -484,7 +489,7 @@ class SynthesisEngine(SynthesisEngineBase):
                 speaker_id=numpy.array(speaker_id, dtype=numpy.int64).reshape(-1),
             )
 
-        # volume: ゲイン適用
+    # 音量: ゲインを適用します。
         wave *= query.volumeScale
 
         # 出力サンプリングレートがデフォルト(decode forwarderによるもの、24kHz)でなければ、それを適用する
