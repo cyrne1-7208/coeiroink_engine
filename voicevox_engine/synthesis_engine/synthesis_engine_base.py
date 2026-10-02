@@ -166,13 +166,21 @@ class SynthesisEngineBase(metaclass=ABCMeta):
             speaker_id=speaker_id,
         )
 
-    def create_accent_phrases(self, text: str, speaker_id: int) -> list[AccentPhrase]:
+    def create_accent_phrases(
+        self,
+        text: str,
+        speaker_id: int,
+        enable_katakana_english: bool = False,
+    ) -> list[AccentPhrase]:
         """Open JTalkのフルコンテキストラベルをアクセント句へ変換し、継続長と音高を補完する。"""
 
         if len(text.strip()) == 0:
             return []
 
-        utterance = extract_full_context_label(text)
+        utterance = extract_full_context_label(
+            text,
+            enable_katakana_english=enable_katakana_english,
+        )
         if len(utterance.breath_groups) == 0:
             return []
 

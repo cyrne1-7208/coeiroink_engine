@@ -2,8 +2,6 @@
 
 Cyrne1によってフォークされたCOEIROINK Engineです。HTTP API、MYCOEIROINKモデルのメタデータ管理、リクエスト処理を担当し、音声合成は隣接する[coeiroink_core](https://github.com/cyrne1-7208/coeiroink_core)へ委譲します。GUIと歌唱機能は対象外です。
 
-バージョンは`vX.Y.Z+coeiroink.1.7.3`形式で表記し、現在のバージョンは`v0.1.1+coeiroink.1.7.3`です。
-
 ## 対象環境
 
 EngineとCoreを同じ親ディレクトリへ配置し、利用するバックエンドを1つ選択します。
@@ -46,7 +44,7 @@ MYCOEIROINKのZIPを展開し、モデルフォルダを`/path/to/speaker_info`�
   --device cpu
 ```
 
-Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。モデルは必要になった時点でロードされ、ロード済みモデルは保持されます。明示的なモデル数上限は設けません。
+Windowsでは`.venv\Scripts\python.exe`を使用します。既定の待受ポートは`50032`です。モデルは必要になった時点でロードされ、別モデルへ切り替える際は現在のモデルを解放して置き換えます。
 
 Dockerで起動する場合は、CoreとEngineを含む親ディレクトリをビルドコンテキストにしてください。
 

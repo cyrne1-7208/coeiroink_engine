@@ -139,24 +139,29 @@ def test_audio_query_matches_voicevox_0252_defaults_and_legacy_body(tmp_path: Pa
     assert response.content.startswith(b"RIFF")
 
 
-def test_katakana_english_parameter_is_wire_compatible_but_not_advertised(
+def test_katakana_english_parameter_changes_only_unknown_english_reading(
     tmp_path: Path,
 ):
     client, _ = create_test_client(tmp_path)
 
-    for enabled in (True, False):
+    queries = {}
+    for enabled in (False, True):
         response = client.post(
             "/voicevox/audio_query",
             params={
-                "text": "VOICEVOX",
+                "text": "synthesis",
                 "speaker": STYLE_ID,
                 "enable_katakana_english": enabled,
             },
         )
         assert response.status_code == 200
+        queries[enabled] = response.json()
+
+    assert queries[False]["kana"] != queries[True]["kana"]
+    assert "シンセシス" in queries[True]["kana"].replace("'", "")
 
     manifest = client.get("/voicevox/engine_manifest").json()
-    assert manifest["supported_features"]["apply_katakana_english"] is False
+    assert manifest["supported_features"]["apply_katakana_english"] is True
 
 
 def test_audio_query_from_legacy_preset_adds_0252_pause_defaults(
@@ -181,24 +186,22 @@ def test_audio_query_from_legacy_preset_adds_0252_pause_defaults(
     assert response.json()["pauseLengthScale"] == 1
 
 
-def test_audio_query_from_unsupported_pause_preset_returns_501(
-    tmp_path: Path, monkeypatch
-):
+def test_audio_query_from_preset_preserves_pause_controls(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         engine_run.PresetManager,
         "load_presets",
         lambda _self: [_preset(pauseLength=0.25)],
     )
-    client, audio_manager = create_test_client(tmp_path)
+    client, _ = create_test_client(tmp_path)
 
     response = client.post(
         "/voicevox/audio_query_from_preset",
         params={"text": "テストです", "preset_id": 1},
     )
 
-    assert response.status_code == 501
-    assert "pauseLength" in response.json()["detail"]
-    audio_manager.synthesis.assert_not_called()
+    assert response.status_code == 200
+    assert response.json()["pauseLength"] == 0.25
+    assert response.json()["pauseLengthScale"] == 1
 
 
 def test_multi_synthesis_accepts_modern_interrogative_flag(tmp_path: Path):
@@ -332,9 +335,7 @@ def test_cancellable_disconnection_monitor_follows_app_lifespan(tmp_path: Path):
     ("field", "value"),
     [("pauseLength", 0.25), ("pauseLengthScale", 1.5)],
 )
-def test_unsupported_pause_controls_return_explicit_501(
-    tmp_path: Path, field: str, value: float
-):
+def test_pause_controls_are_forwarded_to_core(tmp_path: Path, field: str, value: float):
     client, audio_manager = create_test_client(tmp_path)
     query = _audio_query(client)
     query[field] = value
@@ -345,9 +346,10 @@ def test_unsupported_pause_controls_return_explicit_501(
         json=query,
     )
 
-    assert response.status_code == 501
-    assert "pauseLength" in response.json()["detail"]
-    audio_manager.synthesis.assert_not_called()
+    assert response.status_code == 200
+    call = audio_manager.synthesis.call_args.kwargs
+    assert call["pause_length"] == query.get("pauseLength")
+    assert call["pause_length_scale"] == query.get("pauseLengthScale", 1)
 
 
 def test_missing_required_audio_query_field_returns_422(tmp_path: Path):
@@ -403,6 +405,7 @@ def test_manifest_disabled_mora_editing_returns_501(tmp_path: Path, path: str):
 def test_manifest_disabled_morphing_returns_501(tmp_path: Path):
     client, audio_manager = create_test_client(tmp_path)
     query = _audio_query(client)
+    audio_manager.synthesis.reset_mock()
 
     targets = client.post("/voicevox/morphable_targets", json=[STYLE_ID])
     synthesis = client.post(
@@ -456,7 +459,18 @@ def test_modern_metadata_device_and_manifest_shapes(tmp_path: Path):
         "/voicevox/speaker_info",
         params={"speaker_uuid": SPEAKER_UUID, "resource_format": "url"},
     )
-    assert unsupported_resource_format.status_code == 501
+    assert unsupported_resource_format.status_code == 200
+    url_info = unsupported_resource_format.json()
+    assert client.get(url_info["portrait"]).content == b"portrait"
+    assert client.get(url_info["style_infos"][0]["icon"]).content == b"icon"
+    assert [
+        client.get(url).content for url in url_info["style_infos"][0]["voice_samples"]
+    ] == [
+        b"sample 1",
+        b"sample 2",
+        b"sample 3",
+    ]
+    assert client.get("/voicevox/_resources/not-registered").status_code == 404
 
     devices = client.get("/voicevox/supported_devices")
     assert devices.json() == {"cpu": True, "cuda": False, "dml": False}
@@ -468,7 +482,57 @@ def test_modern_metadata_device_and_manifest_shapes(tmp_path: Path):
     assert manifest_json["supported_vvlib_manifest_version"] is None
     assert manifest_json["supported_features"]["sing"] is False
     assert manifest_json["supported_features"]["manage_library"] is False
-    assert manifest_json["supported_features"]["adjust_pause_length"] is False
+    assert manifest_json["supported_features"]["adjust_pause_length"] is True
+    assert manifest_json["supported_features"]["interrogative_upspeak"] is False
+    assert manifest_json["supported_features"]["return_resource_url"] is True
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("post", "/voicevox/add_preset"),
+        ("post", "/voicevox/update_preset"),
+        ("post", "/voicevox/delete_preset"),
+        ("post", "/voicevox/user_dict_word"),
+        ("put", "/voicevox/user_dict_word/dummy"),
+        ("delete", "/voicevox/user_dict_word/dummy"),
+        ("post", "/voicevox/import_user_dict"),
+        ("post", "/voicevox/setting"),
+    ],
+)
+def test_disable_mutable_api_returns_403_before_mutation(
+    tmp_path: Path, method: str, path: str
+):
+    client, _ = create_test_client(tmp_path, disable_mutable_api=True)
+
+    response = client.request(method, path)
+
+    assert response.status_code == 403
+    assert "無効化" in response.json()["detail"]
+
+
+def test_disable_mutable_api_does_not_disable_read_only_routes(tmp_path: Path):
+    client, _ = create_test_client(tmp_path, disable_mutable_api=True)
+
+    assert client.get("/voicevox/version").status_code == 200
+    assert client.get("/v1/engine_info").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("1", True), ("0", False), ("", False)],
+)
+def test_voicevox_boolean_environment_values(monkeypatch, value: str, expected: bool):
+    monkeypatch.setenv("VV_TEST_BOOLEAN", value)
+
+    assert engine_run.decide_boolean_from_env("VV_TEST_BOOLEAN") is expected
+
+
+def test_invalid_voicevox_boolean_environment_warns_and_disables(monkeypatch):
+    monkeypatch.setenv("VV_TEST_BOOLEAN", "true")
+
+    with pytest.warns(UserWarning, match="VV_TEST_BOOLEAN=true"):
+        assert engine_run.decide_boolean_from_env("VV_TEST_BOOLEAN") is False
 
 
 def test_openapi_contains_voicevox_0252_talk_parameters(tmp_path: Path):
@@ -507,6 +571,17 @@ def test_openapi_contains_voicevox_0252_talk_parameters(tmp_path: Path):
         "vowel_length",
         "pitch",
     }
+
+    assert (
+        schema["paths"]["/voicevox/audio_query"]["post"]["operationId"] == "audio_query"
+    )
+    operation_ids = [
+        operation["operationId"]
+        for methods in schema["paths"].values()
+        for operation in methods.values()
+        if "operationId" in operation
+    ]
+    assert len(operation_ids) == len(set(operation_ids))
 
 
 def test_setting_post_uses_voicevox_0252_no_content_response(tmp_path: Path):

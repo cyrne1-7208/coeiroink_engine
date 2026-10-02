@@ -74,6 +74,8 @@ from .td_psola import (
 
 CatalogCallback = Callable[[], Any]
 DictionaryCallback = Callable[[DictionaryWords], Any]
+_PROCESSING_ALGORITHM_ALIASES = {"coeiroink": "td-psola"}
+_PROCESSING_ALGORITHMS = frozenset(("td-psola", "world", "resampling"))
 
 # 想定済みの公開APIエラーだけをHTTPへ変換し、未知の例外はASGIまで伝播させてtracebackを残す。
 HANDLED_API_ERRORS = (
@@ -187,6 +189,17 @@ def _as_waveform(value: Any) -> np.ndarray:
             "audio manager returned an invalid waveform"
         )
     return wave
+
+
+def _normalize_processing_algorithm(value: str | None) -> str:
+    algorithm = (value or "td-psola").lower()
+    algorithm = _PROCESSING_ALGORITHM_ALIASES.get(algorithm, algorithm)
+    if algorithm not in _PROCESSING_ALGORITHMS:
+        supported = ", ".join(sorted(_PROCESSING_ALGORITHMS))
+        raise audio_helpers.AudioValidationError(
+            f"processing_algorithm must be one of: {supported}"
+        )
+    return algorithm
 
 
 def _prediction_parts(result: Any) -> tuple[np.ndarray, list[int]]:
@@ -704,9 +717,7 @@ def _process_wave(
         adjusted_f0 = None
     target_f0 = _validated_f0(adjusted_f0) if adjusted_f0 is not None else None
 
-    algorithm = (processing_algorithm or "td-psola").lower()
-    if algorithm not in ("td-psola", "world", "resampling"):
-        algorithm = "td-psola"
+    algorithm = _normalize_processing_algorithm(processing_algorithm)
 
     # F0軌跡は未トリムのモデル波形を基準にするため、休止長変更や端部トリムより先に音高処理を行う。
     if pitch_scale != 0.0 or intonation_scale != 1.0 or target_f0 is not None:
@@ -1002,7 +1013,9 @@ def create_v2_router(
 
     router = APIRouter()
     settings = {
-        "processing_algorithm": str(default_processing_algorithm),
+        "processing_algorithm": _normalize_processing_algorithm(
+            default_processing_algorithm
+        ),
         **_default_trim_values(default_trim_buffer),
     }
 
@@ -1373,7 +1386,12 @@ def create_v2_router(
         },
     )
     def set_default_processing_algorithm(param: AlgorithmSettings) -> None:
-        settings["processing_algorithm"] = param.processing_algorithm
+        try:
+            settings["processing_algorithm"] = _normalize_processing_algorithm(
+                param.processing_algorithm
+            )
+        except HANDLED_API_ERRORS as error:
+            raise _as_http_error(error) from error
 
     @router.post(
         "/v1/set_default_trim_buffer",
