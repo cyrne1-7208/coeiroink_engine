@@ -55,7 +55,7 @@ class TestPresetManager(TestCase):
             **{
                 "id": 10,
                 "name": "test10",
-                "speaker_uuid": "7ffcb7ce-00ec-4bdc-82cd-45a8889e43ff",
+                "speaker_uuid": "00000000-0000-0000-0000-000000000010",
                 "style_id": 2,
                 "speedScale": 1,
                 "pitchScale": 1,
@@ -101,7 +101,7 @@ class TestPresetManager(TestCase):
             **{
                 "id": 2,
                 "name": "test3",
-                "speaker_uuid": "7ffcb7ce-00ec-4bdc-82cd-45a8889e43ff",
+                "speaker_uuid": "00000000-0000-0000-0000-000000000010",
                 "style_id": 2,
                 "speedScale": 1,
                 "pitchScale": 1,
@@ -127,7 +127,7 @@ class TestPresetManager(TestCase):
             **{
                 "id": -1,
                 "name": "test3",
-                "speaker_uuid": "7ffcb7ce-00ec-4bdc-82cd-45a8889e43ff",
+                "speaker_uuid": "00000000-0000-0000-0000-000000000010",
                 "style_id": 2,
                 "speedScale": 1,
                 "pitchScale": 1,
@@ -153,7 +153,7 @@ class TestPresetManager(TestCase):
             **{
                 "id": 10,
                 "name": "test10",
-                "speaker_uuid": "7ffcb7ce-00ec-4bdc-82cd-45a8889e43ff",
+                "speaker_uuid": "00000000-0000-0000-0000-000000000010",
                 "style_id": 2,
                 "speedScale": 1,
                 "pitchScale": 1,
@@ -179,7 +179,7 @@ class TestPresetManager(TestCase):
             **{
                 "id": 1,
                 "name": "test1 new",
-                "speaker_uuid": "7ffcb7ce-00ec-4bdc-82cd-45a8889e43ff",
+                "speaker_uuid": "00000000-0000-0000-0000-000000000010",
                 "style_id": 2,
                 "speedScale": 1,
                 "pitchScale": 1,
@@ -225,7 +225,7 @@ class TestPresetManager(TestCase):
             **{
                 "id": 10,
                 "name": "test1 new",
-                "speaker_uuid": "7ffcb7ce-00ec-4bdc-82cd-45a8889e43ff",
+                "speaker_uuid": "00000000-0000-0000-0000-000000000010",
                 "style_id": 2,
                 "speedScale": 1,
                 "pitchScale": 1,
@@ -248,7 +248,7 @@ class TestPresetManager(TestCase):
             **{
                 "id": 1,
                 "name": "test1 new",
-                "speaker_uuid": "7ffcb7ce-00ec-4bdc-82cd-45a8889e43ff",
+                "speaker_uuid": "00000000-0000-0000-0000-000000000010",
                 "style_id": 2,
                 "speedScale": 1,
                 "pitchScale": 1,
