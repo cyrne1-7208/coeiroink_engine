@@ -46,9 +46,10 @@ class BasePhoneme:
 
     def verify(self):
         """
-        音素クラスとして、データが正しいかassertする
+        音素クラスとして、データが正しいか検証する
         """
-        assert self.phoneme in self.phoneme_list, f"{self.phoneme} is not defined."
+        if self.phoneme not in self.phoneme_list:
+            raise ValueError(f"{self.phoneme} is not defined.")
 
     @property
     def phoneme_id(self):

@@ -46,5 +46,5 @@ def test_label_file_round_trip_and_validation(tmp_path, phoneme_class):
     assert path.read_text(encoding="utf-8") == "0.00\t0.10\tpau\n0.10\t0.30\ta"
     assert phoneme_class.load_lab_list(path) == phonemes
     path.write_text("0 1 unknown", encoding="utf-8")
-    with pytest.raises(AssertionError, match="not defined"):
+    with pytest.raises(ValueError, match="not defined"):
         phoneme_class.load_lab_list(path)

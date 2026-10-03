@@ -400,7 +400,8 @@ class CoreWrapper:
             self.core.is_model_loaded.restype = c_bool
         else:
             model_type = check_core_type(core_dir)
-        assert model_type is not None
+        if model_type is None:
+            raise RuntimeError(f"VOICEVOX Coreの種類を判定できません: {core_dir}")
 
         if model_type == "onnxruntime":
             self.core.supported_devices.restype = c_char_p

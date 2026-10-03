@@ -10,7 +10,7 @@ requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }
 dependencies = [
     "coeirocore==0.2.1+coeiroink.1.7.3",
-    "fastapi>=0.141,<0.142",
+    "fastapi>=0.142,<0.143",
     "jinja2>=3.1.4,<4",
     "kanalizer>=0.1.1,<0.2",
     "librosa>=0.11,<1",
@@ -25,7 +25,7 @@ dependencies = [
     "soundfile>=0.14,<1",
     "starlette>=1.6,<2",
     "python-multipart>=0.0.20,<1",
-    "uvicorn>=0.52,<0.53",
+    "uvicorn>=0.54,<0.55",
 ]
 
 [project.optional-dependencies]

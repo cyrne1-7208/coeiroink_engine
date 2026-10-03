@@ -10,7 +10,7 @@ from coeirocore.pyworld_compat import load_pyworld
 from .metas.metas import Speaker, SpeakerSupportPermittedSynthesisMorphing, StyleInfo
 from .metas.metas_store import construct_lookup
 from .model import AudioQuery, MorphableTargetInfo, SpeakerNotFoundError
-from .synthesis_engine import SynthesisEngine
+from .synthesis_engine.synthesis_engine_base import SynthesisEngineBase
 
 
 # FIXME: ndarray type hint, https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/blob/2b64f86197573497c685c785c6e0e743f407b63e/pyworld/pyworld.pyx#L398
@@ -126,7 +126,7 @@ def is_synthesis_morphing_permitted(
 
 
 def synthesis_morphing_parameter(
-    engine: SynthesisEngine,
+    engine: SynthesisEngineBase,
     query: AudioQuery,
     base_speaker: int,
     target_speaker: int,

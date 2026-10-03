@@ -503,7 +503,8 @@ if __name__ == "__main__":
         speaker_info_dir=speaker_info_dir,
         audio_manager=audio_manager,
     )
-    assert len(synthesis_engines) != 0, "音声合成エンジンがありません。"
+    if not synthesis_engines:
+        raise RuntimeError("音声合成エンジンがありません。")
     latest_core_version = max(synthesis_engines, key=_version_key)
 
     cancellable_engine = None
