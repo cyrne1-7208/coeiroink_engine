@@ -3,11 +3,13 @@
 # ruff: noqa: F821  PyInstallerがAnalysisなどのspec専用APIを実行時に注入する。
 
 import json
+import subprocess
 import sys
 from argparse import ArgumentParser
 from importlib.util import find_spec
 from pathlib import Path
 from shutil import copy2, copytree, ignore_patterns
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from PyInstaller.utils.hooks import (
     collect_all,
@@ -146,6 +148,38 @@ copytree(
     dirs_exist_ok=True,
     ignore=ignore_patterns("container"),
 )
+
+# 凍結したPythonバイトコードだけでなく、同じビルドに使った本体と依存のソースも提供する。
+sources_dir = target_dir / "licenses" / "sources"
+copytree("build/licenses/sources", sources_dir, dirs_exist_ok=True)
+for repository in (Path("../coeiroink_core"), Path(".")):
+    repository = repository.resolve()
+    if (repository / ".git").exists():
+        tracked = (
+            subprocess.check_output(["git", "-C", str(repository), "ls-files", "-z"])
+            .decode("utf-8")
+            .split("\0")
+        )
+    else:
+        # 配布ソースには.gitを含めないため、再ビルド時は同梱したファイル一覧を使う。
+        tracked = (
+            (repository / "SOURCE_FILES.txt").read_text(encoding="utf-8").splitlines()
+        )
+    # コミット前のビルドでも、追加したライセンス文書をソース一式から落とさない。
+    tracked.extend(
+        path.relative_to(repository).as_posix()
+        for path in (repository / "licenses").rglob("*")
+        if path.is_file()
+    )
+    tracked = sorted(set(tracked) - {"", "SOURCE_FILES.txt"})
+    with ZipFile(sources_dir / f"{repository.name}.zip", "w", ZIP_DEFLATED) as archive:
+        for relative_path in tracked:
+            source = repository / relative_path
+            if source.is_file():
+                archive.write(source, f"{repository.name}/{relative_path}")
+        archive.writestr(
+            f"{repository.name}/SOURCE_FILES.txt", "\n".join(tracked) + "\n"
+        )
 
 # 配布元のマニフェストは共通のまま保ち、Windows成果物だけ実行ファイル名を調整する。
 if sys.platform == "win32":

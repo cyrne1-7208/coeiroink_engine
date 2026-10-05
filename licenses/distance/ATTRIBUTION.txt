@@ -1,0 +1,8 @@
+Component: Distance 0.1.3
+Copyright (C) 2013 Michaël Meyer
+Source: https://pypi.org/project/Distance/0.1.3/
+Source archive: https://files.pythonhosted.org/packages/5c/1a/883e47df323437aefa0d0a92ccfb38895d9416bd0b56262c2e46a47767b8/Distance-0.1.3.tar.gz
+
+The upstream source archive contains differing version notices: LICENSE reproduces GPL version 2, while the header of setup.py specifies GPL version 3 or any later version.
+The original LICENSE is retained unchanged, and the GPL version 3 text is supplied alongside it. This notice records the upstream discrepancy; it does not relicense Distance or assert that every file is GPLv3-only or GPLv2-only.
+See the accompanying source archive for the original files and notices.

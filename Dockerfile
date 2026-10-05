@@ -52,6 +52,7 @@ RUN CXX=g++ LDCXXSHARED="g++ -shared" \
     && .venv/bin/python generate_licenses.py \
         --package-snapshot /tmp/coeiroink-runtime-packages.json \
         --output-path engine_manifest_assets/dependency_licenses.json \
+        --sources-dir licenses/sources \
     && torch_cpu_library="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/torch/lib/libtorch_cpu.so" \
     && test -f "$torch_cpu_library" \
     && .venv/bin/patchelf --clear-execstack "$torch_cpu_library" \

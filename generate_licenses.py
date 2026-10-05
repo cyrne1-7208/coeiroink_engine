@@ -1,8 +1,12 @@
 import argparse
+import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
+import tomllib
+import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from importlib import metadata
@@ -13,6 +17,9 @@ URL_TIMEOUT_SECONDS = 30
 UNKNOWN_LICENSE = "UNKNOWN"
 LEGAL_FILE_PATTERN = re.compile(
     r"^(?:licen[cs]es?|copying|notice|copyright)(?:$|[._-].*)", re.IGNORECASE
+)
+SOURCE_LICENSE_PATTERN = re.compile(
+    r"GPL|General Public License|Mozilla Public License|MPL", re.IGNORECASE
 )
 
 # パッケージ側のメタデータが空でも、一次配布元から識別できるものだけSPDX名を補う。
@@ -430,6 +437,24 @@ def _package_license(package: dict[str, Any], canonical_name: str) -> License:
         else _unknown_license_text(package["Name"], package["Version"])
     )
     license_name = KNOWN_LICENSE_NAMES.get(canonical_name, package["License"])
+    if canonical_name == "distance" and package["Version"] == "0.1.3":
+        # 上流のLICENSEとsetup.pyの版指定が異なるため、こちらで一方に決め直さない。
+        license_name = "GPL (upstream GPLv2/GPLv3 notices differ)"
+        license_text = _combine_legal_documents(
+            [
+                *documents,
+                (
+                    "licenses/distance/ATTRIBUTION.txt",
+                    Path("licenses/distance/ATTRIBUTION.txt").read_text(
+                        encoding="utf-8"
+                    ),
+                ),
+                (
+                    "licenses/GPL-3.0.txt",
+                    Path("licenses/GPL-3.0.txt").read_text(encoding="utf-8"),
+                ),
+            ]
+        )
     if not license_name or license_name == UNKNOWN_LICENSE:
         raise LicenseGenerationError(
             f"No license identifier provided for {package['Name']} {package['Version']}"
@@ -488,9 +513,65 @@ def generate_licenses(
     return [*_bundled_licenses(), *_python_package_licenses(runtime_packages)]
 
 
+def collect_sources(licenses: list[License], destination: Path) -> None:
+    """配布するGPL・LGPL・MPL依存のソースを、lockと同じバージョンで同梱する。"""
+
+    with Path("uv.lock").open("rb") as file:
+        packages = tomllib.load(file)["package"]
+    license_by_package = {
+        (_canonicalize_package_name(item.name), item.version): item for item in licenses
+    }
+    destination.mkdir(parents=True, exist_ok=True)
+    rows = [
+        "# 依存ライブラリのソースコード",
+        "",
+        "この配布物に含まれるGPL・LGPL・MPL依存のソースアーカイブです。展開すると、各ライブラリのソース、ライセンス、ビルド用ファイルを参照できます。",
+        "本体のソースと再ビルド方法は、ひとつ上の `SOURCES.md` を参照してください。",
+        "",
+        "| ライブラリ | バージョン | ソースアーカイブ | 配布元 |",
+        "| --- | --- | --- | --- |",
+    ]
+    for package in packages:
+        item = license_by_package.get((package["name"], package["version"]))
+        if item is None or SOURCE_LICENSE_PATTERN.search(item.license or "") is None:
+            continue
+        # 本体とOpenCL拡張のソースは、Core・Engineのソース一式として別途提供する。
+        if "editable" in package["source"] or "directory" in package["source"]:
+            continue
+        if "sdist" not in package:
+            raise LicenseGenerationError(
+                f"No source archive in uv.lock for {item.name} {item.version}"
+            )
+        source = package["sdist"]
+        filename = Path(urllib.parse.urlsplit(source["url"]).path).name
+        archive_path = destination / filename
+        with (
+            urllib.request.urlopen(
+                source["url"], timeout=URL_TIMEOUT_SECONDS
+            ) as response,
+            archive_path.open("wb") as output,
+        ):
+            shutil.copyfileobj(response, output)
+        with archive_path.open("rb") as file:
+            digest = hashlib.file_digest(file, "sha256").hexdigest()
+        if f"sha256:{digest}" != source["hash"]:
+            raise LicenseGenerationError(
+                f"Source archive checksum mismatch: {filename}"
+            )
+        rows.append(
+            f"| {item.name} | {item.version} | [{filename}]({filename}) | [ソース配布元]({source['url']}) |"
+        )
+    (destination / "README.md").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--output-path", type=Path)
+    parser.add_argument(
+        "--sources-dir",
+        type=Path,
+        help="Bundle GPL, LGPL and MPL source archives from uv.lock in this directory",
+    )
     parser.add_argument(
         "--package-snapshot",
         type=Path,
@@ -502,7 +583,10 @@ def main() -> None:
         if args.package_snapshot is not None
         else None
     )
-    serialized = [asdict(license) for license in generate_licenses(runtime_packages)]
+    licenses = generate_licenses(runtime_packages)
+    if args.sources_dir is not None:
+        collect_sources(licenses, args.sources_dir)
+    serialized = [asdict(license) for license in licenses]
 
     if args.output_path is None:
         json.dump(serialized, sys.stdout, ensure_ascii=False, indent=2)

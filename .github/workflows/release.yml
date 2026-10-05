@@ -200,7 +200,8 @@ jobs:
           uv pip check
           uv run --no-sync python generate_licenses.py \
             --package-snapshot runtime-packages.json \
-            --output-path engine_manifest_assets/dependency_licenses.json
+            --output-path engine_manifest_assets/dependency_licenses.json \
+            --sources-dir build/licenses/sources
           rm runtime-packages.json
 
       - name: Build the standalone Engine

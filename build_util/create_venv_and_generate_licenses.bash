@@ -44,5 +44,6 @@ output_license_path="$(realpath -m "$OUTPUT_LICENSE_JSON_PATH")"
     cd "$engine_dir"
     "$venv_path/bin/python" generate_licenses.py \
         --package-snapshot "$snapshot_path" \
-        --output-path "$output_license_path"
+        --output-path "$output_license_path" \
+        --sources-dir build/licenses/sources
 )

@@ -2,6 +2,7 @@
 <html lang="ja">
     <head>
         <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>VOICEVOX Engine 設定</title>
         <link
             rel="shortcut icon"
@@ -29,41 +30,53 @@
                 </div>
 
                 <div class="mb-3">
-                    <label class="form-label">CORS Policy Mode</label>
+                    <label class="form-label" for="cors_policy_mode">
+                        CORS Policy Mode
+                    </label>
                     <select
                         class="form-select"
-                        aria-label="cors_policy_mode"
+                        id="cors_policy_mode"
+                        aria-describedby="cors_policy_mode_help"
                         name="cors_policy_mode"
                     >
-                        <option selected value="{{ cors_policy_mode }}">
-                            現在値: {{ cors_policy_mode }}
+                        <option
+                            value="localapps"
+                            {% if cors_policy_mode == "localapps" %}selected{% endif %}
+                        >
+                            localapps
                         </option>
-                        <option value="localapps">localapps</option>
-                        <option value="all">all</option>
+                        <option
+                            value="all"
+                            {% if cors_policy_mode == "all" %}selected{% endif %}
+                        >
+                            all
+                        </option>
                     </select>
-                    <div class="form-text">
+                    <div class="form-text" id="cors_policy_mode_help">
                         <p class="mb-1">
-                            allまたはlocalappsを指定します。allはすべてを許可します。
+                            allはすべてのオリジンを許可します。既定はlocalappsです。
                         </p>
                         <p class="mb-1">
-                            localappsはオリジン間リソース共有ポリシーを、app://.とlocalhost関連に限定します。
+                            localappsは<code>app://.</code>と、<code>localhost</code>・<code>127.0.0.1</code>のHTTP/HTTPSオリジンを許可します。ポート番号付きも指定できます。
                         </p>
                         <p>
-                            その他のオリジンはallow_originオプションで追加できます。デフォルトはlocalappsです。
+                            その他のオリジンは、下のAllow Origin欄に入力してください。
                         </p>
                     </div>
                 </div>
 
                 <div class="mb-3">
-                    <label class="form-label">Allow Origin</label>
+                    <label class="form-label" for="allow_origin">Allow Origin</label>
                     <input
                         class="form-control"
                         type="text"
+                        id="allow_origin"
+                        aria-describedby="allow_origin_help"
                         name="allow_origin"
                         value="{{ allow_origin }}"
                     />
-                    <div class="form-text">
-                        許可するオリジンを指定します。複数指定する場合はスペースで区切って入力します。
+                    <div class="form-text" id="allow_origin_help">
+                        許可するオリジン（例：<code>https://example.com</code>）を入力してください。複数指定する場合はスペースで区切ります。URLのパスは含めないでください。
                     </div>
                 </div>
 
