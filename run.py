@@ -5,6 +5,8 @@ import multiprocessing
 import os
 import re
 import sys
+import time
+import traceback
 from contextlib import asynccontextmanager
 from io import TextIOWrapper
 from pathlib import Path
@@ -68,6 +70,11 @@ from voicevox_engine.voicevox_compat.router import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# ウォームアップ合成に使う短い固定文。アクセント句が1つ以上できる長さにする。
+_WARMUP_TEXT = "こんにちは"
+# Coreの内部サンプリングレート（44100）と異なる値にして、リサンプラー（resampy/numba）の初回JITも起動時に済ませる。
+_WARMUP_OUTPUT_SAMPLING_RATE = 24000
+
 
 def _version_key(version: str) -> Version:
     """Return a comparable Core version, including local suffixes such as +cpu."""
@@ -97,6 +104,67 @@ def _model_cache_limit(value: str) -> int | None:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("正の整数またはallを指定してください。")
     return parsed
+
+
+def _warmup_target(audio_manager: AudioManager) -> tuple[str, int] | None:
+    """ウォームアップに使う（話者UUID, スタイルID）を決める。スタイルが無ければNoneを返す。
+
+    メタデータの公開順に探し、読み込み済みのモデルがあればその先頭を、無ければ先頭のスタイルを返す。
+    """
+
+    styles = [
+        (speaker["speaker_uuid"], style["id"])
+        for speaker in audio_manager.meta_manager.get_metas_dict()
+        for style in speaker["styles"]
+    ]
+    if not styles:
+        return None
+    for speaker_uuid, style_id in styles:
+        if audio_manager.is_speaker_initialized(
+            style_id=style_id, speaker_uuid=speaker_uuid
+        ):
+            return speaker_uuid, style_id
+    return styles[0]
+
+
+def _warm_up(audio_manager: AudioManager) -> None:
+    """起動時に合成を1回実行し、最初のリクエストで発生する初期化の待ち時間を前倒しする。
+
+    ESPnetの初回import、モデルの読み込み、初回推論、リサンプラーのJITを済ませる。
+    波形は破棄する。ウォームアップは最適化なので、失敗しても警告だけを出して起動を続ける。
+    ログ設定はuvicorn.runが行うため、この時点ではINFOを出せない。そのためprintで標準エラー出力へ書く。
+    """
+
+    try:
+        target = _warmup_target(audio_manager)
+        if target is None:
+            print(
+                "WARNING:  ウォームアップをスキップします。利用できるスタイルがありません。",
+                file=sys.stderr,
+            )
+            return
+        speaker_uuid, style_id = target
+        started_at = time.perf_counter()
+        audio_manager.synthesis(
+            _WARMUP_TEXT,
+            style_id=style_id,
+            speaker_uuid=speaker_uuid,
+            output_sampling_rate=_WARMUP_OUTPUT_SAMPLING_RATE,
+        )
+        elapsed = time.perf_counter() - started_at
+    except Exception:  # noqa: BLE001
+        # 最適化のための処理なので、原因を問わず起動は止めない。
+        print(
+            "WARNING:  ウォームアップに失敗しました。起動は続行します。",
+            file=sys.stderr,
+        )
+        traceback.print_exc()
+        return
+    print(
+        f"INFO:     ウォームアップが完了しました"
+        f"（speaker_uuid={speaker_uuid}, style_id={style_id}, {elapsed:.2f}秒）",
+        file=sys.stderr,
+    )
 
 
 def set_output_log_utf8() -> None:
@@ -405,6 +473,15 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--warmup",
+        action="store_true",
+        help=(
+            "起動時に短い音声合成を1回実行し、最初のリクエストの待ち時間を起動時に移します。"
+            "--max-loaded-modelsにallを指定した場合と併用できます。"
+            "--enable_cancellable_synthesisのワーカーは対象外です。"
+        ),
+    )
+    parser.add_argument(
         "--disable_mutable_api",
         action="store_true",
         default=decide_boolean_from_env("VV_DISABLE_MUTABLE_API"),
@@ -506,6 +583,10 @@ if __name__ == "__main__":
     if not synthesis_engines:
         raise RuntimeError("音声合成エンジンがありません。")
     latest_core_version = max(synthesis_engines, key=_version_key)
+
+    # キャンセル用ワーカーの起動とCPUを奪い合わないよう、その前に実行する。
+    if args.warmup:
+        _warm_up(audio_manager)
 
     cancellable_engine = None
     if args.enable_cancellable_synthesis:
