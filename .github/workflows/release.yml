@@ -32,6 +32,7 @@ jobs:
     outputs:
       container_tag: ${{ steps.version.outputs.container_tag }}
       internal_version: ${{ steps.version.outputs.internal_version }}
+      core_sha: ${{ steps.core.outputs.sha }}
     steps:
       - name: Validate version
         id: version
@@ -46,6 +47,44 @@ jobs:
           # OCIイメージのタグには`+`を使えないため、GHCR用のタグでは`-`へ置き換える。
           echo "container_tag=${VERSION/+/-}" >> "$GITHUB_OUTPUT"
           echo "internal_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Engine
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: coeiroink_engine
+          persist-credentials: false
+
+      - name: Check out Core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cyrne1-7208/coeiroink_core
+          ref: ${{ inputs.core_ref }}
+          path: coeiroink_core
+          persist-credentials: false
+
+      - name: Resolve Core commit
+        id: core
+        working-directory: coeiroink_core
+        run: |
+          # ビルド中にブランチが更新されても、全成果物で同じCoreを使う。
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Engine and Core versions
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.internal_version }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          expected = os.environ["EXPECTED_VERSION"]
+          for repository in ("coeiroink_engine", "coeiroink_core"):
+              with (Path(repository) / "pyproject.toml").open("rb") as file:
+                  actual = tomllib.load(file)["project"]["version"]
+              if actual != expected:
+                  raise SystemExit(f"{repository} version {actual!r} != {expected!r}")
+          PY
 
   build:
     name: Build ${{ matrix.target }}
@@ -93,26 +132,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cyrne1-7208/coeiroink_core
-          ref: ${{ inputs.core_ref }}
+          ref: ${{ needs.validate-inputs.outputs.core_sha }}
           path: coeiroink_core
           persist-credentials: false
-
-      - name: Validate Engine and Core versions
-        env:
-          EXPECTED_VERSION: ${{ needs.validate-inputs.outputs.internal_version }}
-        run: |
-          python - <<'PY'
-          import os
-          import tomllib
-          from pathlib import Path
-
-          expected = os.environ["EXPECTED_VERSION"]
-          for repository in ("coeiroink_engine", "coeiroink_core"):
-              with (Path(repository) / "pyproject.toml").open("rb") as file:
-                  actual = tomllib.load(file)["project"]["version"]
-              if actual != expected:
-                  raise SystemExit(f"{repository} version {actual!r} != {expected!r}")
-          PY
 
       - name: Install OpenCL build dependencies
         if: matrix.target == 'linux-opencl'
@@ -320,16 +342,5 @@ jobs:
       tag: ${{ needs.validate-inputs.outputs.container_tag }}
       push: true
       backend: ${{ matrix.backend }}
-      core_ref: ${{ inputs.core_ref }}
+      core_ref: ${{ needs.validate-inputs.outputs.core_sha }}
       publish_latest: true
-
-  test-linux-cpu-container:
-    name: Test published Linux CPU container
-    needs: [validate-inputs, publish-linux-containers]
-    permissions:
-      contents: read
-      packages: read
-    uses: ./.github/workflows/test-engine-container.yml
-    with:
-      image: ${{ format('ghcr.io/{0}:{1}-cpu', github.repository, needs.validate-inputs.outputs.container_tag) }}
-      backend: cpu

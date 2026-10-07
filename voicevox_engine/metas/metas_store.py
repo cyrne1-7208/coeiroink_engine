@@ -30,7 +30,11 @@ class MetasStore:
         self._speaker_paths: dict[str, Path] = {}
 
         for folder in sorted(engine_speakers_path.iterdir()):
-            if not folder.is_dir() or folder.name.startswith("."):
+            if (
+                not folder.is_dir()
+                or folder.name.startswith(".")
+                or folder.name == "__MACOSX"
+            ):
                 continue
 
             meta = json.loads((folder / "metas.json").read_text(encoding="utf-8"))

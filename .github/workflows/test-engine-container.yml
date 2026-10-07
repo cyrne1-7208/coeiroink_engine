@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/build-engine-container.yml"
       - ".github/workflows/test-engine-container.yml"
+      - "build_util/check_container.sh"
       - "Dockerfile"
       - "Dockerfile.dockerignore"
       - "pyproject.toml"
@@ -14,6 +15,7 @@ on:
     paths:
       - ".github/workflows/build-engine-container.yml"
       - ".github/workflows/test-engine-container.yml"
+      - "build_util/check_container.sh"
       - "Dockerfile"
       - "Dockerfile.dockerignore"
       - "pyproject.toml"
@@ -21,7 +23,7 @@ on:
   workflow_call:
     inputs:
       image:
-        description: "検証済みGHCRイメージ。省略時は呼び出し元のソースからビルドする"
+        description: "検証するGHCRイメージ。省略時は呼び出し元のソースからビルドする"
         required: false
         type: string
         default: ""
@@ -98,7 +100,6 @@ jobs:
           fi
 
       - name: Check out Engine source
-        if: inputs.image == ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: coeiroink_engine
@@ -145,43 +146,8 @@ jobs:
           IMAGE: ${{ steps.image.outputs.name }}
         run: docker pull "$IMAGE"
 
-      - name: Check CPU voice smoothing dependencies
-        if: (inputs.backend || 'cpu') == 'cpu'
-        env:
-          IMAGE: ${{ steps.image.outputs.name }}
-        run: |
-          docker run --rm "$IMAGE" .venv/bin/python -c \
-            "import parselmouth"
-
       - name: Start the selected container and check the HTTP server
         env:
           BACKEND: ${{ inputs.backend || 'cpu' }}
           IMAGE: ${{ steps.image.outputs.name }}
-        run: |
-          set -euo pipefail
-          # GitHub-hosted runnerにはGPUがないため、CUDA/OpenCLイメージはCPUで起動し、HTTP応答だけを確認する。
-          container_id="$(docker run --detach --env COEIROINK_DEVICE=cpu --publish 127.0.0.1:50032:50032 "$IMAGE")"
-          cleanup() {
-            local status="$1"
-            if [ "$status" -ne 0 ]; then
-              docker logs "$container_id" || true
-            fi
-            docker rm --force "$container_id" >/dev/null 2>&1 || true
-          }
-          trap 'cleanup "$?"' EXIT
-
-          for attempt in $(seq 1 12); do
-            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-              http://127.0.0.1:50032/voicevox/version || true)"
-            if [ "$status" = 200 ]; then
-              echo "$BACKEND container is ready"
-              trap - EXIT
-              cleanup 0
-              exit 0
-            fi
-            echo "Attempt $attempt/12: HTTP status ${status:-connection failure}"
-            sleep 5
-          done
-          trap - EXIT
-          cleanup 1
-          exit 1
+        run: bash coeiroink_engine/build_util/check_container.sh "$IMAGE" "$BACKEND"

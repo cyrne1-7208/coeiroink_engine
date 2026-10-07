@@ -19,6 +19,7 @@ from voicevox_engine.coeiroink_v2.audio import (
     MAX_SAMPLING_RATE,
     encode_pcm_wav,
 )
+from voicevox_engine.coeiroink_v2.catalog import CatalogNetworkError
 from voicevox_engine.coeiroink_v2.metadata import MetadataAssetNotFoundError
 from voicevox_engine.coeiroink_v2.models import (
     SpeakerMeta,
@@ -219,6 +220,43 @@ def _app(*, voice_smoothing=False):
         )
     )
     return app, manager, dictionary_calls
+
+
+@pytest.mark.parametrize(
+    ("path", "callback_name"),
+    [
+        ("/v1/download_info", "download_info_callback"),
+        ("/v1/downloadable_speakers", "downloadable_speakers_callback"),
+        ("/v1/update_info", "update_info_callback"),
+    ],
+)
+def test_catalog_failure_returns_json_502(path, callback_name, caplog):
+    def unavailable_catalog():
+        raise CatalogNetworkError("catalog connection failed")
+
+    app = FastAPI()
+    app.include_router(
+        create_v2_router(FakeAudioManager(), **{callback_name: unavailable_catalog})
+    )
+
+    response = TestClient(app).get(path)
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "catalog connection failed"}
+    assert "CatalogNetworkError: catalog connection failed" in caplog.text
+
+
+def test_catalog_programming_error_is_not_reported_as_transport_failure():
+    def broken_callback():
+        raise ValueError("callback implementation failed")
+
+    app = FastAPI()
+    app.include_router(
+        create_v2_router(FakeAudioManager(), download_info_callback=broken_callback)
+    )
+
+    with pytest.raises(ValueError, match="callback implementation failed"):
+        TestClient(app).get("/v1/download_info")
 
 
 def _detail():

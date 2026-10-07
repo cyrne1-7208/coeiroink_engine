@@ -81,6 +81,20 @@ def test_supports_nasal_consonant_cluster_and_question_pause():
     _assert_contiguous(result, sum(frames) * 10)
 
 
+def test_accepts_devoiced_vowel_notation_without_changing_mora_names():
+    result = convert_duration(
+        ["^", "s", "u", "N", "$"],
+        [[_mora("s-U", "す"), _mora("N", "ん")]],
+        [1, 2, 3, 4, 1],
+        hop_length=10,
+    )
+
+    assert [m.mora for m in result] == ["pau", "s-U", "N", "pau"]
+    assert [p.phoneme for p in result[1].phoneme_pitches] == ["s", "u"]
+    assert result[2].phoneme_pitches[0].phoneme == "N"
+    _assert_contiguous(result, 110)
+
+
 def test_accepts_mapping_moras_without_mutating_inputs():
     plain = ["^", "a", "$"]
     detail = [[{"phoneme": "a", "hira": "あ", "accent": 1}]]

@@ -97,7 +97,11 @@ def _mora_specs(prosody_detail: Iterable[Iterable[object]]) -> list[_MoraSpec]:
                 )
             if not isinstance(hira, str):
                 raise DurationConversionError(f"{context}.hira must be a string")
-            phonemes = tuple(name.split("-"))
+            # 推論用トークンと同じ表記にそろえる。撥音のNと子音のnは区別し、応答のモーラ名は変更しない。
+            phonemes = tuple(
+                phoneme if phoneme == "N" else phoneme.lower()
+                for phoneme in name.split("-")
+            )
             if any(not phoneme for phoneme in phonemes):
                 raise DurationConversionError(
                     f"{context}.phoneme contains an empty phoneme"

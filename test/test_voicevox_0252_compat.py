@@ -5,9 +5,14 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
+from coeirocore.coeiro_manager import (
+    InvalidSynthesisParameterError,
+    StyleNotFoundError,
+)
 
 import run as engine_run
 from test.test_old_mycoeiroink import SPEAKER_UUID, STYLE_ID, create_test_client
+from voicevox_engine.cancellable_engine import CancellableWorkerSynthesisError
 from voicevox_engine.engine_manifest import EngineManifestLoader
 from voicevox_engine.katakana_english import (
     text_to_full_context_labels as current_katakana_english,
@@ -404,6 +409,39 @@ def test_enabled_cancellable_synthesis_uses_injected_engine(tmp_path: Path):
         ]
         is False
     )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (InvalidSynthesisParameterError("speed_scale must be positive"), 422),
+        (StyleNotFoundError("style was removed"), 404),
+        (ValueError("unexpected implementation error"), 500),
+    ],
+)
+def test_cancellable_worker_errors_keep_normal_synthesis_status(
+    tmp_path, error, expected_status, caplog
+):
+    cancellable_engine = Mock()
+    cancellable_engine._synthesis_impl.side_effect = CancellableWorkerSynthesisError(
+        {
+            "exception_type": f"{type(error).__module__}.{type(error).__qualname__}",
+            "message": str(error),
+            "traceback": "worker traceback",
+        }
+    )
+    client, _ = create_test_client(tmp_path, cancellable_engine=cancellable_engine)
+
+    response = client.post(
+        "/voicevox/cancellable_synthesis",
+        params={"speaker": STYLE_ID},
+        json=_audio_query(client),
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": str(error)}
+    if expected_status == 500:
+        assert "worker traceback" in caplog.text
 
 
 def test_cancellable_disconnection_monitor_follows_app_lifespan(tmp_path: Path):

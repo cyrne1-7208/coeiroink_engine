@@ -28,7 +28,7 @@ from fastapi.responses import RedirectResponse, Response
 from voicevox_engine import __version__
 
 from . import audio as audio_helpers
-from .catalog import OfficialSiteCatalogClient
+from .catalog import CatalogClientError, OfficialSiteCatalogClient
 from .dictionary import DictionaryError
 from .duration import DurationConversionError, convert_duration
 from .metadata import (
@@ -418,7 +418,11 @@ def _sampling_rate(audio_manager: AudioManager) -> int:
 
 
 def _catalog_result(callback: CatalogCallback) -> Any:
-    result = callback()
+    try:
+        result = callback()
+    except CatalogClientError as error:
+        _LOGGER.error("Catalog request failed", exc_info=error)
+        raise HTTPException(status_code=502, detail=str(error)) from error
     return [] if result is None else result
 
 
@@ -1076,7 +1080,7 @@ def create_v2_router(
     """ルートパスに依存しないCOEIROINK v2ルーターを構築する。
 
     audio_managerとmetadata_storeは公開実装または同じAPIを持つテストダブルを受け付ける。
-    外部カタログのコールバックは任意で、未指定時の一覧APIは空配列を返す。
+    外部カタログのコールバックが未指定なら、公式サイトから一覧を取得する。
     """
 
     if audio_manager is None:

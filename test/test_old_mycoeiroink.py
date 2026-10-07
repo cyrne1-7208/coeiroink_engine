@@ -124,6 +124,19 @@ def test_ambiguous_style_initialization_returns_422(
     audio_manager.is_speaker_initialized.assert_not_called()
 
 
+def test_metadata_loading_ignores_macos_zip_sidecars(tmp_path: Path):
+    (tmp_path / "speaker_info" / "__MACOSX").mkdir(parents=True)
+    client, _ = create_test_client(tmp_path)
+
+    for path, uuid_key in (
+        ("/voicevox/speakers", "speaker_uuid"),
+        ("/v1/speakers", "speakerUuid"),
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert [speaker[uuid_key] for speaker in response.json()] == [SPEAKER_UUID]
+
+
 def test_old_mycoeiroink_metadata_endpoints(tmp_path: Path):
     client, _ = create_test_client(tmp_path)
 

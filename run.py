@@ -28,7 +28,10 @@ from fastapi.responses import JSONResponse
 from packaging.version import Version
 
 from voicevox_engine import __version__
-from voicevox_engine.cancellable_engine import CancellableEngine
+from voicevox_engine.cancellable_engine import (
+    CancellableEngine,
+    CancellableWorkerSynthesisError,
+)
 from voicevox_engine.coeiroink_v2.catalog import OfficialSiteCatalogClient
 from voicevox_engine.coeiroink_v2.dictionary import (
     set_dictionary as set_coeiroink_dictionary,
@@ -237,6 +240,19 @@ def _add_exception_handlers(app: FastAPI) -> None:
         _request: Request, err: InvalidSynthesisParameterError
     ) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(err)})
+
+    @app.exception_handler(CancellableWorkerSynthesisError)
+    async def cancellable_synthesis_error_handler(
+        _request: Request, err: CancellableWorkerSynthesisError
+    ) -> JSONResponse:
+        # ワーカーが返したCoreの既知エラーだけを通常合成と同じ扱いにし、実装上の不具合は500として記録する。
+        status = {
+            f"{StyleNotFoundError.__module__}.{StyleNotFoundError.__qualname__}": 404,
+            f"{InvalidSynthesisParameterError.__module__}.{InvalidSynthesisParameterError.__qualname__}": 422,
+        }.get(err.exception_type, 500)
+        if status == 500:
+            _LOGGER.error("Cancellable synthesis failed", exc_info=err)
+        return JSONResponse(status_code=status, content={"detail": err.message})
 
 
 def _add_cors_middleware(
