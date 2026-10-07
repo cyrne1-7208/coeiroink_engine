@@ -106,63 +106,59 @@ def _model_cache_limit(value: str) -> int | None:
     return parsed
 
 
-def _warmup_target(audio_manager: AudioManager) -> tuple[str, int] | None:
-    """ウォームアップに使う（話者UUID, スタイルID）を決める。スタイルが無ければNoneを返す。
+def _loaded_styles(audio_manager: AudioManager) -> list[tuple[str, int]]:
+    """読み込み済みの（話者UUID, スタイルID）を、メタデータの公開順で返す。未ロードのスタイルは含めない。"""
 
-    メタデータの公開順に探し、読み込み済みのモデルがあればその先頭を、無ければ先頭のスタイルを返す。
-    """
-
-    styles = [
+    return [
         (speaker["speaker_uuid"], style["id"])
         for speaker in audio_manager.meta_manager.get_metas_dict()
         for style in speaker["styles"]
-    ]
-    if not styles:
-        return None
-    for speaker_uuid, style_id in styles:
         if audio_manager.is_speaker_initialized(
-            style_id=style_id, speaker_uuid=speaker_uuid
-        ):
-            return speaker_uuid, style_id
-    return styles[0]
+            style_id=style["id"], speaker_uuid=speaker["speaker_uuid"]
+        )
+    ]
 
 
 def _warm_up(audio_manager: AudioManager) -> None:
-    """起動時に合成を1回実行し、最初のリクエストで発生する初期化の待ち時間を前倒しする。
+    """読み込み済みの全モデルで合成を1回ずつ実行し、最初のリクエストで発生する待ち時間を前倒しする。
 
-    ESPnetの初回import、モデルの読み込み、初回推論、リサンプラーのJITを済ませる。
-    波形は破棄する。ウォームアップは最適化なので、失敗しても警告だけを出して起動を続ける。
+    対象は読み込み済みのモデルだけなので、ウォームアップで追加のモデル読み込みは起きない。
+    ESPnetの初回import、初回推論、リサンプラーのJITを済ませる。波形は破棄する。
+    ウォームアップは最適化なので、失敗しても警告だけを出して起動を続ける。1モデルの失敗で他のモデルは止めない。
     ログ設定はuvicorn.runが行うため、この時点ではINFOを出せない。そのためprintで標準エラー出力へ書く。
     """
 
-    try:
-        target = _warmup_target(audio_manager)
-        if target is None:
-            print(
-                "WARNING:  ウォームアップをスキップします。利用できるスタイルがありません。",
-                file=sys.stderr,
-            )
-            return
-        speaker_uuid, style_id = target
-        started_at = time.perf_counter()
-        audio_manager.synthesis(
-            _WARMUP_TEXT,
-            style_id=style_id,
-            speaker_uuid=speaker_uuid,
-            output_sampling_rate=_WARMUP_OUTPUT_SAMPLING_RATE,
-        )
-        elapsed = time.perf_counter() - started_at
-    except Exception:  # noqa: BLE001
-        # 最適化のための処理なので、原因を問わず起動は止めない。
+    styles = _loaded_styles(audio_manager)
+    if not styles:
         print(
-            "WARNING:  ウォームアップに失敗しました。起動は続行します。",
+            "WARNING:  読み込み済みのモデルがないため、ウォームアップをスキップします。"
+            "起動時にモデルを読み込むには、--max-loaded-models allを指定してください。",
             file=sys.stderr,
         )
-        traceback.print_exc()
         return
+
+    started_at = time.perf_counter()
+    succeeded = 0
+    for speaker_uuid, style_id in styles:
+        try:
+            audio_manager.synthesis(
+                _WARMUP_TEXT,
+                style_id=style_id,
+                speaker_uuid=speaker_uuid,
+                output_sampling_rate=_WARMUP_OUTPUT_SAMPLING_RATE,
+            )
+            succeeded += 1
+        except Exception:  # noqa: BLE001
+            # 最適化のための処理なので、原因を問わず次のモデルへ進む。
+            print(
+                f"WARNING:  ウォームアップに失敗しました（speaker_uuid={speaker_uuid}, style_id={style_id}）。"
+                "起動は続行します。",
+                file=sys.stderr,
+            )
+            traceback.print_exc()
+    elapsed = time.perf_counter() - started_at
     print(
-        f"INFO:     ウォームアップが完了しました"
-        f"（speaker_uuid={speaker_uuid}, style_id={style_id}, {elapsed:.2f}秒）",
+        f"INFO:     ウォームアップが完了しました（{succeeded}/{len(styles)}モデル, {elapsed:.2f}秒）",
         file=sys.stderr,
     )
 
@@ -419,9 +415,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--experimental",
         action="append",
-        choices=("generator-only", "soxr", "voice-smoothing"),
+        choices=("generator-only", "soxr", "voice-smoothing", "warmup"),
         default=[],
-        help="実験的な機能を有効にします。複数指定する場合は、このオプションを繰り返してください。",
+        help=(
+            "実験的な機能を有効にします。複数指定する場合は、このオプションを繰り返してください。"
+            "warmupは、起動時に読み込み済みの全モデルで短い合成を1回ずつ実行します。"
+        ),
     )
     parser.add_argument(
         "--voicevox_dir",
@@ -470,15 +469,6 @@ if __name__ == "__main__":
         help=(
             "直近に使った音声合成モデルの保持上限です。"
             "値を省略するかallを指定すると、起動時に全モデルを読み込みます。デフォルトは1です。"
-        ),
-    )
-    parser.add_argument(
-        "--warmup",
-        action="store_true",
-        help=(
-            "起動時に短い音声合成を1回実行し、最初のリクエストの待ち時間を起動時に移します。"
-            "--max-loaded-modelsにallを指定した場合と併用できます。"
-            "--enable_cancellable_synthesisのワーカーは対象外です。"
         ),
     )
     parser.add_argument(
@@ -585,7 +575,7 @@ if __name__ == "__main__":
     latest_core_version = max(synthesis_engines, key=_version_key)
 
     # キャンセル用ワーカーの起動とCPUを奪い合わないよう、その前に実行する。
-    if args.warmup:
+    if "warmup" in args.experimental:
         _warm_up(audio_manager)
 
     cancellable_engine = None

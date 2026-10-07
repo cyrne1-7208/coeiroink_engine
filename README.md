@@ -63,20 +63,13 @@ Windowsでは`.venv\Scripts\python.exe`を使います。GPU版では、`--devic
 
 空きメモリが足りなくなると、使用していない期間が長いモデルから解放します。
 
-### ウォームアップ
-
-最初の合成リクエストは、ライブラリの読み込みや初回推論のため、2回目以降より時間がかかります。`--warmup`を指定すると、起動時に短い音声合成を1回実行し、この待ち時間を起動時に移せます。既定では無効です。
-
-`--max-loaded-models all`と併用できます。この場合は、読み込み済みのモデルで実行します。それ以外では、先頭のスタイルのモデルを読み込んで実行します。
-
-ウォームアップに失敗しても、警告を出して起動を続けます。`--enable_cancellable_synthesis`のワーカーは対象外です。
-
 ### 実験的な機能
 
 - `--experimental soxr`：リサンプラーにlibsoxr VHQを使います。セットアップ時に`--extra soxr`も指定してください。
 - `--experimental voice-smoothing`：母音の音色や周期の細かな揺れを抑えます。`/v1/synthesis`とVOICEVOX互換の合成に適用されます。
+- `--experimental warmup`：起動時に、読み込み済みで保持している全モデルで短い合成を1回ずつ実行し、最初のリクエストの待ち時間を起動時に移します。未ロードのモデルは読み込みません。起動時にモデルを読み込むのは`--max-loaded-models all`のときだけで、読み込み済みのモデルがなければ警告してスキップします。`--enable_cancellable_synthesis`のワーカーは対象外です。
 
-どちらも既定では無効です。併用する場合は、`--experimental soxr --experimental voice-smoothing`と指定します。
+いずれも既定では無効です。併用する場合は、`--experimental soxr --experimental voice-smoothing`のように、オプションを繰り返して指定します。
 
 ## Docker
 
