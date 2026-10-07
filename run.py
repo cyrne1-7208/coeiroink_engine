@@ -417,10 +417,7 @@ if __name__ == "__main__":
         action="append",
         choices=("generator-only", "soxr", "voice-smoothing", "warmup"),
         default=[],
-        help=(
-            "実験的な機能を有効にします。複数指定する場合は、このオプションを繰り返してください。"
-            "warmupは、起動時に読み込み済みの全モデルで短い合成を1回ずつ実行します。"
-        ),
+        help="実験的な機能を有効にします。複数指定する場合は、このオプションを繰り返してください。",
     )
     parser.add_argument(
         "--voicevox_dir",

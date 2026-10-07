@@ -67,7 +67,7 @@ Windowsでは`.venv\Scripts\python.exe`を使います。GPU版では、`--devic
 
 - `--experimental soxr`：リサンプラーにlibsoxr VHQを使います。セットアップ時に`--extra soxr`も指定してください。
 - `--experimental voice-smoothing`：母音の音色や周期の細かな揺れを抑えます。`/v1/synthesis`とVOICEVOX互換の合成に適用されます。
-- `--experimental warmup`：起動時に、読み込み済みで保持している全モデルで短い合成を1回ずつ実行し、最初のリクエストの待ち時間を起動時に移します。未ロードのモデルは読み込みません。起動時にモデルを読み込むのは`--max-loaded-models all`のときだけで、読み込み済みのモデルがなければ警告してスキップします。`--enable_cancellable_synthesis`のワーカーは対象外です。
+- `--experimental warmup`：起動時に、読み込み済みで保持している全モデルで短い合成を1回ずつ実行し、最初のリクエストの待ち時間を起動時に移します。未ロードのモデルは読み込みません。`--max-loaded-models all`または値を省略した`--max-loaded-models`を指定すると、起動時に全モデルを読み込みます。読み込み済みのモデルがなければ警告してスキップします。`--enable_cancellable_synthesis`のワーカーは対象外です。
 
 いずれも既定では無効です。併用する場合は、`--experimental soxr --experimental voice-smoothing`のように、オプションを繰り返して指定します。
 
