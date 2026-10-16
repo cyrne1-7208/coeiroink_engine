@@ -541,6 +541,7 @@ def start_synthesis_subprocess(
         max_loaded_models=1,
         generator_only=getattr(args, "generator_only", True),
         voice_smoothing=args.voice_smoothing,
+        dangerous_skip_check=getattr(args, "dangerous_skip_check", False),
     )
     if not synthesis_engines:
         raise RuntimeError("音声合成エンジンがありません。")

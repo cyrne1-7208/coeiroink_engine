@@ -11,8 +11,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import numpy as np
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
+from run import _add_cors_middleware, _add_exception_handlers, _create_lifespan
 from voicevox_engine.cancellable_engine import (
     CancellableEngine,
     CancellableRequestDisconnected,
@@ -22,6 +23,7 @@ from voicevox_engine.cancellable_engine import (
     _RequestState,
     start_synthesis_subprocess,
 )
+from voicevox_engine.setting import CorsPolicyMode
 
 
 class _FakeProcess:
@@ -303,6 +305,56 @@ def test_disconnection_monitor_cancels_request_waiting_for_worker():
     asyncio.run(run_test())
 
 
+def test_disconnect_reaches_monitor_through_origin_middleware(caplog):
+    engine = _engine_without_processes()
+    app = FastAPI(lifespan=_create_lifespan(engine, Mock()))
+    _add_exception_handlers(app)
+    _add_cors_middleware(app, CorsPolicyMode.localapps, None)
+
+    async def run_test():
+        started = asyncio.Event()
+        incoming = asyncio.Queue()
+        incoming.put_nowait({"type": "http.request", "body": b""})
+        sent = []
+
+        @app.post("/synthesis")
+        async def synthesis(request: Request):
+            await request.body()
+            started.set()
+            return await asyncio.to_thread(
+                engine._synthesis_impl, Mock(), 1, request, False, None
+            )
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "method": "POST",
+            "scheme": "http",
+            "path": "/synthesis",
+            "query_string": b"",
+            "headers": [(b"origin", b"http://localhost")],
+        }
+        async with app.router.lifespan_context(app):
+            task = asyncio.create_task(app(scope, incoming.get, send))
+            try:
+                await asyncio.wait_for(started.wait(), timeout=1)
+                incoming.put_nowait({"type": "http.disconnect"})
+                await asyncio.wait_for(asyncio.shield(task), timeout=1)
+            finally:
+                engine.shutdown(timeout=0)
+                await asyncio.gather(task, return_exceptions=True)
+
+        assert not engine.watch_con_list
+        assert sent[0]["status"] == 499
+
+    with patch("run.update_dict"):
+        asyncio.run(run_test())
+    assert not [record for record in caplog.records if record.exc_info]
+
+
 def test_async_disconnection_cleanup_does_not_join_on_event_loop_thread():
     engine = _engine_without_processes()
     request = Mock()
@@ -408,6 +460,7 @@ def test_subprocess_passes_device_without_preloading_every_model():
         resampler="soxr-vhq",
         max_loaded_models=None,
         voice_smoothing=True,
+        dangerous_skip_check=True,
     )
 
     with (
@@ -433,4 +486,5 @@ def test_subprocess_passes_device_without_preloading_every_model():
         max_loaded_models=1,
         generator_only=True,
         voice_smoothing=True,
+        dangerous_skip_check=True,
     )

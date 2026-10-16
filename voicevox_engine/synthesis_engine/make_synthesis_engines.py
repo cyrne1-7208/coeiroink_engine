@@ -60,6 +60,8 @@ def make_audio_manager(
     max_loaded_models: int | None = 1,
     generator_only: bool = True,
     voice_smoothing: bool = False,
+    preload_models: bool = True,
+    dangerous_skip_check: bool = False,
 ) -> AudioManager:
     """起動設定を整理し、ネイティブAPIと互換APIで共有するCoreを作る。"""
 
@@ -76,6 +78,8 @@ def make_audio_manager(
         max_loaded_models=max_loaded_models,
         generator_only=generator_only,
         voice_smoothing=voice_smoothing,
+        preload_models=preload_models,
+        dangerous_skip_check=dangerous_skip_check,
     )
 
 
@@ -118,6 +122,7 @@ def make_synthesis_engines(
     resampler: str = "resampy",
     audio_manager: AudioManager | None = None,
     voice_smoothing: bool = False,
+    dangerous_skip_check: bool = False,
 ) -> dict[str, SynthesisEngineBase]:
     """
     Coreを準備し、音声合成エンジンを生成する。
@@ -143,6 +148,8 @@ def make_synthesis_engines(
         VITSの推論用generatorだけを読み込む。非対応モデルではFalseを指定する。
     voice_smoothing: bool, optional, default=False
         Coreの実験的な音声補正を有効化する。
+    dangerous_skip_check: bool, optional, default=False
+        推定メモリ不足を警告だけにし、メモリ不足による拒否と自動解放を省略する。
     speaker_info_dir: Path, optional, default=None
         MYCOEIROINKを展開したspeaker_infoディレクトリ
     device: str, optional, default=None
@@ -169,6 +176,7 @@ def make_synthesis_engines(
             max_loaded_models=max_loaded_models,
             generator_only=generator_only,
             voice_smoothing=voice_smoothing,
+            dangerous_skip_check=dangerous_skip_check,
         )
     elif max_loaded_models is None:
         audio_manager.initialize_all_speakers()

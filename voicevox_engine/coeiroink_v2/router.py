@@ -67,7 +67,6 @@ from .models import (
 )
 from .prosody import (
     ProsodyError,
-    clear_prosody_cache,
     estimate_prosody,
     estimate_prosody_from_kana,
 )
@@ -850,7 +849,6 @@ def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
         try:
             callback = dictionary_callback or _public_dictionary_callback
             callback(words)
-            clear_prosody_cache()
             return {}
         except HANDLED_API_ERRORS as error:
             raise _as_http_error(error) from error

@@ -13,8 +13,8 @@ from coeirocore.coeiro_manager import (
 from fastapi.testclient import TestClient
 
 from run import generate_app
-from voicevox_engine.dev.synthesis_engine import MockSynthesisEngine
 from voicevox_engine.setting import SettingLoader
+from voicevox_engine.synthesis_engine.coeiroink_adapter import CoeiroinkVoicevoxAdapter
 
 # 実モデルに依存せず、旧MYCOEIROINKのメタデータ形式だけを検証する。
 SPEAKER_UUID = "00000000-0000-4000-8000-000000000001"
@@ -55,9 +55,16 @@ def create_test_client(
     device: str = "cpu",
     duplicate_style: bool = False,
     disable_mutable_api: bool = False,
+    metadata_version: object = "0.0.1",
 ):
     speaker_info_dir = tmp_path / "speaker_info"
-    create_old_mycoeiroink_fixture(speaker_info_dir, folder_name=folder_name)
+    speaker_dir = create_old_mycoeiroink_fixture(
+        speaker_info_dir, folder_name=folder_name
+    )
+    meta_path = speaker_dir / "metas.json"
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    metadata["version"] = metadata_version
+    meta_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
     if duplicate_style:
         duplicate_dir = create_old_mycoeiroink_fixture(
             speaker_info_dir, folder_name="duplicate-speaker"
@@ -75,7 +82,7 @@ def create_test_client(
                 "name": "テスト話者",
                 "speaker_uuid": SPEAKER_UUID,
                 "styles": [{"name": "テスト", "id": STYLE_ID}],
-                "version": "0.0.1",
+                "version": str(metadata_version),
             }
         ],
         ensure_ascii=False,
@@ -87,7 +94,7 @@ def create_test_client(
     audio_manager.fs = 44100
     audio_manager.device = device
     audio_manager.predict.return_value = np.linspace(-0.1, 0.1, 4410, dtype=np.float32)
-    engine = MockSynthesisEngine(
+    engine = CoeiroinkVoicevoxAdapter(
         speakers=core_metas,
         supported_devices=json.dumps({"cpu": True, "cuda": False}),
         audio_manager=audio_manager,
@@ -135,6 +142,16 @@ def test_metadata_loading_ignores_macos_zip_sidecars(tmp_path: Path):
         response = client.get(path)
         assert response.status_code == 200
         assert [speaker[uuid_key] for speaker in response.json()] == [SPEAKER_UUID]
+
+
+@pytest.mark.parametrize("version", [1, None])
+def test_metadata_version_matches_core_normalization(tmp_path: Path, version):
+    client, _ = create_test_client(tmp_path, metadata_version=version)
+
+    for path in ("/v1/speakers", "/voicevox/speakers"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.json()[0]["version"] == str(version)
 
 
 def test_old_mycoeiroink_metadata_endpoints(tmp_path: Path):

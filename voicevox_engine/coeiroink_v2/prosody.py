@@ -6,7 +6,6 @@ stream.  This module only performs the small v2 wire-format conversion.
 """
 
 from collections.abc import Sequence
-from functools import lru_cache
 
 from coeirocore.model import AccentPhrase as CoreAccentPhrase
 from coeirocore.model import AudioQuery as CoreAudioQuery
@@ -129,9 +128,11 @@ def _build_prosody(
     return Prosody(plain=plain, detail=detail)
 
 
-@lru_cache(maxsize=256)
-def _estimate_prosody_cached(text: str) -> Prosody:
-    """Cache the expensive Open JTalk analysis for repeated request text."""
+def estimate_prosody(text: str) -> Prosody:
+    """現在のユーザー辞書でテキストを解析し、v2形式のプロソディを返す。"""
+
+    text = _require_string(text, "text")
+    # 辞書を更新する経路にかかわらず、同じ文章でも最新の読みを使う。
     try:
         accent_phrases = analyze_text(text)
     except Exception as error:
@@ -139,22 +140,8 @@ def _estimate_prosody_cached(text: str) -> Prosody:
     return _build_prosody(accent_phrases)
 
 
-def estimate_prosody(text: str) -> Prosody:
-    """Estimate v2 prosody from ordinary text.
-
-    A deep copy keeps the cache immutable from the caller's perspective.
-    ``clear_prosody_cache`` is called after user-dictionary updates so cached
-    readings cannot outlive the dictionary that produced them.
-    """
-
-    text = _require_string(text, "text")
-    return _estimate_prosody_cached(text).model_copy(deep=True)
-
-
 def clear_prosody_cache() -> None:
-    """Discard text analyses made before the current user dictionary update."""
-
-    _estimate_prosody_cached.cache_clear()
+    """旧importとの互換用。解析結果を保持しなくなったため、何もしない。"""
 
 
 def estimate_prosody_from_kana(kana: str) -> Prosody:

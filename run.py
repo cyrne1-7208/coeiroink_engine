@@ -26,10 +26,13 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from packaging.version import Version
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from voicevox_engine import __version__
 from voicevox_engine.cancellable_engine import (
     CancellableEngine,
+    CancellableRequestDisconnected,
     CancellableWorkerSynthesisError,
 )
 from voicevox_engine.coeiroink_v2.catalog import OfficialSiteCatalogClient
@@ -39,6 +42,7 @@ from voicevox_engine.coeiroink_v2.dictionary import (
 from voicevox_engine.coeiroink_v2.metadata import (
     SpeakerMetadataStore,
 )
+from voicevox_engine.coeiroink_v2.prosody import estimate_prosody
 from voicevox_engine.coeiroink_v2.router import create_v2_router
 from voicevox_engine.engine_manifest import EngineManifestLoader
 from voicevox_engine.metas.metas_store import MetasStore
@@ -128,7 +132,7 @@ def _warm_up(audio_manager: AudioManager) -> None:
     対象は読み込み済みのモデルだけなので、ウォームアップで追加のモデル読み込みは起きない。
     ESPnetの初回import、初回推論、リサンプラーのJITを済ませる。波形は破棄する。
     ウォームアップは最適化なので、失敗しても警告だけを出して起動を続ける。1モデルの失敗で他のモデルは止めない。
-    ログ設定はuvicorn.runが行うため、この時点ではINFOを出せない。そのためprintで標準エラー出力へ書く。
+    進捗と失敗の詳細は標準エラー出力へ書く。
     """
 
     styles = _loaded_styles(audio_manager)
@@ -141,11 +145,21 @@ def _warm_up(audio_manager: AudioManager) -> None:
         return
 
     started_at = time.perf_counter()
+    try:
+        # HTTP合成と同じトークン列を使い、ESPnet側の別のテキスト解析を起動しない。
+        tokens = estimate_prosody(_WARMUP_TEXT).plain
+    except Exception:  # noqa: BLE001
+        print(
+            "WARNING:  ウォームアップ用テキストの解析に失敗しました。起動は続行します。",
+            file=sys.stderr,
+        )
+        traceback.print_exc()
+        return
     succeeded = 0
     for speaker_uuid, style_id in styles:
         try:
             audio_manager.synthesis(
-                _WARMUP_TEXT,
+                tokens,
                 style_id=style_id,
                 speaker_uuid=speaker_uuid,
                 output_sampling_rate=_WARMUP_OUTPUT_SAMPLING_RATE,
@@ -188,8 +202,13 @@ def set_output_log_utf8() -> None:
             )
 
 
-def _create_lifespan(cancellable_engine: CancellableEngine | None):
-    """起動時の辞書更新と、キャンセル監視タスクの開始・終了を管理する。"""
+def _create_lifespan(
+    cancellable_engine: CancellableEngine | None,
+    audio_manager: AudioManager,
+    *,
+    warmup: bool = False,
+):
+    """起動時の辞書更新とモデル準備、キャンセル監視タスクの開始・終了を管理する。"""
 
     cancellable_disconnection_task: asyncio.Task | None = None
 
@@ -202,6 +221,10 @@ def _create_lifespan(cancellable_engine: CancellableEngine | None):
             )
         try:
             update_dict()
+            # 辞書やHTTPルーターなどの初期化後、受付開始前に容量確認と事前ロードを済ませる。
+            audio_manager.prepare_models()
+            if warmup:
+                _warm_up(audio_manager)
             yield
         finally:
             if cancellable_disconnection_task is not None:
@@ -219,7 +242,15 @@ def _create_lifespan(cancellable_engine: CancellableEngine | None):
 
 
 def _add_exception_handlers(app: FastAPI) -> None:
-    """Coreの公開例外をHTTPステータスへ変換する。"""
+    """Coreの公開例外と接続キャンセルをHTTP応答へ変換する。"""
+
+    @app.exception_handler(CancellableRequestDisconnected)
+    async def cancellable_disconnected_handler(
+        _request: Request, err: CancellableRequestDisconnected
+    ) -> JSONResponse:
+        # クライアント切断は合成器の異常ではない。499は接続を閉じたクライアントを表す慣用コード。
+        _LOGGER.info("Cancellable synthesis cancelled: %s", err)
+        return JSONResponse(status_code=499, content={"detail": str(err)})
 
     @app.exception_handler(StyleNotFoundError)
     async def style_not_found_handler(
@@ -285,17 +316,27 @@ def _add_cors_middleware(
         allow_headers=["*"],
     )
 
-    @app.middleware("http")
-    async def block_origin_middleware(request: Request, call_next):
-        origin = request.headers.get("Origin")
-        if (
-            origin is None
-            or "*" in allowed_origins
-            or origin in allowed_origins
-            or compiled_localhost_regex.fullmatch(origin)
-        ):
-            return await call_next(request)
-        return JSONResponse(status_code=403, content={"detail": "Origin not allowed"})
+    class BlockOriginMiddleware:
+        # BaseHTTPMiddlewareのreceiveラッパーを通すとis_disconnected()が切断を取得できないため、受信処理はそのまま渡す。
+        def __init__(self, app: ASGIApp) -> None:
+            self.app = app
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "http":
+                origin = Headers(scope=scope).get("Origin")
+                if (
+                    origin is not None
+                    and "*" not in allowed_origins
+                    and origin not in allowed_origins
+                    and not compiled_localhost_regex.fullmatch(origin)
+                ):
+                    await JSONResponse(
+                        status_code=403, content={"detail": "Origin not allowed"}
+                    )(scope, receive, send)
+                    return
+            await self.app(scope, receive, send)
+
+    app.add_middleware(BlockOriginMiddleware)
 
 
 def generate_app(
@@ -309,6 +350,7 @@ def generate_app(
     speaker_info_dir: Path | None = None,
     cancellable_engine: CancellableEngine | None = None,
     disable_mutable_api: bool = False,
+    warmup: bool = False,
 ) -> FastAPI:
     """COEIROINK v2 APIとVOICEVOX互換APIを提供するFastAPIアプリを作る。"""
 
@@ -324,7 +366,7 @@ def generate_app(
             "COEIROINK /v1 APIと、/voicevox配下のVOICEVOX互換会話音声APIを提供します。"
         ),
         version=__version__,
-        lifespan=_create_lifespan(cancellable_engine),
+        lifespan=_create_lifespan(cancellable_engine, audio_manager, warmup=warmup),
     )
     _add_exception_handlers(app)
     _add_cors_middleware(app, cors_policy_mode, allow_origin)
@@ -485,6 +527,14 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--dangerous-skip-check",
+        action="store_true",
+        help=(
+            "推定メモリ不足でも警告だけを出し、ロード拒否とメモリ不足による自動解放を省略します。"
+            "保持数の上限は維持しますが、メモリ不足でプロセスが終了する危険があります。"
+        ),
+    )
+    parser.add_argument(
         "--disable_mutable_api",
         action="store_true",
         default=decide_boolean_from_env("VV_DISABLE_MUTABLE_API"),
@@ -578,6 +628,8 @@ if __name__ == "__main__":
         max_loaded_models=args.max_loaded_models,
         generator_only=args.generator_only,
         voice_smoothing=args.voice_smoothing,
+        preload_models=False,
+        dangerous_skip_check=args.dangerous_skip_check,
     )
     synthesis_engines = make_synthesis_engines(
         speaker_info_dir=speaker_info_dir,
@@ -586,10 +638,6 @@ if __name__ == "__main__":
     if not synthesis_engines:
         raise RuntimeError("音声合成エンジンがありません。")
     latest_core_version = max(synthesis_engines, key=_version_key)
-
-    # キャンセル用ワーカーの起動とCPUを奪い合わないよう、その前に実行する。
-    if "warmup" in args.experimental:
-        _warm_up(audio_manager)
 
     cancellable_engine = None
     if args.enable_cancellable_synthesis:
@@ -623,6 +671,7 @@ if __name__ == "__main__":
             allow_origin=allow_origin,
             cancellable_engine=cancellable_engine,
             disable_mutable_api=args.disable_mutable_api,
+            warmup="warmup" in args.experimental,
         ),
         host=args.host,
         port=args.port,

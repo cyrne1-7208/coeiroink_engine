@@ -68,6 +68,8 @@ def test_make_audio_manager_passes_complete_device_selection():
             opencl_platform_index=1,
             max_loaded_models=3,
             voice_smoothing=True,
+            preload_models=False,
+            dangerous_skip_check=True,
         )
     factory.assert_called_once_with(
         fs=44100,
@@ -81,6 +83,8 @@ def test_make_audio_manager_passes_complete_device_selection():
         max_loaded_models=3,
         generator_only=True,
         voice_smoothing=True,
+        preload_models=False,
+        dangerous_skip_check=True,
     )
 
 

@@ -5,7 +5,10 @@ from time import sleep
 from unittest.mock import patch
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from run import _add_cors_middleware
 from voicevox_engine.setting import CorsPolicyMode, Setting, SettingLoader
 from voicevox_engine.utility import path_utility
 
@@ -14,6 +17,33 @@ def _setting(allow_origin: str | None) -> Setting:
     return Setting(
         cors_policy_mode=CorsPolicyMode.localapps,
         allow_origin=allow_origin,
+    )
+
+
+@pytest.mark.parametrize(
+    ("origin", "status"),
+    [
+        (None, 200),
+        ("app://.", 200),
+        ("http://localhost:50021", 200),
+        ("https://allowed.example", 200),
+        ("http://localhost.evil.example", 403),
+        ("https://blocked.example", 403),
+    ],
+)
+def test_origin_policy_preserves_allowlist_and_cors_headers(origin, status):
+    app = FastAPI()
+    _add_cors_middleware(app, CorsPolicyMode.localapps, ["https://allowed.example"])
+
+    @app.get("/")
+    async def root():
+        return {}
+
+    response = TestClient(app).get("/", headers={"Origin": origin} if origin else {})
+
+    assert response.status_code == status
+    assert response.headers.get("access-control-allow-origin") == (
+        origin if status == 200 else None
     )
 
 

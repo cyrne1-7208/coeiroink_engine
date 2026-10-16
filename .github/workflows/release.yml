@@ -86,6 +86,24 @@ jobs:
                   raise SystemExit(f"{repository} version {actual!r} != {expected!r}")
           PY
 
+      - name: Check existing release tag
+        working-directory: coeiroink_engine
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # 既存Releaseを更新してもタグは移動しないため、別コミットの成果物で上書きしない。
+          tag_refs=$(git ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSION^{}")
+          tag_commit=$(printf '%s\n' "$tag_refs" | awk -v ref="refs/tags/$VERSION" '
+            $2 == ref { direct = $1 }
+            $2 == ref "^{}" { peeled = $1 }
+            END { print (peeled ? peeled : direct) }
+          ')
+          if [ -n "$tag_commit" ] && [ "$tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Tag $VERSION points to $tag_commit, not $GITHUB_SHA; run from that tag or use a new version." >&2
+            exit 1
+          fi
+
   build:
     name: Build ${{ matrix.target }}
     needs: validate-inputs

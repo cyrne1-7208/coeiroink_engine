@@ -10,6 +10,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from pyopenjtalk import g2p
 
+from voicevox_engine.coeiroink_v2.prosody import estimate_prosody
 from voicevox_engine.model import UserDictWord, WordTypes
 from voicevox_engine.part_of_speech_data import MAX_PRIORITY, part_of_speech_data
 from voicevox_engine.user_dict import (
@@ -119,6 +120,21 @@ class TestUserDict(TestCase):
                 accent_associative_rule="*",
             ),
         )
+
+    def test_prosody_uses_current_user_dictionary(self):
+        surface = "音声確認語"
+        previous = estimate_prosody(surface).plain
+
+        apply_word(
+            surface=surface,
+            pronunciation="テストヨミ",
+            accent_type=1,
+            priority=MAX_PRIORITY,
+            user_dict_path=self.tmp_dir_path / "prosody.json",
+            compiled_dict_path=self.tmp_dir_path / "prosody.dic",
+        )
+
+        assert estimate_prosody(surface).plain != previous
 
     def test_apply_word_without_json(self):
         user_dict_path = self.tmp_dir_path / "test_apply_word_without_json.json"

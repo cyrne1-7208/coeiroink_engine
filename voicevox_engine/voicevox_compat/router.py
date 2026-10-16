@@ -28,7 +28,6 @@ from voicevox_engine.coeiroink_v2.metadata import (
 from voicevox_engine.coeiroink_v2.metadata import (
     StyleNotFoundError as MetadataStyleNotFoundError,
 )
-from voicevox_engine.coeiroink_v2.prosody import clear_prosody_cache
 from voicevox_engine.engine_manifest import EngineManifestLoader
 from voicevox_engine.engine_manifest.engine_manifest import EngineManifest
 from voicevox_engine.kana_parser import create_kana, parse_kana
@@ -974,7 +973,6 @@ def _add_user_dictionary_routes(
                 word_type=word_type,
                 priority=priority,
             )
-            clear_prosody_cache()
             return word_uuid
         except ValidationError as e:
             raise HTTPException(
@@ -1033,7 +1031,6 @@ def _add_user_dictionary_routes(
                 word_type=word_type,
                 priority=priority,
             )
-            clear_prosody_cache()
             return Response(status_code=204)
         except HTTPException:
             raise
@@ -1064,7 +1061,6 @@ def _add_user_dictionary_routes(
         """
         try:
             delete_word(word_uuid=word_uuid)
-            clear_prosody_cache()
             return Response(status_code=204)
         except HTTPException:
             raise
@@ -1095,7 +1091,6 @@ def _add_user_dictionary_routes(
         """
         try:
             import_user_dict(dict_data=import_dict_data, override=override)
-            clear_prosody_cache()
             return Response(status_code=204)
         except HTTPException:
             raise

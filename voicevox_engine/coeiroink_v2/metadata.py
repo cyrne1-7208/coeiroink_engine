@@ -138,6 +138,8 @@ def _parse_folder_metadata(raw_metadata: object, meta_path: Path) -> SpeakerMeta
             f"invalid speaker metadata: {meta_path}: expected an object"
         )
     wire_metadata = dict(raw_metadata)
+    # 古いモデルの数値・nullも、Coreと同じ文字列表記で受け付ける。
+    wire_metadata["version"] = str(wire_metadata.get("version", "0.0.1"))
     wire_metadata.setdefault("base64Portrait", "")
     wire_styles = []
     raw_styles = wire_metadata.get("styles")
@@ -502,17 +504,11 @@ class SpeakerMetadataStore:
         record = self._record(speaker_uuid)
         style_infos = []
         for style in record.metadata.styles:
-            style_portrait_path = record.folder / "portraits" / f"{style.style_id}.png"
             style_infos.append(
                 StyleInfo(
                     id=style.style_id,
                     icon=_base64_file(
                         record.folder / "icons" / f"{style.style_id}.png", "style icon"
-                    ),
-                    portrait=(
-                        _base64_file(style_portrait_path, "style portrait")
-                        if style_portrait_path.is_file()
-                        else None
                     ),
                     voice_samples=[
                         _base64_file(path, "voice sample")

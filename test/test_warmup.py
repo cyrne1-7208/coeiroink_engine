@@ -1,5 +1,11 @@
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+
 import numpy as np
 import pytest
+from coeirocore.coeiro_manager import ModelLoadError
+from fastapi import FastAPI
 
 import run as engine_run
 
@@ -66,15 +72,16 @@ def test_warm_up_warms_all_loaded_models_in_public_order(
 
     engine_run._warm_up(manager)
 
+    tokens = engine_run.estimate_prosody("こんにちは").plain
     assert manager.synthesis_calls == [
         {
-            "text": "こんにちは",
+            "text": tokens,
             "style_id": 11,
             "speaker_uuid": SPEAKER_A,
             "output_sampling_rate": 24000,
         },
         {
-            "text": "こんにちは",
+            "text": tokens,
             "style_id": 20,
             "speaker_uuid": SPEAKER_B,
             "output_sampling_rate": 24000,
@@ -124,3 +131,56 @@ def test_warm_up_failure_does_not_stop_other_models(
     assert "WARNING:" in error_output
     assert "boom" in error_output
     assert "1/2" in error_output
+
+
+def test_warm_up_analysis_failure_does_not_stop_startup(monkeypatch, capsys):
+    manager = FakeAudioManager(_metas(), initialized={(SPEAKER_A, 10)})
+
+    def fail_analysis(_text):
+        raise RuntimeError("analysis failed")
+
+    monkeypatch.setattr(engine_run, "estimate_prosody", fail_analysis)
+
+    engine_run._warm_up(manager)
+
+    assert manager.synthesis_calls == []
+    assert "analysis failed" in capsys.readouterr().err
+
+
+def test_startup_prepares_models_after_dictionary_and_before_warmup(monkeypatch):
+    events = []
+    manager = SimpleNamespace(prepare_models=lambda: events.append("prepare"))
+    monkeypatch.setattr(engine_run, "update_dict", lambda: events.append("dictionary"))
+    monkeypatch.setattr(engine_run, "_warm_up", lambda _: events.append("warmup"))
+    app = FastAPI(lifespan=engine_run._create_lifespan(None, manager, warmup=True))
+
+    async def start():
+        async with app.router.lifespan_context(app):
+            events.append("ready")
+
+    asyncio.run(start())
+
+    assert events == ["dictionary", "prepare", "warmup", "ready"]
+
+
+def test_startup_memory_failure_stops_startup_and_shuts_down_workers(monkeypatch):
+    manager = SimpleNamespace(
+        prepare_models=Mock(side_effect=ModelLoadError("insufficient memory"))
+    )
+    workers = SimpleNamespace(
+        catch_disconnection=AsyncMock(), shutdown_async=AsyncMock()
+    )
+    monkeypatch.setattr(engine_run, "update_dict", lambda: None)
+    warm_up = Mock()
+    monkeypatch.setattr(engine_run, "_warm_up", warm_up)
+    app = FastAPI(lifespan=engine_run._create_lifespan(workers, manager, warmup=True))
+
+    async def start():
+        async with app.router.lifespan_context(app):
+            pytest.fail("startup must not complete after a model preparation error")
+
+    with pytest.raises(ModelLoadError, match="insufficient memory"):
+        asyncio.run(start())
+
+    warm_up.assert_not_called()
+    workers.shutdown_async.assert_awaited_once_with()
