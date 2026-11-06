@@ -55,15 +55,9 @@ def test_core_dependency_versions_match_engine() -> None:
     project = _load_toml(REPOSITORY_ROOT / "pyproject.toml")
     lock = _load_toml(REPOSITORY_ROOT / "uv.lock")
     version = project["project"]["version"]
-    opencl_metadata = next(
-        metadata
-        for metadata in project["tool"]["uv"]["dependency-metadata"]
-        if metadata["name"] == "coeiroink-opencl"
-    )
 
     assert _pinned_versions(project, "coeirocore") == {version}
     assert _pinned_versions(project, "coeiroink-opencl") == {version}
-    assert opencl_metadata["version"] == version
     assert _locked_versions(lock, "coeirocore") == {version}
     assert _locked_versions(lock, "coeiroink-opencl") == {version}
 

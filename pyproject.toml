@@ -207,12 +207,6 @@ coeiroink-opencl = [
     { requirement = "torch", match-runtime = true },
 ]
 
-[[tool.uv.dependency-metadata]]
-name = "coeiroink-opencl"
-version = "0.2.1+coeiroink.1.7.3"
-# TorchのバージョンはEngineのextraで固定しているため、ローカルパッケージ側では重ねて指定しない。
-requires-dist = []
-
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
