@@ -995,7 +995,7 @@ def _add_metadata_lookup_routes(router: APIRouter, context: _V2RouterContext) ->
         try:
             store = metadata_required()
             return store.style_id_to_speaker_meta(style_id)
-        except (StyleNotFoundError, AmbiguousStyleError):
+        except StyleNotFoundError, AmbiguousStyleError:
             return SpeakerMetaForTextBox(
                 speakerUuid="None",
                 styleId=0,

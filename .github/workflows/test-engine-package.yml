@@ -46,10 +46,10 @@ jobs:
         run: |
           set -euo pipefail
           case "$TARGET" in
-            linux-cpu|windows-cpu) extra=cpu; python=3.12 ;;
-            linux-cuda|windows-cuda) extra=cuda; python=3.12 ;;
-            linux-opencl) extra=opencl; python=3.12 ;;
-            windows-directml) extra=directml; python=3.12 ;;
+            linux-cpu|windows-cpu) extra=cpu; python=3.14 ;;
+            linux-cuda|windows-cuda) extra=cuda; python=3.14 ;;
+            linux-opencl) extra=opencl; python=3.14 ;;
+            windows-directml) extra=directml; python=3.14 ;;
             *) echo "unknown target: $TARGET" >&2; exit 2 ;;
           esac
           echo "extra=$extra" >> "$GITHUB_OUTPUT"
@@ -86,7 +86,7 @@ jobs:
       - name: Set up target Python and uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: 0.12.5
+          version: 0.13.9
           python-version: ${{ steps.profile.outputs.python }}
           activate-environment: true
           working-directory: ${{ runner.temp }}/coeiroink-server-oss/coeiroink_engine

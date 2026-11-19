@@ -10,7 +10,7 @@ GPL・LGPL・MPL依存のソースアーカイブも `sources/` に収録して�
 
 その他の依存も、使用したバージョンとソースの配布元をZIP内の `uv.lock` に記録しています。Pythonパッケージのソースは `sdist.url`、Gitから取得するパッケージのソースは `source.git` を参照してください。OpenCL拡張の上流コミットとビルド設定は、Coreの `native/opencl/CMakeLists.txt` にあります。
 
-再ビルドにはPython 3.12、uv、Git、対象OSのC/C++ビルド環境が必要です。GPU版の追加要件は本体のREADMEを参照してください。Engineのディレクトリで、配布物と同じバックエンドを指定します。
+再ビルドにはPython 3.14、uv、Git、対象OSのC/C++ビルド環境が必要です。GPU版の追加要件は本体のREADMEを参照してください。Engineのディレクトリで、配布物と同じバックエンドを指定します。
 
 ```bash
 uv sync --locked --extra cpu --no-dev

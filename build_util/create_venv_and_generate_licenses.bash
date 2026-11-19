@@ -15,12 +15,12 @@ venv_path="$engine_dir/licenses_venv"
 snapshot_path="$venv_path/runtime-packages.json"
 trap 'rm -rf "$venv_path"' EXIT
 
-python_bin="${PYTHON_BIN:-python3.12}"
+python_bin="${PYTHON_BIN:-python3.14}"
 uv_bin="${UV_BIN:-uv}"
 if [[ "$uv_bin" != /* ]]; then
     uv_bin="$(command -v "$uv_bin")"
 fi
-"$python_bin" -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
+"$python_bin" -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
 test -f "$engine_dir/pyproject.toml"
 test -f "$engine_dir/uv.lock"
 test -f "$core_dir/pyproject.toml"

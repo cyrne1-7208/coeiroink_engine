@@ -4,7 +4,7 @@ Sudachiのfull辞書を使った形態素解析を、実験的な機能として
 
 ## 有効化
 
-通常のEngineセットアップではSudachiをインストールしません。利用する場合だけ、Python 3.12環境で次を実行します。
+通常のEngineセットアップではSudachiをインストールしません。利用する場合だけ、Python 3.14環境で次を実行します。
 
 ```bash
 uv sync --locked --extra sudachi

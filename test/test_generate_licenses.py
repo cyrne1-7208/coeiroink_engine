@@ -61,6 +61,33 @@ def test_legal_documents_reject_missing_metadata_file(tmp_path, monkeypatch):
         generate_licenses._legal_documents("demo")
 
 
+def test_cuda_toolkit_uses_nvidia_cuda_runtime_eula(tmp_path, monkeypatch):
+    license_path = Path("nvidia_cuda_runtime-13.0.96.dist-info/licenses/License.txt")
+    target = tmp_path / license_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("NVIDIA CUDA Toolkit EULA", encoding="utf-8")
+
+    toolkit_dist = _Distribution(tmp_path, [], [])
+    runtime_dist = _Distribution(tmp_path, [license_path], ["License.txt"])
+
+    def fake_distribution(name: str) -> _Distribution:
+        if name == "cuda-toolkit":
+            return toolkit_dist
+        if name == "nvidia-cuda-runtime":
+            return runtime_dist
+        raise generate_licenses.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(generate_licenses.metadata, "distribution", fake_distribution)
+
+    license_info = generate_licenses._package_license(
+        {"Name": "cuda-toolkit", "Version": "13.0.3.0", "License": "UNKNOWN"},
+        "cuda-toolkit",
+    )
+
+    assert license_info.license == "LicenseRef-NVIDIA-Proprietary"
+    assert license_info.text == "NVIDIA CUDA Toolkit EULA"
+
+
 def test_distance_notice_preserves_original_license():
     documents = generate_licenses._legal_documents("Distance")
     license = generate_licenses._package_license(

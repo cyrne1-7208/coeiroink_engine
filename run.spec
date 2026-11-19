@@ -86,7 +86,7 @@ for package in optional_packages.get(backend, ()):
     collect_package(package)
 
 if backend == "cuda":
-    datas.extend(copy_metadata("cupy-cuda12x"))
+    datas.extend(copy_metadata("cupy-cuda13x"))
 
 a = Analysis(
     ["run.py"],

@@ -1,15 +1,16 @@
 [build-system]
-requires = ["setuptools>=73,<74", "wheel>=0.45,<1"]
+requires = ["setuptools>=77.0.3,<82", "wheel>=0.45,<1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "coeiroink-engine"
-version = "0.2.1+coeiroink.1.7.3"
+version = "0.2.2+coeiroink.1.7.3"
 description = "COEIROINK Engine HTTP server"
-requires-python = ">=3.12,<3.13"
-license = { file = "LICENSE" }
+requires-python = ">=3.14,<3.15"
+license = "LGPL-3.0-only"
+license-files = ["LICENSE", "licenses/GPL-3.0.txt", "licenses/SOURCES.md"]
 dependencies = [
-    "coeirocore==0.2.1+coeiroink.1.7.3",
+    "coeirocore==0.2.2+coeiroink.1.7.3",
     "fastapi>=0.142,<0.143",
     "jinja2>=3.1.4,<4",
     "kanalizer>=0.1.1,<0.2",
@@ -31,26 +32,26 @@ dependencies = [
 [project.optional-dependencies]
 # Engineで選んだextraをCoreにも適用し、バックエンドと依存するwheelを揃える。
 cpu = [
-    "coeirocore[cpu]==0.2.1+coeiroink.1.7.3",
+    "coeirocore[cpu]==0.2.2+coeiroink.1.7.3",
     # ルートプロジェクトでCPU用wheelの配布先を選ぶため、Coreと同じ組み合わせを指定する。
-    "torch==2.10.0",
-    "torchaudio==2.10.0",
+    "torch==2.14.1",
+    "torchaudio==2.11.0",
 ]
 cuda = [
-    "coeirocore[cuda]==0.2.1+coeiroink.1.7.3",
+    "coeirocore[cuda]==0.2.2+coeiroink.1.7.3",
     # ルートプロジェクトでCUDA用wheelの配布先を選ぶため、Coreと同じ組み合わせを指定する。
-    "torch==2.10.0",
-    "torchaudio==2.10.0",
+    "torch==2.14.1",
+    "torchaudio==2.11.0",
 ]
 directml = [
-    "coeirocore[directml]==0.2.1+coeiroink.1.7.3",
+    "coeirocore[directml]==0.2.2+coeiroink.1.7.3",
 ]
 opencl = [
-    "coeirocore[opencl]==0.2.1+coeiroink.1.7.3",
+    "coeirocore[opencl]==0.2.2+coeiroink.1.7.3",
     # OpenCL用のsource設定を有効にし、Core内のネイティブパッケージとCPU版Torchを同じuv.lockで固定する。
-    "coeiroink-opencl==0.2.1+coeiroink.1.7.3; sys_platform == 'linux'",
-    "torch==2.10.0; sys_platform == 'linux'",
-    "torchaudio==2.10.0; sys_platform == 'linux'",
+    "coeiroink-opencl==0.2.2+coeiroink.1.7.3; sys_platform == 'linux'",
+    "torch==2.14.1; sys_platform == 'linux'",
+    "torchaudio==2.11.0; sys_platform == 'linux'",
 ]
 sudachi = [
     # SudachiPyはRust実装を含むwheelを使い、通常のEngine構築には含めない。
@@ -59,7 +60,7 @@ sudachi = [
 ]
 soxr = [
     # Coreの高品質リサンプラーは、選択した場合だけ導入する。
-    "coeirocore[soxr]==0.2.1+coeiroink.1.7.3",
+    "coeirocore[soxr]==0.2.2+coeiroink.1.7.3",
 ]
 [dependency-groups]
 build = [
@@ -189,16 +190,16 @@ coeirocore = { path = "../coeiroink_core", editable = true }
 coeiroink-opencl = [
     { path = "../coeiroink_core/native/opencl", extra = "opencl" },
 ]
-# CPUとOpenCLはCPU wheel、CUDAはcu128 wheelを同じPyTorchバージョンから解決する。
+# CPUとOpenCLはCPU wheel、CUDAはcu130 wheelを同じPyTorchバージョンから解決する。
 torch = [
     { index = "pytorch-cpu", extra = "cpu" },
     { index = "pytorch-cpu", extra = "opencl" },
-    { index = "pytorch-cu128", extra = "cuda" },
+    { index = "pytorch-cu130", extra = "cuda" },
 ]
 torchaudio = [
     { index = "pytorch-cpu", extra = "cpu" },
     { index = "pytorch-cpu", extra = "opencl" },
-    { index = "pytorch-cu128", extra = "cuda" },
+    { index = "pytorch-cu130", extra = "cuda" },
 ]
 
 [tool.uv.extra-build-dependencies]
@@ -213,16 +214,13 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
-
-[tool.setuptools]
-license-files = ["LICENSE", "licenses/GPL-3.0.txt", "licenses/SOURCES.md"]
 
 [tool.setuptools.packages.find]
 include = ["voicevox_engine*"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 88

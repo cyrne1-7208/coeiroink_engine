@@ -80,7 +80,7 @@ def _child_error_payload(error: Exception) -> dict[str, str]:
 def _is_process_alive(proc: Process) -> bool:
     try:
         return proc.is_alive()
-    except (AssertionError, ValueError):
+    except AssertionError, ValueError:
         return False
 
 
@@ -89,21 +89,21 @@ def _close_connection(connection: Connection | None) -> None:
         return
     try:
         connection.close()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
 
 
 def _join_process(proc: Process, timeout: float) -> None:
     try:
         proc.join(max(0.0, timeout))
-    except (AssertionError, OSError, ValueError):
+    except AssertionError, OSError, ValueError:
         pass
 
 
 def _close_process(proc: Process) -> None:
     try:
         proc.close()
-    except (AssertionError, OSError, ValueError):
+    except AssertionError, OSError, ValueError:
         pass
 
 
@@ -120,7 +120,7 @@ def _stop_process(
     if graceful and connection is not None:
         try:
             connection.send({"kind": "shutdown"})
-        except (EOFError, OSError, ValueError):
+        except EOFError, OSError, ValueError:
             graceful = False
     if not graceful:
         _close_connection(connection)
@@ -128,14 +128,14 @@ def _stop_process(
         try:
             if _is_process_alive(proc):
                 proc.terminate()
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass
 
     _join_process(proc, max(0.0, deadline - time.monotonic()))
     if _is_process_alive(proc):
         try:
             proc.terminate()
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass
         _join_process(proc, max(0.0, deadline - time.monotonic()))
     if _is_process_alive(proc):
@@ -143,7 +143,7 @@ def _stop_process(
         if kill is not None:
             try:
                 kill()
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 pass
         _join_process(proc, max(0.0, deadline - time.monotonic()))
     _close_connection(connection)
@@ -550,7 +550,7 @@ def start_synthesis_subprocess(
         while True:
             try:
                 request = sub_proc_con.recv()
-            except (EOFError, OSError):
+            except EOFError, OSError:
                 break
             if isinstance(request, dict) and request.get("kind") == "shutdown":
                 break
@@ -588,7 +588,7 @@ def start_synthesis_subprocess(
                     delete_file(temporary_wave_path)
                 try:
                     sub_proc_con.send(_child_error_payload(error))
-                except (EOFError, OSError, ValueError):
+                except EOFError, OSError, ValueError:
                     break
     finally:
         sub_proc_con.close()

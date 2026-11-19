@@ -80,7 +80,7 @@ def check_release_build(
                         ) as response:
                             if json.loads(response.read()) == expected_version:
                                 return
-                    except (OSError, URLError, TimeoutError):
+                    except OSError, URLError, TimeoutError:
                         pass
                     time.sleep(2)
             finally:
