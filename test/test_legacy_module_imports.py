@@ -1,3 +1,7 @@
+"""旧CamelCaseモジュールおよび互換再エクスポートのimport経路を維持していることを検証する。"""
+
+from __future__ import annotations
+
 import importlib
 
 import pytest
@@ -41,6 +45,17 @@ def test_legacy_module_import_resolves_to_canonical_module(
     assert importlib.import_module(legacy_name) is importlib.import_module(
         canonical_name
     )
+
+
+def test_legacy_katakana_english_import_uses_shared_implementation() -> None:
+    from voicevox_engine.katakana_english import (
+        text_to_full_context_labels as current_katakana_english,
+    )
+    from voicevox_engine.voicevox_compat.katakana_english import (
+        text_to_full_context_labels as legacy_katakana_english,
+    )
+
+    assert legacy_katakana_english is current_katakana_english
 
 
 def test_package_level_class_exports_remain_compatible() -> None:

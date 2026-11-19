@@ -1,3 +1,7 @@
+"""依存パッケージのライセンス文書収集・例外規定・ソース同梱ハッシュ検証を確認する。"""
+
+from __future__ import annotations
+
 import hashlib
 import json
 from email.message import Message
@@ -7,9 +11,11 @@ import pytest
 
 import generate_licenses
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
 
 class _Distribution:
-    def __init__(self, root: Path, files: list[Path], declared: list[str]):
+    def __init__(self, root: Path, files: list[Path], declared: list[str]) -> None:
         self.root = root
         self.files = files
         self.metadata = Message()
@@ -20,7 +26,10 @@ class _Distribution:
         return self.root / path
 
 
-def test_legal_documents_include_metadata_and_conventional_files(tmp_path, monkeypatch):
+def test_legal_documents_include_metadata_and_conventional_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     files = [
         Path("demo-1.0.dist-info/licenses/LICENSE"),
         Path("demo-1.0.dist-info/licenses/AUTHORS.md"),
@@ -48,7 +57,10 @@ def test_legal_documents_include_metadata_and_conventional_files(tmp_path, monke
     )
 
 
-def test_legal_documents_reject_missing_metadata_file(tmp_path, monkeypatch):
+def test_legal_documents_reject_missing_metadata_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     distribution = _Distribution(tmp_path, [], ["LICENSE"])
     monkeypatch.setattr(
         generate_licenses.metadata, "distribution", lambda _name: distribution
@@ -61,7 +73,10 @@ def test_legal_documents_reject_missing_metadata_file(tmp_path, monkeypatch):
         generate_licenses._legal_documents("demo")
 
 
-def test_cuda_toolkit_uses_nvidia_cuda_runtime_eula(tmp_path, monkeypatch):
+def test_cuda_toolkit_uses_nvidia_cuda_runtime_eula(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     license_path = Path("nvidia_cuda_runtime-13.0.96.dist-info/licenses/License.txt")
     target = tmp_path / license_path
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -88,20 +103,29 @@ def test_cuda_toolkit_uses_nvidia_cuda_runtime_eula(tmp_path, monkeypatch):
     assert license_info.text == "NVIDIA CUDA Toolkit EULA"
 
 
-def test_distance_notice_preserves_original_license():
+def test_distance_notice_preserves_original_license(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(REPOSITORY_ROOT)
     documents = generate_licenses._legal_documents("Distance")
-    license = generate_licenses._package_license(
+    license_info = generate_licenses._package_license(
         {"Name": "Distance", "Version": "0.1.3", "License": "GPL"}, "distance"
     )
 
-    assert "notices differ" in license.license
-    assert all(text in license.text for _path, text in documents)
-    assert "does not relicense Distance" in license.text
-    assert Path("licenses/GPL-3.0.txt").read_text(encoding="utf-8") in license.text
+    assert "notices differ" in license_info.license
+    assert all(text in license_info.text for _path, text in documents)
+    assert "does not relicense Distance" in license_info.text
+    assert (REPOSITORY_ROOT / "licenses" / "GPL-3.0.txt").read_text(
+        encoding="utf-8"
+    ) in license_info.text
 
 
 @pytest.mark.parametrize("valid_hash", [True, False])
-def test_collect_sources_uses_locked_archive(tmp_path, monkeypatch, valid_hash):
+def test_collect_sources_uses_locked_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    valid_hash: bool,
+) -> None:
     # 小さなローカル配布物を使い、外部通信なしで同梱とハッシュ不一致時の停止を確認する。
     source = tmp_path / "library-1.0.tar.gz"
     source.write_bytes(b"source archive contents")

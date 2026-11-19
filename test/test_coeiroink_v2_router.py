@@ -1,3 +1,7 @@
+"""COEIROINK v2 HTTPルーターのエンドポイント契約・エラー応答・OpenAPIスキーマを検証する。"""
+
+from __future__ import annotations
+
 import base64
 from pathlib import Path
 
@@ -5,20 +9,13 @@ import numpy as np
 import pytest
 from coeirocore.coeiro_manager import (
     InvalidSynthesisParameterError,
-    PredictionResult,
     SynthesisError,
 )
-from coeirocore.pyworld_compat import load_pyworld
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import voicevox_engine.coeiroink_v2.router as router_module
-from voicevox_engine.coeiroink_v2 import wave_processing
-from voicevox_engine.coeiroink_v2.audio import (
-    MAX_PAUSE_LENGTH_SECONDS,
-    MAX_SAMPLING_RATE,
-    encode_pcm_wav,
-)
+import voicevox_engine
+from voicevox_engine.coeiroink_v2.audio import encode_pcm_wav
 from voicevox_engine.coeiroink_v2.catalog import CatalogNetworkError
 from voicevox_engine.coeiroink_v2.metadata import MetadataAssetNotFoundError
 from voicevox_engine.coeiroink_v2.models import (
@@ -33,101 +30,10 @@ SPEAKER_UUID = "00000000-0000-0000-0000-000000000001"
 STYLE_ID = 7
 
 
-class FakeAudioManager:
-    fs = 16000
-    device = "cpu"
-
-    def __init__(self, *, voice_smoothing=False):
-        self.voice_smoothing = voice_smoothing
-        self.prediction_calls = []
-        self.dictionary_calls = []
-        self.smoothing_calls = []
-
-    def predict(self, text, style_id, speed_scale, speaker_uuid):
-        self.prediction_calls.append(
-            {
-                "kind": "predict",
-                "text": list(text),
-                "style_id": style_id,
-                "speed_scale": speed_scale,
-                "speaker_uuid": speaker_uuid,
-            }
-        )
-        return np.linspace(-0.25, 0.25, 8, dtype=np.float32)
-
-    def predict_with_duration(self, text, style_id, speed_scale, speaker_uuid):
-        self.prediction_calls.append(
-            {
-                "kind": "predict_with_duration",
-                "text": list(text),
-                "style_id": style_id,
-                "speed_scale": speed_scale,
-                "speaker_uuid": speaker_uuid,
-            }
-        )
-        return PredictionResult(
-            wav=np.linspace(-0.25, 0.25, 8, dtype=np.float32),
-            duration_frames=[1, 2, 1],
-        )
-
-    def smooth_voice(self, wave, tokens, duration_frames, *, hop_length):
-        self.smoothing_calls.append(
-            {
-                "wave": np.array(wave, copy=True),
-                "tokens": list(tokens),
-                "duration_frames": list(duration_frames),
-                "hop_length": hop_length,
-            }
-        )
-        return wave + np.float32(0.5)
-
-    @staticmethod
-    def get_hop_length(style_id, speaker_uuid):
-        assert (style_id, speaker_uuid) == (STYLE_ID, SPEAKER_UUID)
-        return 2
-
-    @staticmethod
-    def get_world_f0(wave, sampling_rate):
-        assert sampling_rate == 16000
-        return np.array([110.0, 120.0], dtype=np.float64)
-
-    @staticmethod
-    def trim(wave):
-        return wave
-
-    @staticmethod
-    def volume(wave, scale):
-        return wave * scale
-
-    @staticmethod
-    def pitch_intonation(wave, sampling_rate, pitch_scale, intonation_scale):
-        return wave + np.float32(pitch_scale + intonation_scale - 1.0)
-
-    @staticmethod
-    def sil(wave, sampling_rate, pre, post):
-        return np.concatenate(
-            (
-                np.zeros(int(sampling_rate * pre), dtype=np.float32),
-                wave,
-                np.zeros(int(sampling_rate * post), dtype=np.float32),
-            )
-        )
-
-    @staticmethod
-    def resample_output(wave, sampling_rate, output_sampling_rate):
-        return np.repeat(wave, output_sampling_rate // sampling_rate)
-
-
-class RecordingFakeAudioManager(FakeAudioManager):
-    def __init__(self):
-        super().__init__()
-        self.events = []
-
-
 class FakeMetadata:
     speaker_info_dir = Path("/tmp/fake-speaker-info")
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.speaker = SpeakerMeta(
             speakerName="Fake",
             speakerUuid=SPEAKER_UUID,
@@ -155,29 +61,29 @@ class FakeMetadata:
         self.sample = encode_pcm_wav(np.ones(4, dtype=np.float32) * 0.1, 16000)
 
     @property
-    def speaker_uuids(self):
+    def speaker_uuids(self) -> tuple[str, ...]:
         return (SPEAKER_UUID,)
 
-    def list_speakers(self):
+    def list_speakers(self) -> list[SpeakerMeta]:
         return [self.speaker]
 
-    def list_speakers_path_variant(self):
+    def list_speakers_path_variant(self) -> list[SpeakerMetaPathVariant]:
         return [self.path_variant]
 
-    def speaker_meta(self, speaker_uuid):
+    def speaker_meta(self, speaker_uuid: str) -> SpeakerMeta:
         assert speaker_uuid == SPEAKER_UUID
         return self.speaker
 
-    def speaker_path(self, speaker_uuid):
+    def speaker_path(self, speaker_uuid: str) -> Path:
         assert speaker_uuid == SPEAKER_UUID
         return self.speaker_info_dir / "fake"
 
-    def get_style(self, speaker_uuid, style_id):
+    def get_style(self, speaker_uuid: str, style_id: int) -> SpeakerMetaStyle:
         assert speaker_uuid == SPEAKER_UUID
         assert style_id == STYLE_ID
         return self.speaker.styles[0]
 
-    def style_id_to_speaker_meta(self, style_id):
+    def style_id_to_speaker_meta(self, style_id: int) -> dict[str, object]:
         assert style_id == STYLE_ID
         return {
             "speakerUuid": SPEAKER_UUID,
@@ -186,31 +92,45 @@ class FakeMetadata:
             "styleName": "normal",
         }
 
-    def read_sample_voice(self, speaker_uuid, style_id, index):
+    def read_sample_voice(self, speaker_uuid: str, style_id: int, index: int) -> bytes:
         assert (speaker_uuid, style_id, index) == (SPEAKER_UUID, STYLE_ID, 0)
         return self.sample
 
-    def speaker_policy(self, speaker_uuid):
+    def speaker_policy(self, speaker_uuid: str) -> SpeakerPolicy:
         assert speaker_uuid == SPEAKER_UUID
         return SpeakerPolicy(policy="policy", license="license")
 
 
-def _app(*, voice_smoothing=False):
-    manager = FakeAudioManager(voice_smoothing=voice_smoothing)
-    dictionary_calls = []
+def _make_app(
+    v2_fake_audio_manager_cls: type,
+    *,
+    voice_smoothing: bool = False,
+    metadata: object | None = None,
+    **callbacks: object,
+) -> tuple[FastAPI, object, list[object]]:
+    manager = v2_fake_audio_manager_cls(
+        voice_smoothing=voice_smoothing,
+        expected_speaker_uuid=SPEAKER_UUID,
+        expected_style_id=STYLE_ID,
+    )
+    dictionary_calls: list[object] = []
 
-    def set_dictionary(words):
+    def set_dictionary(words: object) -> None:
         dictionary_calls.append(words)
 
+    router_callbacks: dict[str, object] = {
+        "dictionary_callback": set_dictionary,
+        "download_info_callback": list,
+        "downloadable_speakers_callback": list,
+        "update_info_callback": list,
+        **callbacks,
+    }
     app = FastAPI()
     app.include_router(
         create_v2_router(
             manager,
-            FakeMetadata(),
-            dictionary_callback=set_dictionary,
-            download_info_callback=list,
-            downloadable_speakers_callback=list,
-            update_info_callback=list,
+            FakeMetadata() if metadata is None else metadata,
+            **router_callbacks,
             default_trim_buffer={
                 "startTrimBuffer": 0.0,
                 "endTrimBuffer": 0.0,
@@ -222,58 +142,23 @@ def _app(*, voice_smoothing=False):
     return app, manager, dictionary_calls
 
 
-@pytest.mark.parametrize(
-    ("path", "callback_name"),
-    [
-        ("/v1/download_info", "download_info_callback"),
-        ("/v1/downloadable_speakers", "downloadable_speakers_callback"),
-        ("/v1/update_info", "update_info_callback"),
-    ],
-)
-def test_catalog_failure_returns_json_502(path, callback_name, caplog):
-    def unavailable_catalog():
-        raise CatalogNetworkError("catalog connection failed")
-
-    app = FastAPI()
-    app.include_router(
-        create_v2_router(FakeAudioManager(), **{callback_name: unavailable_catalog})
-    )
-
-    response = TestClient(app).get(path)
-
-    assert response.status_code == 502
-    assert response.json() == {"detail": "catalog connection failed"}
-    assert "CatalogNetworkError: catalog connection failed" in caplog.text
-
-
-def test_catalog_programming_error_is_not_reported_as_transport_failure():
-    def broken_callback():
-        raise ValueError("callback implementation failed")
-
-    app = FastAPI()
-    app.include_router(
-        create_v2_router(FakeAudioManager(), download_info_callback=broken_callback)
-    )
-
-    with pytest.raises(ValueError, match="callback implementation failed"):
-        TestClient(app).get("/v1/download_info")
-
-
-def _detail():
-    return [[{"phoneme": "a", "hira": "あ", "accent": 0}]]
-
-
-def _making_payload():
+def _making_payload() -> dict[str, object]:
     return {
         "speakerUuid": SPEAKER_UUID,
         "styleId": STYLE_ID,
         "text": "this text is deliberately ignored",
-        "prosodyDetail": _detail(),
+        "prosodyDetail": [[{"phoneme": "a", "hira": "あ", "accent": 0}]],
         "speedScale": 1.0,
     }
 
 
-def _processing_payload(wav_base64):
+def _processing_wav_base64() -> str:
+    return base64.standard_b64encode(
+        encode_pcm_wav(np.ones(8, dtype=np.float32) * 0.1, 16000)
+    ).decode("ascii")
+
+
+def _processing_payload(wav_base64: str) -> dict[str, object]:
     return {
         "volumeScale": 1.0,
         "pitchScale": 0.0,
@@ -285,13 +170,7 @@ def _processing_payload(wav_base64):
     }
 
 
-def _processing_wav_base64():
-    return base64.standard_b64encode(
-        encode_pcm_wav(np.ones(8, dtype=np.float32) * 0.1, 16000)
-    ).decode("ascii")
-
-
-def _synthesis_payload():
+def _synthesis_payload() -> dict[str, object]:
     return {
         **_making_payload(),
         "volumeScale": 1.0,
@@ -303,39 +182,94 @@ def _synthesis_payload():
     }
 
 
-def _mora_duration(mora, start, end):
-    return {
-        "mora": mora,
-        "hira": "",
-        "phonemePitches": [],
-        "wavRange": {"start": start, "end": end},
-    }
+@pytest.mark.parametrize(
+    ("path", "callback_name"),
+    [
+        ("/v1/download_info", "download_info_callback"),
+        ("/v1/downloadable_speakers", "downloadable_speakers_callback"),
+        ("/v1/update_info", "update_info_callback"),
+    ],
+)
+def test_catalog_failure_returns_json_502(
+    v2_fake_audio_manager_cls: type,
+    path: str,
+    callback_name: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def unavailable_catalog() -> None:
+        raise CatalogNetworkError("catalog connection failed")
+
+    app, _, _ = _make_app(
+        v2_fake_audio_manager_cls, **{callback_name: unavailable_catalog}
+    )
+
+    response = TestClient(app).get(path)
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "catalog connection failed"}
+    assert "CatalogNetworkError: catalog connection failed" in caplog.text
 
 
-def _internal_pause_durations():
-    return [
-        _mora_duration("a", 0, 2),
-        _mora_duration("pau", 2, 4),
-        _mora_duration("a", 4, 8),
-    ]
+def test_catalog_programming_error_is_not_reported_as_transport_failure(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    def broken_callback() -> None:
+        raise ValueError("callback implementation failed")
+
+    app, _, _ = _make_app(
+        v2_fake_audio_manager_cls, download_info_callback=broken_callback
+    )
+
+    with pytest.raises(ValueError, match="callback implementation failed"):
+        TestClient(app).get("/v1/download_info")
 
 
-def test_v2_router_covers_json_metadata_and_control_endpoints():
-    app, _manager, dictionary_calls = _app()
+def test_status_and_metadata_endpoints(v2_fake_audio_manager_cls: type) -> None:
+    app, _, _ = _make_app(v2_fake_audio_manager_cls)
     client = TestClient(app)
 
     assert client.get("/").json() == {"status": "start"}
     assert client.get("/v1/engine_info").json() == {
         "device": "cpu",
-        "version": "0.2.2+coeiroink.1.7.3",
+        "version": voicevox_engine.__version__,
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
     assert client.get("/v1/speakers_path_variant").status_code == 200
-
-    prosody = client.post(
-        "/v1/estimate_prosody_from_kana",
-        json={"text": "ア'"},
+    assert (
+        client.get("/v1/speaker_folder_path", params={"speakerUuid": SPEAKER_UUID})
+        .json()["speakerFolderPath"]
+        .endswith("/fake")
     )
+    assert client.get("/v1/speaker_folder_path").json() == {"speakerFolderPath": "None"}
+    assert (
+        client.post(
+            "/v1/style_id_to_speaker_meta", params={"styleId": STYLE_ID}
+        ).json()["styleId"]
+        == STYLE_ID
+    )
+    assert client.post("/v1/style_id_to_speaker_meta").json() == {
+        "speakerUuid": "None",
+        "styleId": 0,
+        "speakerName": "None",
+        "styleName": "None",
+    }
+    assert (
+        client.get(
+            "/v1/sample_voice",
+            params={"speakerUuid": SPEAKER_UUID, "styleId": STYLE_ID},
+        ).headers["content-type"]
+        == "audio/wav"
+    )
+    assert client.get(
+        "/v1/speaker_policy", params={"speakerUuid": SPEAKER_UUID}
+    ).json() == {"policy": "policy", "license": "license"}
+
+
+def test_prosody_query_and_f0_endpoints(v2_fake_audio_manager_cls: type) -> None:
+    app, _, _ = _make_app(v2_fake_audio_manager_cls)
+    client = TestClient(app)
+
+    prosody = client.post("/v1/estimate_prosody_from_kana", json={"text": "ア'"})
     assert prosody.status_code == 200
     assert prosody.json() == {"detail": [[{"phoneme": "a", "hira": "あ", "accent": 1}]]}
 
@@ -369,43 +303,17 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
         "$",
     ]
 
-    wav = encode_pcm_wav(np.ones(8, dtype=np.float32) * 0.1, 16000)
-    wav_base64 = base64.standard_b64encode(wav).decode("ascii")
     f0 = client.post(
         "/v1/estimate_f0",
-        json={"wavBase64": wav_base64, "moraDurations": []},
+        json={"wavBase64": _processing_wav_base64(), "moraDurations": []},
     )
     assert f0.status_code == 200
     assert f0.json()["f0"] == [110.0, 120.0]
 
-    assert (
-        client.get("/v1/speaker_folder_path", params={"speakerUuid": SPEAKER_UUID})
-        .json()["speakerFolderPath"]
-        .endswith("/fake")
-    )
-    assert client.get("/v1/speaker_folder_path").json() == {"speakerFolderPath": "None"}
-    assert (
-        client.post(
-            "/v1/style_id_to_speaker_meta", params={"styleId": STYLE_ID}
-        ).json()["styleId"]
-        == STYLE_ID
-    )
-    assert client.post("/v1/style_id_to_speaker_meta").json() == {
-        "speakerUuid": "None",
-        "styleId": 0,
-        "speakerName": "None",
-        "styleName": "None",
-    }
-    assert (
-        client.get(
-            "/v1/sample_voice",
-            params={"speakerUuid": SPEAKER_UUID, "styleId": STYLE_ID},
-        ).headers["content-type"]
-        == "audio/wav"
-    )
-    assert client.get(
-        "/v1/speaker_policy", params={"speakerUuid": SPEAKER_UUID}
-    ).json() == {"policy": "policy", "license": "license"}
+
+def test_control_and_catalog_endpoints(v2_fake_audio_manager_cls: type) -> None:
+    app, _, dictionary_calls = _make_app(v2_fake_audio_manager_cls)
+    client = TestClient(app)
 
     assert client.post("/v1/set_dictionary", json={"dictionaryWords": []}).json() == {}
     assert len(dictionary_calls) == 1
@@ -439,8 +347,10 @@ def test_v2_router_covers_json_metadata_and_control_endpoints():
     assert client.get("/v1/update_info").json() == []
 
 
-def test_v2_router_prediction_process_and_redirect_contract():
-    app, manager, _ = _app()
+def test_predict_and_predict_with_duration_endpoints(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls)
     client = TestClient(app)
 
     payload = _making_payload()
@@ -449,12 +359,9 @@ def test_v2_router_prediction_process_and_redirect_contract():
     assert predicted.headers["content-type"] == "audio/wav"
     assert manager.prediction_calls[-1]["text"] == ["^", "a", "$"]
 
-    estimated_payload = {
-        **payload,
-        "text": "い",
-        "prosodyDetail": [],
-    }
-    estimated = client.post("/v1/predict", json=estimated_payload)
+    estimated = client.post(
+        "/v1/predict", json={**payload, "text": "い", "prosodyDetail": []}
+    )
     assert estimated.status_code == 200
     assert manager.prediction_calls[-1]["text"] == ["^", "i", "$"]
 
@@ -463,14 +370,17 @@ def test_v2_router_prediction_process_and_redirect_contract():
     assert with_duration.headers["content-type"].startswith("application/json")
     assert with_duration.json()["moraDurations"]
 
+
+def test_process_synthesis_and_redirect_endpoints(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls)
+    client = TestClient(app)
+
     processed = client.post(
         "/v1/process",
         json={
-            **_processing_payload(
-                base64.standard_b64encode(
-                    encode_pcm_wav(np.ones(8, dtype=np.float32) * 0.1, 16000)
-                ).decode("ascii")
-            ),
+            **_processing_payload(_processing_wav_base64()),
             "sampledIntervalValue": 0,
             "adjustedF0": [],
             "processingAlgorithm": "coeiroink",
@@ -481,24 +391,19 @@ def test_v2_router_prediction_process_and_redirect_contract():
 
     pitch_time = np.arange(4096, dtype=np.float32) / 16000.0
     pitch_wav = encode_pcm_wav(0.1 * np.sin(2.0 * np.pi * 220.0 * pitch_time), 16000)
-    pitch_payload = _processing_payload(
-        base64.standard_b64encode(pitch_wav).decode("ascii")
-    )
-    pitch_payload.update(
-        {
+    pitched = client.post(
+        "/v1/process",
+        json={
+            **_processing_payload(base64.standard_b64encode(pitch_wav).decode("ascii")),
             "processingAlgorithm": "resampling",
             "pitchScale": 0.25,
             "adjustedF0": [],
-        }
+        },
     )
-    pitched = client.post("/v1/process", json=pitch_payload)
     assert pitched.status_code == 200
     assert pitched.headers["content-type"] == "audio/wav"
 
-    synthesis = client.post(
-        "/v1/synthesis",
-        json=_synthesis_payload(),
-    )
+    synthesis = client.post("/v1/synthesis", json=_synthesis_payload())
     assert synthesis.status_code == 200
     assert synthesis.headers["content-type"] == "audio/wav"
     assert manager.prediction_calls[-1]["kind"] == "predict"
@@ -510,8 +415,10 @@ def test_v2_router_prediction_process_and_redirect_contract():
     assert redirected.content == b""
 
 
-def test_v2_synthesis_voice_smoothing_gets_duration_and_runs_once():
-    app, manager, _ = _app(voice_smoothing=True)
+def test_v2_synthesis_voice_smoothing_gets_duration_and_runs_once(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls, voice_smoothing=True)
 
     response = TestClient(app).post("/v1/synthesis", json=_synthesis_payload())
 
@@ -536,16 +443,19 @@ def test_v2_synthesis_voice_smoothing_gets_duration_and_runs_once():
 
 
 @pytest.mark.parametrize(
-    "text, special_phoneme, special_hira",
+    ("text", "special_phoneme", "special_hira"),
     [
         ("これは。あれは。", "_", "、"),
         ("これは質問ですか？", "?", "？"),
     ],
 )
 def test_v2_estimated_prosody_detail_round_trips_special_phrases(
-    text, special_phoneme, special_hira
-):
-    app, manager, _ = _app()
+    v2_fake_audio_manager_cls: type,
+    text: str,
+    special_phoneme: str,
+    special_hira: str,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls)
     client = TestClient(app)
 
     estimated = client.post("/v1/estimate_prosody", json={"text": text})
@@ -571,162 +481,62 @@ def test_v2_estimated_prosody_detail_round_trips_special_phrases(
     assert manager.prediction_calls[-1]["text"] == estimated_data["plain"]
 
 
-def test_v2_process_rejects_an_oversized_pause_length_with_422():
-    app, _, _ = _app()
+def test_question_in_middle_can_be_predicted_with_or_without_prosody_detail(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls)
     client = TestClient(app)
-    payload = _processing_payload(_processing_wav_base64())
-    payload.update(
-        {
-            "pauseLength": MAX_PAUSE_LENGTH_SECONDS + 0.001,
-            "moraDurations": _internal_pause_durations(),
-        }
-    )
+    text = "お元気ですか？今日は晴れです。"
+    estimated = client.post("/v1/estimate_prosody", json={"text": text})
+    assert estimated.status_code == 200
 
-    response = client.post("/v1/process", json=payload)
+    for detail in (estimated.json()["detail"], []):
+        response = client.post(
+            "/v1/predict",
+            json={**_making_payload(), "text": text, "prosodyDetail": detail},
+        )
+        assert response.status_code == 200
 
-    assert response.status_code == 422
-
-
-def test_v2_process_rejects_a_zero_length_internal_pau_with_422():
-    app, _, _ = _app()
-    client = TestClient(app)
-    payload = _processing_payload(_processing_wav_base64())
-    payload.update(
-        {
-            "pauseLength": 0.3,
-            "moraDurations": [
-                _mora_duration("a", 0, 2),
-                _mora_duration("pau", 2, 2),
-                _mora_duration("a", 2, 8),
-            ],
-        }
-    )
-
-    response = client.post("/v1/process", json=payload)
-
-    assert response.status_code == 422
+    tokens = manager.prediction_calls[0]["text"]
+    assert tokens == manager.prediction_calls[1]["text"]
+    assert "_" in tokens
+    assert "?" not in tokens
+    assert tokens[-1] == "$"
 
 
 @pytest.mark.parametrize(
-    "field, value",
+    "overrides",
     [
-        ("outputSamplingRate", 0),
-        ("outputSamplingRate", MAX_SAMPLING_RATE + 1),
-        ("prePhonemeLength", -0.001),
-        ("postPhonemeLength", -0.001),
-        ("volumeScale", -0.001),
-        ("intonationScale", -0.001),
+        {"outputSamplingRate": 0},
+        {"wavBase64": "not-valid-base64!"},
+        {
+            "pauseLength": 0.3,
+            "moraDurations": [
+                {
+                    "mora": mora,
+                    "hira": "",
+                    "phonemePitches": [],
+                    "wavRange": {"start": start, "end": end},
+                }
+                for mora, start, end in (("a", 0, 2), ("pau", 2, 2), ("a", 2, 8))
+            ],
+        },
     ],
 )
-def test_v2_process_rejects_invalid_sampling_and_processing_values_with_422(
-    field, value
-):
-    app, _, _ = _app()
-    client = TestClient(app)
-    payload = _processing_payload(_processing_wav_base64())
-    payload[field] = value
+def test_v2_process_rejects_invalid_payloads_with_422(
+    v2_fake_audio_manager_cls: type,
+    overrides: dict[str, object],
+) -> None:
+    app, _, _ = _make_app(v2_fake_audio_manager_cls)
+    payload = {**_processing_payload(_processing_wav_base64()), **overrides}
 
-    response = client.post("/v1/process", json=payload)
-
-    assert response.status_code == 422
+    assert TestClient(app).post("/v1/process", json=payload).status_code == 422
 
 
-def test_v2_process_applies_adjusted_f0_before_pause_replacement_with_fake(
-    monkeypatch,
-):
-    manager = RecordingFakeAudioManager()
-    wave = np.linspace(-0.25, 0.25, 8, dtype=np.float32)
-
-    def fake_world(
-        audio_manager,
-        current,
-        sampling_rate,
-        pitch_scale,
-        intonation_scale,
-        adjusted_f0,
-    ):
-        assert audio_manager is manager
-        assert sampling_rate == 16000
-        assert pitch_scale == 0.0
-        assert intonation_scale == 1.0
-        np.testing.assert_array_equal(adjusted_f0, [110.0, 120.0])
-        manager.events.append("adjusted_f0")
-        return current + 1.0
-
-    def fake_pause(current, *args, **kwargs):
-        np.testing.assert_array_equal(current, wave + 1.0)
-        manager.events.append("pause")
-        return current
-
-    monkeypatch.setattr(wave_processing, "_world_process", fake_world)
-    monkeypatch.setattr(
-        router_module.audio_helpers,
-        "replace_pause_segments",
-        fake_pause,
-    )
-
-    result, sampling_rate = wave_processing.process_wave(
-        manager,
-        wave,
-        16000,
-        wave_processing.WaveProcessingOptions(
-            volume_scale=1.0,
-            pitch_scale=0.0,
-            intonation_scale=1.0,
-            pre_phoneme_length=0.0,
-            post_phoneme_length=0.0,
-            output_sampling_rate=16000,
-            start_trim_buffer=0.0,
-            end_trim_buffer=0.0,
-            processing_algorithm="world",
-            adjusted_f0=[110.0, 120.0],
-            pause_length=0.3,
-            pause_start_trim_buffer=0.0,
-            pause_end_trim_buffer=0.0,
-            mora_durations=_internal_pause_durations(),
-        ),
-    )
-
-    assert sampling_rate == 16000
-    np.testing.assert_array_equal(result, wave + 1.0)
-    assert manager.events == ["adjusted_f0", "pause"]
-
-
-def test_world_processing_preserves_unvoiced_f0_frames(monkeypatch):
-    manager = FakeAudioManager()
-    wave = np.zeros(32, dtype=np.float32)
-    captured = {}
-
-    def fake_world(wave, sampling_rate):
-        return (
-            np.array([0.0, 100.0, 200.0, 0.0]),
-            None,
-            None,
-        )
-
-    def fake_synthesize(f0, spectral_envelope, aperiodicity, sampling_rate):
-        captured["f0"] = np.asarray(f0).copy()
-        return np.zeros(32, dtype=np.float64)
-
-    manager.get_world = fake_world
-    monkeypatch.setattr(load_pyworld(), "synthesize", fake_synthesize)
-
-    result = wave_processing._world_process(
-        manager,
-        wave,
-        16000,
-        pitch_scale=0.0,
-        intonation_scale=0.5,
-        adjusted_f0=[0.0, 100.0, 200.0, 0.0],
-    )
-
-    np.testing.assert_array_equal(captured["f0"], [0.0, 125.0, 175.0, 0.0])
-    assert result.dtype == np.float32
-    assert result.shape == wave.shape
-
-
-def test_v2_router_openapi_uses_aliases_and_audio_content_types():
-    app, _, _ = _app()
+def test_v2_router_openapi_uses_aliases_and_audio_content_types(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, _, _ = _make_app(v2_fake_audio_manager_cls)
     schema = app.openapi()
 
     assert (
@@ -749,21 +559,18 @@ def test_v2_router_openapi_uses_aliases_and_audio_content_types():
     assert "default" not in index_parameter["schema"]
 
 
-def test_missing_sample_voice_uses_official_error_contract(tmp_path):
+def test_missing_sample_voice_uses_official_error_contract(
+    tmp_path: Path,
+    v2_fake_audio_manager_cls: type,
+) -> None:
     class MissingSampleMetadata(FakeMetadata):
-        def read_sample_voice(self, speaker_uuid, style_id, index):
+        def read_sample_voice(
+            self, speaker_uuid: str, style_id: int, index: int
+        ) -> bytes:
             raise MetadataAssetNotFoundError(tmp_path / "missing.wav", "voice sample")
 
-    manager = FakeAudioManager()
-    missing_app = FastAPI()
-    missing_app.include_router(
-        create_v2_router(
-            manager,
-            MissingSampleMetadata(),
-            download_info_callback=list,
-            downloadable_speakers_callback=list,
-            update_info_callback=list,
-        )
+    missing_app, _, _ = _make_app(
+        v2_fake_audio_manager_cls, metadata=MissingSampleMetadata()
     )
     response = TestClient(missing_app).get(
         "/v1/sample_voice",
@@ -774,25 +581,25 @@ def test_missing_sample_voice_uses_official_error_contract(tmp_path):
     assert response.json() == {"detail": "Sample voice file not found"}
 
 
-def test_sample_voice_rejects_negative_index() -> None:
-    app, _, _ = _app()
+def test_sample_voice_rejects_negative_index(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, _, _ = _make_app(v2_fake_audio_manager_cls)
 
     response = TestClient(app).get(
         "/v1/sample_voice",
-        params={
-            "speakerUuid": SPEAKER_UUID,
-            "styleId": STYLE_ID,
-            "index": -1,
-        },
+        params={"speakerUuid": SPEAKER_UUID, "styleId": STYLE_ID, "index": -1},
     )
 
     assert response.status_code == 422
 
 
-def test_unexpected_value_error_is_not_reported_as_request_validation() -> None:
-    app, manager, _ = _app()
+def test_unexpected_value_error_is_not_reported_as_request_validation(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls)
 
-    def fail_prediction(*args, **kwargs):
+    def fail_prediction(*_args: object, **_kwargs: object) -> None:
         raise ValueError("implementation defect")
 
     manager.predict = fail_prediction
@@ -801,10 +608,13 @@ def test_unexpected_value_error_is_not_reported_as_request_validation() -> None:
         TestClient(app).post("/v1/predict", json=_making_payload())
 
 
-def test_synthesis_error_logs_the_original_cause(caplog) -> None:
-    app, manager, _ = _app()
+def test_synthesis_error_logs_the_original_cause(
+    v2_fake_audio_manager_cls: type,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls)
 
-    def fail_prediction(*args, **kwargs):
+    def fail_prediction(*_args: object, **_kwargs: object) -> None:
         try:
             raise RuntimeError("inference failure")
         except RuntimeError as error:
@@ -819,35 +629,15 @@ def test_synthesis_error_logs_the_original_cause(caplog) -> None:
     assert len(caplog.records) == 1
 
 
-def test_question_in_middle_can_be_predicted_with_or_without_prosody_detail():
-    app, manager, _ = _app()
-    client = TestClient(app)
-    text = "お元気ですか？今日は晴れです。"
-    estimated = client.post("/v1/estimate_prosody", json={"text": text})
-    assert estimated.status_code == 200
+def test_core_parameter_error_is_reported_as_request_validation(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls)
 
-    for detail in (estimated.json()["detail"], []):
-        response = client.post(
-            "/v1/predict",
-            json={**_making_payload(), "text": text, "prosodyDetail": detail},
-        )
-        assert response.status_code == 200
-
-    tokens = manager.prediction_calls[0]["text"]
-    assert tokens == manager.prediction_calls[1]["text"]
-    assert "_" in tokens
-    assert "?" not in tokens
-    assert tokens[-1] == "$"
-
-
-def test_core_parameter_error_is_reported_as_request_validation() -> None:
-    app, manager, _ = _app()
-
-    def reject_parameter(*args, **kwargs):
+    def reject_parameter(*_args: object, **_kwargs: object) -> None:
         raise InvalidSynthesisParameterError("speed_scale must be positive")
 
     manager.predict = reject_parameter
-
     response = TestClient(app, raise_server_exceptions=False).post(
         "/v1/predict",
         json=_making_payload(),

@@ -1,19 +1,30 @@
+"""キャンセル可能合成ワーカーのプロセス管理・切断検知・エラー伝播・終了処理を検証する。"""
+
+from __future__ import annotations
+
 import argparse
 import asyncio
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from multiprocessing import get_context
 from pathlib import Path
 from tempfile import NamedTemporaryFile as RealNamedTemporaryFile
 from threading import RLock
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import numpy as np
 import pytest
+from coeirocore.coeiro_manager import (
+    InvalidSynthesisParameterError,
+    StyleNotFoundError,
+)
 from fastapi import FastAPI, HTTPException, Request
 
+import run as engine_run
 from run import _add_cors_middleware, _add_exception_handlers, _create_lifespan
+from voicevox_engine import cancellable_engine as cancellable_module
 from voicevox_engine.cancellable_engine import (
     CancellableEngine,
     CancellableRequestDisconnected,
@@ -27,34 +38,53 @@ from voicevox_engine.setting import CorsPolicyMode
 
 
 class _FakeProcess:
-    def __init__(self, alive: bool = True):
+    def __init__(self, alive: bool = True) -> None:
         self.alive = alive
-        self.join_timeouts = []
-        self.join_thread_ids = []
+        self.join_timeouts: list[float | None] = []
+        self.join_thread_ids: list[int] = []
         self.terminate_calls = 0
         self.kill_calls = 0
         self.close_calls = 0
 
-    def is_alive(self):
+    def is_alive(self) -> bool:
         return self.alive
 
-    def terminate(self):
+    def terminate(self) -> None:
         self.terminate_calls += 1
         self.alive = False
 
-    def kill(self):
+    def kill(self) -> None:
         self.kill_calls += 1
         self.alive = False
 
-    def join(self, timeout):
+    def join(self, timeout: float | None = None) -> None:
         self.join_timeouts.append(timeout)
         self.join_thread_ids.append(threading.get_ident())
 
-    def close(self):
+    def close(self) -> None:
         self.close_calls += 1
 
 
-def _engine_without_processes():
+def _worker_args(**overrides: object) -> argparse.Namespace:
+    values: dict[str, object] = {
+        "device": "cpu",
+        "use_gpu": None,
+        "device_index": 0,
+        "opencl_platform_index": 0,
+        "resampler": "resampy",
+        "voicelib_dir": [],
+        "voicevox_dir": None,
+        "runtime_dir": [],
+        "cpu_num_threads": 0,
+        "speaker_info_dir": None,
+        "enable_mock": True,
+        "voice_smoothing": False,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def _engine_without_processes() -> CancellableEngine:
     engine = object.__new__(CancellableEngine)
     engine._state_lock = RLock()
     engine._shutting_down = False
@@ -66,17 +96,14 @@ def _engine_without_processes():
     return engine
 
 
-def test_cancellable_engine_requires_at_least_one_worker():
-    args = argparse.Namespace(
-        enable_cancellable_synthesis=True,
-        init_processes=0,
-    )
+def test_cancellable_engine_requires_at_least_one_worker() -> None:
+    args = argparse.Namespace(enable_cancellable_synthesis=True, init_processes=0)
 
     with pytest.raises(ValueError, match="init_processes must be at least 1"):
         CancellableEngine(args)
 
 
-def test_eof_replaces_failed_worker():
+def test_eof_replaces_failed_worker() -> None:
     engine = _engine_without_processes()
     request = Mock()
     process = Mock()
@@ -104,7 +131,7 @@ def test_eof_replaces_failed_worker():
     assert engine.watch_con_list == []
 
 
-def test_dead_worker_is_not_requeued_when_finalized():
+def test_dead_worker_is_not_requeued_when_finalized() -> None:
     engine = _engine_without_processes()
     request = Mock()
     process = _FakeProcess(alive=False)
@@ -120,7 +147,7 @@ def test_dead_worker_is_not_requeued_when_finalized():
     assert process.close_calls == 1
 
 
-def test_concurrent_finalizers_replace_a_worker_once():
+def test_concurrent_finalizers_replace_a_worker_once() -> None:
     engine = _engine_without_processes()
     request = Mock()
     process = _FakeProcess()
@@ -128,7 +155,7 @@ def test_concurrent_finalizers_replace_a_worker_once():
     engine.watch_con_list.append(_RequestState(request, process, connection))
     barrier = threading.Barrier(2)
 
-    def finalize():
+    def finalize() -> None:
         barrier.wait()
         engine.finalize_con(request, process, connection)
 
@@ -142,7 +169,7 @@ def test_concurrent_finalizers_replace_a_worker_once():
     engine.start_new_proc.assert_not_called()
 
 
-def test_child_error_is_structured_and_not_treated_as_http_422():
+def test_child_error_is_structured_and_not_treated_as_http_422() -> None:
     connection = Mock()
     connection.recv.return_value = {
         "kind": "error",
@@ -161,127 +188,89 @@ def test_child_error_is_structured_and_not_treated_as_http_422():
     assert not isinstance(error.value, HTTPException)
 
 
-def test_child_reports_synthesis_error_and_keeps_worker_alive():
+def test_child_reports_synthesis_error_and_keeps_worker_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FakeConnection:
-        def __init__(self, *requests):
+        def __init__(self, *requests: object) -> None:
             self.requests = iter(requests)
-            self.sent = []
+            self.sent: list[dict[str, object]] = []
             self.closed = False
 
-        def recv(self):
+        def recv(self) -> object:
             return next(self.requests)
 
-        def send(self, message):
+        def send(self, message: dict[str, object]) -> None:
             self.sent.append(message)
 
-        def close(self):
+        def close(self) -> None:
             self.closed = True
 
     query = Mock(outputSamplingRate=16_000)
     synthesis_engine = Mock()
     synthesis_engine.synthesis.side_effect = ValueError("invalid test input")
-    connection = FakeConnection(
-        (query, 1, True, None),
-        {"kind": "shutdown"},
-    )
-    args = argparse.Namespace(
-        device="cpu",
-        use_gpu=None,
-        device_index=0,
-        opencl_platform_index=0,
-        resampler="resampy",
-        voicelib_dir=[],
-        voicevox_dir=None,
-        runtime_dir=[],
-        cpu_num_threads=0,
-        speaker_info_dir=None,
-        enable_mock=True,
-        generator_only=False,
-        voice_smoothing=False,
+    connection = FakeConnection((query, 1, True, None), {"kind": "shutdown"})
+    monkeypatch.setattr(cancellable_module, "resolve_device", lambda *_a, **_kw: "cpu")
+    monkeypatch.setattr(
+        cancellable_module,
+        "make_synthesis_engines",
+        lambda *_a, **_kw: {"1.0": synthesis_engine},
     )
 
-    with (
-        patch(
-            "voicevox_engine.cancellable_engine.resolve_device",
-            return_value="cpu",
-        ),
-        patch(
-            "voicevox_engine.cancellable_engine.make_synthesis_engines",
-            return_value={"1.0": synthesis_engine},
-        ),
-    ):
-        start_synthesis_subprocess(args, connection)
+    start_synthesis_subprocess(_worker_args(generator_only=False), connection)
 
     assert connection.closed
     assert connection.sent[0]["kind"] == "error"
-    assert connection.sent[0]["exception_type"].endswith("ValueError")
+    assert str(connection.sent[0]["exception_type"]).endswith("ValueError")
     assert len(connection.sent) == 1
     synthesis_engine.synthesis.assert_called_once()
 
 
-def test_subprocess_removes_wave_if_result_cannot_be_sent(tmp_path: Path):
+def test_subprocess_removes_wave_if_result_cannot_be_sent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FailingConnection:
-        def __init__(self):
+        def __init__(self) -> None:
             self.received = False
 
-        def recv(self):
+        def recv(self) -> tuple[Mock, int, bool, None]:
             if self.received:
                 raise EOFError
             self.received = True
             return Mock(outputSamplingRate=16_000), 1, False, None
 
-        def send(self, _message):
+        def send(self, _message: object) -> None:
             raise OSError("connection closed")
 
-        def close(self):
+        def close(self) -> None:
             pass
 
     synthesis_engine = Mock()
     synthesis_engine.synthesis.return_value = np.zeros(16, dtype=np.float32)
-    args = argparse.Namespace(
-        device="cpu",
-        use_gpu=None,
-        device_index=0,
-        opencl_platform_index=0,
-        resampler="resampy",
-        voicelib_dir=[],
-        voicevox_dir=None,
-        runtime_dir=[],
-        cpu_num_threads=0,
-        speaker_info_dir=None,
-        enable_mock=True,
-        generator_only=False,
-        voice_smoothing=False,
+    monkeypatch.setattr(cancellable_module, "resolve_device", lambda *_a, **_kw: "cpu")
+    monkeypatch.setattr(
+        cancellable_module,
+        "make_synthesis_engines",
+        lambda *_a, **_kw: {"1.0": synthesis_engine},
+    )
+    monkeypatch.setattr(
+        cancellable_module,
+        "NamedTemporaryFile",
+        partial(RealNamedTemporaryFile, dir=tmp_path),
     )
 
-    def temporary_file(**kwargs):
-        return RealNamedTemporaryFile(dir=tmp_path, **kwargs)
-
-    with (
-        patch(
-            "voicevox_engine.cancellable_engine.resolve_device",
-            return_value="cpu",
-        ),
-        patch(
-            "voicevox_engine.cancellable_engine.make_synthesis_engines",
-            return_value={"1.0": synthesis_engine},
-        ),
-        patch(
-            "voicevox_engine.cancellable_engine.NamedTemporaryFile",
-            side_effect=temporary_file,
-        ),
-    ):
-        start_synthesis_subprocess(args, FailingConnection())
+    start_synthesis_subprocess(_worker_args(generator_only=False), FailingConnection())
 
     assert list(tmp_path.iterdir()) == []
 
 
-def test_disconnection_monitor_cancels_request_waiting_for_worker():
+def test_disconnection_monitor_cancels_request_waiting_for_worker() -> None:
     engine = _engine_without_processes()
     request = Mock()
     request.is_disconnected = AsyncMock(return_value=True)
 
-    async def run_test():
+    async def run_test() -> None:
         monitor = asyncio.create_task(engine.catch_disconnection())
         try:
             with pytest.raises(CancellableRequestDisconnected):
@@ -305,27 +294,31 @@ def test_disconnection_monitor_cancels_request_waiting_for_worker():
     asyncio.run(run_test())
 
 
-def test_disconnect_reaches_monitor_through_origin_middleware(caplog):
+def test_disconnect_reaches_monitor_through_origin_middleware(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     engine = _engine_without_processes()
     app = FastAPI(lifespan=_create_lifespan(engine, Mock()))
     _add_exception_handlers(app)
     _add_cors_middleware(app, CorsPolicyMode.localapps, None)
+    monkeypatch.setattr(engine_run, "update_dict", lambda: None)
 
-    async def run_test():
+    async def run_test() -> None:
         started = asyncio.Event()
-        incoming = asyncio.Queue()
+        incoming: asyncio.Queue[dict[str, object]] = asyncio.Queue()
         incoming.put_nowait({"type": "http.request", "body": b""})
-        sent = []
+        sent: list[dict[str, object]] = []
 
         @app.post("/synthesis")
-        async def synthesis(request: Request):
+        async def synthesis(request: Request) -> object:
             await request.body()
             started.set()
             return await asyncio.to_thread(
                 engine._synthesis_impl, Mock(), 1, request, False, None
             )
 
-        async def send(message):
+        async def send(message: dict[str, object]) -> None:
             sent.append(message)
 
         scope = {
@@ -350,12 +343,11 @@ def test_disconnect_reaches_monitor_through_origin_middleware(caplog):
         assert not engine.watch_con_list
         assert sent[0]["status"] == 499
 
-    with patch("run.update_dict"):
-        asyncio.run(run_test())
+    asyncio.run(run_test())
     assert not [record for record in caplog.records if record.exc_info]
 
 
-def test_async_disconnection_cleanup_does_not_join_on_event_loop_thread():
+def test_async_disconnection_cleanup_does_not_join_on_event_loop_thread() -> None:
     engine = _engine_without_processes()
     request = Mock()
     process = _FakeProcess()
@@ -366,7 +358,7 @@ def test_async_disconnection_cleanup_does_not_join_on_event_loop_thread():
     engine.watch_con_list.append(state)
     event_loop_thread_id = threading.get_ident()
 
-    async def run_test():
+    async def run_test() -> None:
         await engine._finalize_disconnected(state)
 
     asyncio.run(run_test())
@@ -378,7 +370,7 @@ def test_async_disconnection_cleanup_does_not_join_on_event_loop_thread():
     engine.shutdown(timeout=0)
 
 
-def test_shutdown_is_explicit_bounded_and_idempotent():
+def test_shutdown_is_explicit_bounded_and_idempotent() -> None:
     engine = _engine_without_processes()
     process = _FakeProcess()
     connection = Mock()
@@ -394,7 +386,9 @@ def test_shutdown_is_explicit_bounded_and_idempotent():
     assert engine.procs_and_cons.empty()
 
 
-def test_shutdown_collects_a_worker_being_returned():
+def test_shutdown_collects_a_worker_being_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     engine = _engine_without_processes()
     process = _FakeProcess()
     connection = Mock()
@@ -402,19 +396,17 @@ def test_shutdown_collects_a_worker_being_returned():
     resume = threading.Event()
     stopped = threading.Event()
 
-    def is_alive():
+    def is_alive() -> bool:
         checking.set()
         assert resume.wait(timeout=2)
         return process.alive
 
-    def shutdown():
+    def shutdown() -> None:
         engine.shutdown(timeout=0)
         stopped.set()
 
-    with (
-        patch.object(process, "is_alive", side_effect=is_alive),
-        ThreadPoolExecutor(max_workers=2) as executor,
-    ):
+    monkeypatch.setattr(process, "is_alive", is_alive)
+    with ThreadPoolExecutor(max_workers=2) as executor:
         returning = executor.submit(engine._put_available_worker, (process, connection))
         try:
             assert checking.wait(timeout=2)
@@ -430,46 +422,34 @@ def test_shutdown_collects_a_worker_being_returned():
     assert process.close_calls == 1
 
 
-def test_workers_use_spawn_context():
-    args = argparse.Namespace(
-        enable_cancellable_synthesis=True,
-        init_processes=1,
+def test_workers_use_spawn_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    args = argparse.Namespace(enable_cancellable_synthesis=True, init_processes=1)
+    monkeypatch.setattr(
+        CancellableEngine, "start_new_proc", lambda _self: (Mock(), Mock())
     )
-    with patch.object(
-        CancellableEngine,
-        "start_new_proc",
-        return_value=(Mock(), Mock()),
-    ):
-        engine = CancellableEngine(args)
+
+    engine = CancellableEngine(args)
 
     assert engine._mp_context.get_start_method() == "spawn"
 
 
-def test_subprocess_passes_device_without_preloading_every_model():
-    args = argparse.Namespace(
+def test_subprocess_passes_device_without_preloading_every_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = _worker_args(
         device="opencl",
-        use_gpu=None,
         device_index=2,
         opencl_platform_index=1,
-        voicelib_dir=[],
-        voicevox_dir=None,
-        runtime_dir=[],
-        cpu_num_threads=0,
         speaker_info_dir=Path("speaker_info"),
-        enable_mock=True,
         resampler="soxr-vhq",
         max_loaded_models=None,
         voice_smoothing=True,
         dangerous_skip_check=True,
     )
+    make_engines = Mock(side_effect=RuntimeError("stop before worker loop"))
+    monkeypatch.setattr(cancellable_module, "make_synthesis_engines", make_engines)
 
-    with (
-        patch(
-            "voicevox_engine.cancellable_engine.make_synthesis_engines",
-            side_effect=RuntimeError("stop before worker loop"),
-        ) as make_engines,
-        pytest.raises(RuntimeError, match="stop before worker loop"),
-    ):
+    with pytest.raises(RuntimeError, match="stop before worker loop"):
         start_synthesis_subprocess(args, Mock())
 
     make_engines.assert_called_once_with(
@@ -488,3 +468,122 @@ def test_subprocess_passes_device_without_preloading_every_model():
         voice_smoothing=True,
         dangerous_skip_check=True,
     )
+
+
+def test_disabled_cancellable_synthesis_returns_explicit_404(
+    engine_client_factory,
+) -> None:
+    client, _ = engine_client_factory.create_client()
+    style_id = engine_client_factory.style_id
+    query = engine_client_factory.post_audio_query(client)
+
+    response = client.post(
+        "/voicevox/cancellable_synthesis",
+        params={"speaker": style_id},
+        json=query,
+    )
+
+    assert response.status_code == 404
+    assert "デフォルトで無効" in response.json()["detail"]
+
+
+def test_enabled_cancellable_synthesis_uses_injected_engine(
+    engine_client_factory,
+) -> None:
+    wav_path = engine_client_factory.tmp_path / "cancellable.wav"
+    wav_path.write_bytes(b"RIFF-cancellable-test")
+    cancellable_engine = Mock()
+    cancellable_engine._synthesis_impl.return_value = str(wav_path)
+    client, _ = engine_client_factory.create_client(
+        cancellable_engine=cancellable_engine
+    )
+    style_id = engine_client_factory.style_id
+    query = engine_client_factory.post_audio_query(client)
+
+    response = client.post(
+        "/voicevox/cancellable_synthesis",
+        params={
+            "speaker": style_id,
+            "enable_interrogative_upspeak": False,
+        },
+        json=query,
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"RIFF-cancellable-test"
+    assert (
+        cancellable_engine._synthesis_impl.call_args.kwargs[
+            "enable_interrogative_upspeak"
+        ]
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (InvalidSynthesisParameterError("speed_scale must be positive"), 422),
+        (StyleNotFoundError("style was removed"), 404),
+        (ValueError("unexpected implementation error"), 500),
+    ],
+)
+def test_cancellable_worker_errors_keep_normal_synthesis_status(
+    engine_client_factory,
+    error: Exception,
+    expected_status: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cancellable_engine = Mock()
+    cancellable_engine._synthesis_impl.side_effect = CancellableWorkerSynthesisError(
+        {
+            "exception_type": f"{type(error).__module__}.{type(error).__qualname__}",
+            "message": str(error),
+            "traceback": "worker traceback",
+        }
+    )
+    client, _ = engine_client_factory.create_client(
+        cancellable_engine=cancellable_engine
+    )
+    style_id = engine_client_factory.style_id
+
+    response = client.post(
+        "/voicevox/cancellable_synthesis",
+        params={"speaker": style_id},
+        json=engine_client_factory.post_audio_query(client),
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": str(error)}
+    if expected_status == 500:
+        assert "worker traceback" in caplog.text
+
+
+def test_cancellable_disconnection_monitor_follows_app_lifespan(
+    engine_client_factory,
+) -> None:
+    class MonitoringCancellableEngine:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.stopped = threading.Event()
+            self.shutdown = threading.Event()
+
+        async def catch_disconnection(self) -> None:
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.stopped.set()
+
+        async def shutdown_async(self) -> None:
+            self.shutdown.set()
+
+    cancellable_engine = MonitoringCancellableEngine()
+    client, _ = engine_client_factory.create_client(
+        cancellable_engine=cancellable_engine
+    )
+
+    with client:
+        assert cancellable_engine.started.wait(timeout=1)
+
+    assert cancellable_engine.stopped.wait(timeout=1)
+    assert cancellable_engine.shutdown.wait(timeout=1)

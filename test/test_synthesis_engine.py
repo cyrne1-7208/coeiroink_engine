@@ -1,5 +1,7 @@
 """旧Core互換経路の入力変換を、手計算できる短いクエリで検証する。"""
 
+from __future__ import annotations
+
 from unittest.mock import Mock
 
 import numpy as np
@@ -10,7 +12,7 @@ from voicevox_engine.synthesis_engine import SynthesisEngine
 
 
 @pytest.fixture
-def query():
+def query() -> AudioQuery:
     frame = 256 / 24000
     return AudioQuery(
         accent_phrases=[
@@ -57,7 +59,7 @@ def query():
 
 
 @pytest.fixture
-def engine():
+def engine() -> SynthesisEngine:
     core = Mock()
     core.metas.return_value = "[]"
     core.supported_devices.return_value = "{}"
@@ -68,7 +70,10 @@ def engine():
     return SynthesisEngine(core=core)
 
 
-def test_phoneme_lengths_are_assigned_to_consonants_vowels_and_pauses(engine, query):
+def test_phoneme_lengths_are_assigned_to_consonants_vowels_and_pauses(
+    engine: SynthesisEngine,
+    query: AudioQuery,
+) -> None:
     engine.core.yukarin_s_forward.return_value = np.array(
         [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09]
     )
@@ -85,7 +90,10 @@ def test_phoneme_lengths_are_assigned_to_consonants_vowels_and_pauses(engine, qu
     assert engine.core.yukarin_s_forward.call_args.kwargs["speaker_id"].item() == 1
 
 
-def test_accent_flags_and_unvoiced_pitch_are_passed_to_legacy_core(engine, query):
+def test_accent_flags_and_unvoiced_pitch_are_passed_to_legacy_core(
+    engine: SynthesisEngine,
+    query: AudioQuery,
+) -> None:
     engine.core.yukarin_sa_forward.return_value = np.array(
         [[10.0, 5.0, 6.0, 9.0, 8.0, 10.0]]
     )
@@ -105,7 +113,10 @@ def test_accent_flags_and_unvoiced_pitch_are_passed_to_legacy_core(engine, query
     assert first.pause_mora.pitch == second.moras[0].pitch == 0
 
 
-def test_synthesis_maps_every_frame_and_preserves_query(engine, query):
+def test_synthesis_maps_every_frame_and_preserves_query(
+    engine: SynthesisEngine,
+    query: AudioQuery,
+) -> None:
     original = query.model_dump()
     wave = engine.synthesis(query, speaker_id=1)
     args = engine.core.decode_forward.call_args.kwargs
@@ -124,7 +135,10 @@ def test_synthesis_maps_every_frame_and_preserves_query(engine, query):
     assert query.model_dump() == original
 
 
-def test_speed_and_pitch_controls_reach_decoder(engine, query):
+def test_speed_and_pitch_controls_reach_decoder(
+    engine: SynthesisEngine,
+    query: AudioQuery,
+) -> None:
     query.speedScale = 2
     query.pitchScale = 1
     query.intonationScale = 0.5
@@ -138,7 +152,10 @@ def test_speed_and_pitch_controls_reach_decoder(engine, query):
     )
 
 
-def test_volume_resampling_and_stereo_are_applied_to_decoded_wave(engine, query):
+def test_volume_resampling_and_stereo_are_applied_to_decoded_wave(
+    engine: SynthesisEngine,
+    query: AudioQuery,
+) -> None:
     query.volumeScale = 0.5
     query.outputSamplingRate = 48000
     query.outputStereo = True
@@ -147,7 +164,10 @@ def test_volume_resampling_and_stereo_are_applied_to_decoded_wave(engine, query)
     np.testing.assert_allclose(wave, 0.125)
 
 
-def test_unvoiced_query_does_not_compute_an_empty_pitch_mean(engine, query):
+def test_unvoiced_query_does_not_compute_an_empty_pitch_mean(
+    engine: SynthesisEngine,
+    query: AudioQuery,
+) -> None:
     query.accent_phrases = [query.accent_phrases[-1]]
     # RuntimeWarningを隠さず、無声音だけのクエリをそのまま合成できることを確認する。
     with np.errstate(invalid="raise", divide="raise"):
@@ -156,7 +176,7 @@ def test_unvoiced_query_does_not_compute_an_empty_pitch_mean(engine, query):
 
 
 @pytest.mark.parametrize(
-    "enabled, vowel, pitch, expected_count",
+    ("enabled", "vowel", "pitch", "expected_count"),
     [
         (False, "a", 5, 1),
         (True, "a", 5, 2),
@@ -165,8 +185,13 @@ def test_unvoiced_query_does_not_compute_an_empty_pitch_mean(engine, query):
     ],
 )
 def test_interrogative_adjustment_is_optional_and_keeps_input(
-    engine, query, enabled, vowel, pitch, expected_count
-):
+    engine: SynthesisEngine,
+    query: AudioQuery,
+    enabled: bool,
+    vowel: str,
+    pitch: float,
+    expected_count: int,
+) -> None:
     query.accent_phrases = [
         AccentPhrase(
             moras=[Mora(text="テスト", vowel=vowel, vowel_length=0.1, pitch=pitch)],

@@ -1,3 +1,9 @@
+"""COEIROINK v2のテキスト・かな記法からの韻律推定と入力エラー契約を検証する。"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
 import pytest
 
 from voicevox_engine.coeiroink_v2.prosody import (
@@ -74,13 +80,13 @@ REFERENCE = {
 }
 
 
-def test_estimate_prosody_matches_saved_black_box_reference():
+def test_estimate_prosody_matches_saved_black_box_reference() -> None:
     result = estimate_prosody("これは音声合成のテストです。")
 
     assert result.model_dump() == REFERENCE
 
 
-def test_estimate_prosody_from_kana_matches_text_analysis():
+def test_estimate_prosody_from_kana_matches_text_analysis() -> None:
     kana = "コレワ'、オンセエゴ'オセエノ、テ'_ストデ_ス"
     result = estimate_prosody_from_kana(kana).model_dump()
 
@@ -96,7 +102,7 @@ def test_estimate_prosody_from_kana_matches_text_analysis():
     ]
 
 
-def test_kana_preserves_pause_and_interrogative_tokens():
+def test_kana_preserves_pause_and_interrogative_tokens() -> None:
     result = estimate_prosody_from_kana("ア'、カ'？")
 
     assert result.plain == ["^", "a", "_", "k", "a", "?"]
@@ -109,7 +115,7 @@ def test_kana_preserves_pause_and_interrogative_tokens():
 
 
 @pytest.mark.parametrize(
-    "call, message",
+    ("call", "message"),
     [
         (lambda: estimate_prosody(None), "text must be a string"),
         (lambda: estimate_prosody_from_kana(None), "kana must be a string"),
@@ -119,6 +125,8 @@ def test_kana_preserves_pause_and_interrogative_tokens():
         ),
     ],
 )
-def test_invalid_input_has_stable_error(call, message):
+def test_invalid_input_has_stable_error(
+    call: Callable[[], object], message: str
+) -> None:
     with pytest.raises(ProsodyError, match=message):
         call()

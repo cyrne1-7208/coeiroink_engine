@@ -1,3 +1,7 @@
+"""COEIROINK v2のPCM WAV入出力・トリムバッファ・休止置換・F0推定を検証する。"""
+
+from __future__ import annotations
+
 import base64
 import io
 
@@ -23,20 +27,22 @@ from voicevox_engine.coeiroink_v2.audio import (
 )
 
 
-def _sine(seconds=0.25, sampling_rate=16000, frequency=440.0):
+def _sine(
+    seconds: float = 0.25, sampling_rate: int = 16000, frequency: float = 440.0
+) -> np.ndarray:
     count = int(seconds * sampling_rate)
     time = np.arange(count, dtype=np.float32) / sampling_rate
     return (0.25 * np.sin(2 * np.pi * frequency * time)).astype(np.float32)
 
 
-def _stereo_pcm_wav():
+def _stereo_pcm_wav() -> bytes:
     wave = np.column_stack((_sine(), _sine(frequency=660.0)))
     output = io.BytesIO()
     soundfile.write(output, wave, 16000, format="WAV", subtype="PCM_16")
     return output.getvalue()
 
 
-def _mora_duration(mora, start, end):
+def _mora_duration(mora: str, start: int, end: int) -> dict[str, object]:
     return {
         "mora": mora,
         "hira": "",
@@ -45,7 +51,7 @@ def _mora_duration(mora, start, end):
     }
 
 
-def test_pcm_wav_round_trip_has_mono_pcm_header_and_sampling_rate():
+def test_pcm_wav_round_trip_has_mono_pcm_header_and_sampling_rate() -> None:
     wave = _sine()
 
     encoded = encode_pcm_wav(wave, 16000)
@@ -53,15 +59,15 @@ def test_pcm_wav_round_trip_has_mono_pcm_header_and_sampling_rate():
 
     assert encoded[:4] == b"RIFF"
     assert encoded[8:12] == b"WAVE"
-    assert encoded[20:22] == b"\x01\x00"  # PCM format tag
-    assert encoded[22:24] == b"\x01\x00"  # one channel
+    assert encoded[20:22] == b"\x01\x00"  # PCM形式
+    assert encoded[22:24] == b"\x01\x00"  # モノラル
     assert sampling_rate == 16000
     assert decoded.dtype == np.float32
     assert decoded.ndim == 1
     np.testing.assert_allclose(decoded, wave, atol=1 / 32768)
 
 
-def test_base64_round_trip_is_stable_and_validated():
+def test_base64_round_trip_is_stable_and_validated() -> None:
     wave = _sine(seconds=0.1)
 
     encoded = encode_pcm_wav_base64(wave, 16000)
@@ -78,19 +84,19 @@ def test_base64_round_trip_is_stable_and_validated():
 
 
 @pytest.mark.parametrize(
-    "value, message",
+    ("value", "message"),
     [
         (np.zeros((10, 1), dtype=np.float32), "mono 1-D"),
         (np.zeros(10, dtype=np.int16), "floating-point"),
         (np.array([0.0, np.nan], dtype=np.float32), "finite"),
     ],
 )
-def test_encoder_rejects_invalid_waveforms(value, message):
+def test_encoder_rejects_invalid_waveforms(value: np.ndarray, message: str) -> None:
     with pytest.raises(AudioValidationError, match=message):
         encode_pcm_wav(value, 16000)
 
 
-def test_decoder_rejects_stereo_rate_mismatch_and_non_wav():
+def test_decoder_rejects_stereo_rate_mismatch_and_non_wav() -> None:
     with pytest.raises(AudioValidationError, match="mono"):
         decode_pcm_wav(_stereo_pcm_wav())
     with pytest.raises(AudioValidationError, match="unexpected sampling rate"):
@@ -99,7 +105,7 @@ def test_decoder_rejects_stereo_rate_mismatch_and_non_wav():
         decode_pcm_wav(b"not-a-wav")
 
 
-def test_trim_buffer_retains_context_outside_detected_sound():
+def test_trim_buffer_retains_context_outside_detected_sound() -> None:
     sampling_rate = 16000
     sound = _sine(seconds=0.2, sampling_rate=sampling_rate)
     wave = np.concatenate(
@@ -122,7 +128,7 @@ def test_trim_buffer_retains_context_outside_detected_sound():
     np.testing.assert_array_equal(buffered[800:-1600], unbuffered)
 
 
-def test_legacy_process_wave_delegates_to_current_processing():
+def test_legacy_process_wave_delegates_to_current_processing() -> None:
     wave = _sine(seconds=0.2, sampling_rate=16000)
 
     identity, identity_rate = process_wave(
@@ -146,7 +152,7 @@ def test_legacy_process_wave_delegates_to_current_processing():
     assert np.isfinite(processed).all()
 
 
-def test_legacy_pitch_and_intonation_processing_is_deterministic():
+def test_legacy_pitch_and_intonation_processing_is_deterministic() -> None:
     wave = _sine(seconds=0.4, sampling_rate=16000)
 
     first, first_rate = process_wave(
@@ -168,7 +174,7 @@ def test_legacy_pitch_and_intonation_processing_is_deterministic():
     np.testing.assert_array_equal(first, second)
 
 
-def test_legacy_process_wav_keeps_pcm_contract():
+def test_legacy_process_wav_keeps_pcm_contract() -> None:
     source = encode_pcm_wav(_sine(seconds=0.1, sampling_rate=16000), 16000)
 
     result = process_wav(source, sampling_rate=16000, volume_scale=0.5)
@@ -180,7 +186,7 @@ def test_legacy_process_wav_keeps_pcm_contract():
 
 
 @pytest.mark.parametrize(
-    "sampling_rate, processing, message",
+    ("sampling_rate", "processing", "message"),
     [
         (0, {}, "sampling_rate"),
         (
@@ -194,7 +200,11 @@ def test_legacy_process_wav_keeps_pcm_contract():
         (16000, {"intonation_scale": -0.001}, "intonation_scale"),
     ],
 )
-def test_legacy_process_wave_rejects_invalid_values(sampling_rate, processing, message):
+def test_legacy_process_wave_rejects_invalid_values(
+    sampling_rate: int,
+    processing: dict[str, object],
+    message: str,
+) -> None:
     with pytest.raises(AudioValidationError, match=message):
         process_wave(
             _sine(seconds=0.02),
@@ -203,7 +213,7 @@ def test_legacy_process_wave_rejects_invalid_values(sampling_rate, processing, m
         )
 
 
-def test_resampling_pitch_shift_preserves_length_and_changes_pitch():
+def test_resampling_pitch_shift_preserves_length_and_changes_pitch() -> None:
     wave = _sine(seconds=0.4, sampling_rate=16000, frequency=220.0)
 
     first = pitch_shift_resampling(wave, 16000, pitch_scale=1.0)
@@ -215,15 +225,10 @@ def test_resampling_pitch_shift_preserves_length_and_changes_pitch():
     np.testing.assert_array_equal(first, second)
 
 
-def test_internal_pause_is_replaced_and_edge_pauses_are_untouched():
+def test_internal_pause_is_replaced_and_edge_pauses_are_untouched() -> None:
     wave = np.arange(20, dtype=np.float32) / 20.0
     durations = [
-        {
-            "mora": mora,
-            "hira": "",
-            "phonemePitches": [],
-            "wavRange": {"start": start, "end": end},
-        }
+        _mora_duration(mora, start, end)
         for mora, start, end in (
             ("pau", 0, 2),
             ("a", 2, 6),
@@ -246,7 +251,7 @@ def test_internal_pause_is_replaced_and_edge_pauses_are_untouched():
     np.testing.assert_array_equal(result, expected)
 
 
-def test_pause_replacement_rejects_an_oversized_pause_length():
+def test_pause_replacement_rejects_an_oversized_pause_length() -> None:
     durations = [
         _mora_duration("a", 0, 2),
         _mora_duration("pau", 2, 4),
@@ -262,7 +267,7 @@ def test_pause_replacement_rejects_an_oversized_pause_length():
         )
 
 
-def test_pause_replacement_rejects_a_zero_length_internal_pau():
+def test_pause_replacement_rejects_a_zero_length_internal_pau() -> None:
     durations = [
         _mora_duration("a", 0, 2),
         _mora_duration("pau", 2, 2),
@@ -278,7 +283,7 @@ def test_pause_replacement_rejects_a_zero_length_internal_pau():
         )
 
 
-def test_world_f0_response_is_finite_and_keeps_mora_durations():
+def test_world_f0_response_is_finite_and_keeps_mora_durations() -> None:
     wave = _sine(seconds=0.4, sampling_rate=16000)
 
     f0 = estimate_world_f0(wave, 16000)

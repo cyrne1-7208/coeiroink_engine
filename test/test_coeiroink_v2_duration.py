@@ -1,17 +1,21 @@
+"""COEIROINK v2の音素フレーム長からモーラ別サンプル区間への変換と境界検証を確認する。"""
+
+from __future__ import annotations
+
 import pytest
 
 from voicevox_engine.coeiroink_v2.duration import (
     DurationConversionError,
     convert_duration,
 )
-from voicevox_engine.coeiroink_v2.models import Mora
+from voicevox_engine.coeiroink_v2.models import Mora, MoraDuration
 
 
-def _mora(phoneme, hira):
+def _mora(phoneme: str, hira: str) -> Mora:
     return Mora(phoneme=phoneme, hira=hira, accent=0)
 
 
-def _assert_contiguous(durations, expected_end):
+def _assert_contiguous(durations: list[MoraDuration], expected_end: int) -> None:
     cursor = 0
     for mora in durations:
         assert mora.wav_range.start == cursor
@@ -25,7 +29,7 @@ def _assert_contiguous(durations, expected_end):
     assert cursor == expected_end
 
 
-def test_converts_phonemes_pauses_and_zero_width_markers():
+def test_converts_phonemes_pauses_and_zero_width_markers() -> None:
     plain = ["^", "k", "o", "[", "N", "#", "s", "a", "_", "t", "o", "$"]
     detail = [
         [_mora("k-o", "こ"), _mora("N", "ん")],
@@ -52,8 +56,7 @@ def test_converts_phonemes_pauses_and_zero_width_markers():
         ("k", 512, 1280),
         ("o", 1280, 2304),
     ]
-    # '[' and '#' are assigned to the following semantic unit: N receives
-    # 5+6 frames and s receives 7+8 frames.
+    # 韻律記号「[」「#」は後続単位へ合算するため、Nは5+6フレーム、sは7+8フレームになる。
     assert result[2].wav_range == {"start": 2304, "end": 5120}
     assert result[3].wav_range == {"start": 5120, "end": 11264}
     assert result[4].wav_range == {"start": 11264, "end": 13824}
@@ -61,7 +64,7 @@ def test_converts_phonemes_pauses_and_zero_width_markers():
     _assert_contiguous(result, sum(frames) * 256)
 
 
-def test_supports_nasal_consonant_cluster_and_question_pause():
+def test_supports_nasal_consonant_cluster_and_question_pause() -> None:
     plain = ["^", "sh", "i", "[", "N", "cl", "t", "a", "?"]
     detail = [
         [
@@ -81,7 +84,7 @@ def test_supports_nasal_consonant_cluster_and_question_pause():
     _assert_contiguous(result, sum(frames) * 10)
 
 
-def test_accepts_devoiced_vowel_notation_without_changing_mora_names():
+def test_accepts_devoiced_vowel_notation_without_changing_mora_names() -> None:
     result = convert_duration(
         ["^", "s", "u", "N", "$"],
         [[_mora("s-U", "す"), _mora("N", "ん")]],
@@ -95,7 +98,7 @@ def test_accepts_devoiced_vowel_notation_without_changing_mora_names():
     _assert_contiguous(result, 110)
 
 
-def test_accepts_mapping_moras_without_mutating_inputs():
+def test_accepts_mapping_moras_without_mutating_inputs() -> None:
     plain = ["^", "a", "$"]
     detail = [[{"phoneme": "a", "hira": "あ", "accent": 1}]]
     frames = [4, 5, 6]
@@ -113,7 +116,7 @@ def test_accepts_mapping_moras_without_mutating_inputs():
 
 
 @pytest.mark.parametrize(
-    "plain, detail, frames, hop_length, message",
+    ("plain", "detail", "frames", "hop_length", "message"),
     [
         (["^", "a", "$"], [[_mora("i", "い")]], [1, 2, 3], 1, "does not match"),
         (["^", "a", "#"], [[_mora("a", "あ")]], [1, 2, 3], 1, "unallocated"),
@@ -122,13 +125,17 @@ def test_accepts_mapping_moras_without_mutating_inputs():
     ],
 )
 def test_rejects_misaligned_or_invalid_input(
-    plain, detail, frames, hop_length, message
-):
+    plain: list[str],
+    detail: list[list[Mora]],
+    frames: list[int],
+    hop_length: int,
+    message: str,
+) -> None:
     with pytest.raises(DurationConversionError, match=message):
         convert_duration(plain, detail, frames, hop_length)
 
 
-def test_zero_duration_markers_still_produce_contiguous_ranges():
+def test_zero_duration_markers_still_produce_contiguous_ranges() -> None:
     result = convert_duration(
         ["^", "[", "a", "]", "$"],
         [[_mora("a", "あ")]],

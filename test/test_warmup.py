@@ -1,3 +1,7 @@
+"""起動時ウォームアップとlifespan（辞書・モデル準備・ワーカー終了）の順序を検証する。"""
+
+from __future__ import annotations
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -14,7 +18,7 @@ SPEAKER_B = "00000000-0000-0000-0000-00000000000b"
 
 
 class FakeMetaManager:
-    def __init__(self, metas: list[dict]):
+    def __init__(self, metas: list[dict]) -> None:
         self._metas = metas
 
     def get_metas_dict(self) -> list[dict]:
@@ -30,17 +34,19 @@ class FakeAudioManager:
         initialized: set[tuple[str, int]] | None = None,
         error: Exception | None = None,
         failing_style_ids: set[int] | None = None,
-    ):
+    ) -> None:
         self.meta_manager = FakeMetaManager(metas)
         self.initialized = initialized or set()
         self.error = error
         self.failing_style_ids = failing_style_ids
         self.synthesis_calls: list[dict] = []
 
-    def is_speaker_initialized(self, style_id: int, speaker_uuid: str | None = None):
+    def is_speaker_initialized(
+        self, style_id: int, speaker_uuid: str | None = None
+    ) -> bool:
         return (speaker_uuid, style_id) in self.initialized
 
-    def synthesis(self, text, style_id, **kwargs):
+    def synthesis(self, text: list[str], style_id: int, **kwargs: object) -> np.ndarray:
         self.synthesis_calls.append({"text": text, "style_id": style_id, **kwargs})
         if self.error is not None and (
             self.failing_style_ids is None or style_id in self.failing_style_ids
@@ -133,10 +139,13 @@ def test_warm_up_failure_does_not_stop_other_models(
     assert "1/2" in error_output
 
 
-def test_warm_up_analysis_failure_does_not_stop_startup(monkeypatch, capsys):
+def test_warm_up_analysis_failure_does_not_stop_startup(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     manager = FakeAudioManager(_metas(), initialized={(SPEAKER_A, 10)})
 
-    def fail_analysis(_text):
+    def fail_analysis(_text: str) -> None:
         raise RuntimeError("analysis failed")
 
     monkeypatch.setattr(engine_run, "estimate_prosody", fail_analysis)
@@ -147,14 +156,16 @@ def test_warm_up_analysis_failure_does_not_stop_startup(monkeypatch, capsys):
     assert "analysis failed" in capsys.readouterr().err
 
 
-def test_startup_prepares_models_after_dictionary_and_before_warmup(monkeypatch):
-    events = []
+def test_startup_prepares_models_after_dictionary_and_before_warmup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
     manager = SimpleNamespace(prepare_models=lambda: events.append("prepare"))
     monkeypatch.setattr(engine_run, "update_dict", lambda: events.append("dictionary"))
     monkeypatch.setattr(engine_run, "_warm_up", lambda _: events.append("warmup"))
     app = FastAPI(lifespan=engine_run._create_lifespan(None, manager, warmup=True))
 
-    async def start():
+    async def start() -> None:
         async with app.router.lifespan_context(app):
             events.append("ready")
 
@@ -163,7 +174,9 @@ def test_startup_prepares_models_after_dictionary_and_before_warmup(monkeypatch)
     assert events == ["dictionary", "prepare", "warmup", "ready"]
 
 
-def test_startup_memory_failure_stops_startup_and_shuts_down_workers(monkeypatch):
+def test_startup_memory_failure_stops_startup_and_shuts_down_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     manager = SimpleNamespace(
         prepare_models=Mock(side_effect=ModelLoadError("insufficient memory"))
     )
@@ -175,7 +188,7 @@ def test_startup_memory_failure_stops_startup_and_shuts_down_workers(monkeypatch
     monkeypatch.setattr(engine_run, "_warm_up", warm_up)
     app = FastAPI(lifespan=engine_run._create_lifespan(workers, manager, warmup=True))
 
-    async def start():
+    async def start() -> None:
         async with app.router.lifespan_context(app):
             pytest.fail("startup must not complete after a model preparation error")
 

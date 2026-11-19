@@ -1,9 +1,12 @@
 """本番アダプターのCoreへの変換と、起動設定の受け渡しを検証する。"""
 
+from __future__ import annotations
+
+import importlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -19,8 +22,13 @@ from voicevox_engine.synthesis_engine.make_synthesis_engines import (
     resolve_device,
 )
 
+# パッケージ__init__が同名関数を再エクスポートしているため、モジュール本体はimportlibで取得する。
+engine_factory_module = importlib.import_module(
+    "voicevox_engine.synthesis_engine.make_synthesis_engines"
+)
 
-def test_adapter_converts_query_to_native_tokens_and_controls():
+
+def test_adapter_converts_query_to_native_tokens_and_controls() -> None:
     manager = Mock(fs=44100, device="cpu")
     manager.synthesis.return_value = np.array([0.1, -0.2, 0.3], dtype=np.float32)
     engine = CoeiroinkVoicevoxAdapter(speakers="[]", audio_manager=manager)
@@ -57,20 +65,23 @@ def test_adapter_converts_query_to_native_tokens_and_controls():
     assert query.model_dump() == before
 
 
-def test_make_audio_manager_passes_complete_device_selection():
-    with patch(
-        "voicevox_engine.synthesis_engine.make_synthesis_engines.AudioManager"
-    ) as factory:
-        make_audio_manager(
-            speaker_info_dir=Path("speaker_info"),
-            device="opencl",
-            device_index=2,
-            opencl_platform_index=1,
-            max_loaded_models=3,
-            voice_smoothing=True,
-            preload_models=False,
-            dangerous_skip_check=True,
-        )
+def test_make_audio_manager_passes_complete_device_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = Mock()
+    monkeypatch.setattr(engine_factory_module, "AudioManager", factory)
+
+    make_audio_manager(
+        speaker_info_dir=Path("speaker_info"),
+        device="opencl",
+        device_index=2,
+        opencl_platform_index=1,
+        max_loaded_models=3,
+        voice_smoothing=True,
+        preload_models=False,
+        dangerous_skip_check=True,
+    )
+
     factory.assert_called_once_with(
         fs=44100,
         device="opencl",
@@ -88,7 +99,9 @@ def test_make_audio_manager_passes_complete_device_selection():
     )
 
 
-def test_factory_reuses_injected_core_metadata_device_and_model_residency():
+def test_factory_reuses_injected_core_metadata_device_and_model_residency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     manager = Mock(fs=44100, device="opencl")
     manager.meta_manager.get_metas_dict.return_value = []
     capabilities = {
@@ -97,11 +110,14 @@ def test_factory_reuses_injected_core_metadata_device_and_model_residency():
         )
         for backend in DeviceBackend
     }
-    with patch(
-        "voicevox_engine.synthesis_engine.make_synthesis_engines.get_supported_device_capabilities",
-        return_value=capabilities,
-    ):
-        engines = make_synthesis_engines(audio_manager=manager, max_loaded_models=None)
+    monkeypatch.setattr(
+        engine_factory_module,
+        "get_supported_device_capabilities",
+        lambda: capabilities,
+    )
+
+    engines = make_synthesis_engines(audio_manager=manager, max_loaded_models=None)
+
     assert list(engines) == [core_version]
     engine = engines[core_version]
     assert engine.audio_manager is manager
@@ -116,7 +132,7 @@ def test_factory_reuses_injected_core_metadata_device_and_model_residency():
     manager.initialize_all_speakers.assert_called_once_with()
 
 
-def test_resolve_device_keeps_devices_and_maps_legacy_gpu_flag():
+def test_resolve_device_keeps_devices_and_maps_legacy_gpu_flag() -> None:
     assert resolve_device("directml") == "directml"
     assert resolve_device("opencl") == "opencl"
     assert resolve_device(use_gpu=True) == "cuda"

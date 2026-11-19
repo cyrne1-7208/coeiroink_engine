@@ -57,6 +57,7 @@ def test_cli_requires_explicit_enable_flag() -> None:
     assert "--experimental sudachi" in result.stderr
 
 
+@pytest.mark.sudachi
 @pytest.mark.parametrize("mode", ["A", "B", "C"])
 def test_full_dictionary_tokenizes_in_each_mode(mode: str) -> None:
     pytest.importorskip("sudachipy")
@@ -164,6 +165,7 @@ def test_unknown_open_jtalk_part_of_speech_remains_usable() -> None:
     assert tuple(row[5:11]) == ("名詞", "普通名詞", "一般", "*", "*", "*")
 
 
+@pytest.mark.sudachi
 def test_open_jtalk_user_json_has_priority_over_environment_csv(
     tmp_path: Path,
 ) -> None:
@@ -212,6 +214,7 @@ def test_open_jtalk_user_json_has_priority_over_environment_csv(
     assert morphemes[0].dictionary_id == 2
 
 
+@pytest.mark.sudachi
 def test_bundled_open_jtalk_dictionary_can_be_loaded() -> None:
     pytest.importorskip("sudachipy")
     pytest.importorskip("sudachidict_full")

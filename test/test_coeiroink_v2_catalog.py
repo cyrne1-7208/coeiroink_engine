@@ -1,3 +1,7 @@
+"""COEIROINK v2公開カタログクライアントのレスポンス上限・スキーマ・エラー処理を検証する。"""
+
+from __future__ import annotations
+
 import json
 from collections.abc import Iterable
 from typing import Any
@@ -215,10 +219,12 @@ def test_network_failures_are_wrapped() -> None:
         CatalogClient(session=session).get_update_info()
 
 
-def test_stream_failure_is_reported_and_response_is_closed(monkeypatch) -> None:
+def test_stream_failure_is_reported_and_response_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     response = FakeResponse(b"[]")
 
-    def interrupted_content(chunk_size):
+    def interrupted_content(chunk_size: int) -> Iterable[bytes]:
         yield b"["
         raise requests.ConnectionError("connection lost")
 

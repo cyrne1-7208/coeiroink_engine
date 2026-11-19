@@ -1,113 +1,88 @@
-from copy import deepcopy
-from unittest import TestCase
+"""ユーザー辞書単語モデルのバリデーション・モーラ数計算・品詞定義の整合を検証する。"""
 
+from __future__ import annotations
+
+import pytest
 from pydantic import ValidationError
 
 from voicevox_engine.kana_parser import parse_kana
-from voicevox_engine.model import UserDictWord
+from voicevox_engine.model import UserDictWord, WordTypes
+from voicevox_engine.part_of_speech_data import part_of_speech_data
 
 
-class TestUserDictWords(TestCase):
-    def setUp(self):
-        self.test_model = {
-            "surface": "テスト",
-            "priority": 0,
-            "part_of_speech": "名詞",
-            "part_of_speech_detail_1": "固有名詞",
-            "part_of_speech_detail_2": "一般",
-            "part_of_speech_detail_3": "*",
-            "inflectional_type": "*",
-            "inflectional_form": "*",
-            "stem": "*",
-            "yomi": "テスト",
-            "pronunciation": "テスト",
-            "accent_type": 0,
-            "accent_associative_rule": "*",
-        }
+def _word(**overrides: object) -> UserDictWord:
+    values: dict[str, object] = {
+        "surface": "テスト",
+        "priority": 0,
+        "part_of_speech": "名詞",
+        "part_of_speech_detail_1": "固有名詞",
+        "part_of_speech_detail_2": "一般",
+        "part_of_speech_detail_3": "*",
+        "inflectional_type": "*",
+        "inflectional_form": "*",
+        "stem": "*",
+        "yomi": "テスト",
+        "pronunciation": "テスト",
+        "accent_type": 0,
+        "accent_associative_rule": "*",
+    }
+    values.update(overrides)
+    return UserDictWord(**values)
 
-    def test_valid_word(self):
-        test_value = deepcopy(self.test_model)
-        try:
-            UserDictWord(**test_value)
-        except ValidationError as e:
-            self.fail(f"Unexpected Validation Error\n{e!s}")
 
-    def test_convert_to_zenkaku(self):
-        test_value = deepcopy(self.test_model)
-        test_value["surface"] = "test"
-        self.assertEqual(UserDictWord(**test_value).surface, "ｔｅｓｔ")
+def test_word_types_match_part_of_speech_data() -> None:
+    assert set(WordTypes) == set(part_of_speech_data.keys())
 
-    def test_count_mora(self):
-        test_value = deepcopy(self.test_model)
-        self.assertEqual(UserDictWord(**test_value).mora_count, 3)
 
-    def test_count_mora_x(self):
-        test_value = deepcopy(self.test_model)
-        for s in [chr(i) for i in range(12449, 12533)]:
-            if s in ["ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ", "ヮ"]:
-                continue
-            for x in "ァィゥェォャュョ":
-                expected_count = 0
-                test_value["pronunciation"] = s + x
-                for accent_phrase in parse_kana(
-                    test_value["pronunciation"] + "'",
-                ):
-                    expected_count += len(accent_phrase.moras)
-                with self.subTest(s=s, x=x):
-                    self.assertEqual(
-                        UserDictWord(**test_value).mora_count,
-                        expected_count,
-                    )
+def test_valid_word_and_zenkaku_surface_conversion() -> None:
+    word = _word(surface="test")
+    assert word.surface == "ｔｅｓｔ"
+    assert word.mora_count == 3
 
-    def test_count_mora_xwa(self):
-        test_value = deepcopy(self.test_model)
-        test_value["pronunciation"] = "クヮンセイ"
-        expected_count = 0
-        for accent_phrase in parse_kana(
-            test_value["pronunciation"] + "'",
-        ):
-            expected_count += len(accent_phrase.moras)
-        self.assertEqual(
-            UserDictWord(**test_value).mora_count,
-            expected_count,
-        )
 
-    def test_invalid_pronunciation_not_katakana(self):
-        test_value = deepcopy(self.test_model)
-        test_value["pronunciation"] = "ぼいぼ"
-        with self.assertRaises(ValidationError):
-            UserDictWord(**test_value)
+@pytest.mark.parametrize(
+    ("pronunciation", "expected_mora_count"),
+    [
+        ("テスト", 3),
+        ("ボイボ", 3),
+        ("クヮンセイ", 4),
+        ("キィクァヂェテェ", 4),
+    ],
+)
+def test_mora_count_matches_expected_moras(
+    pronunciation: str, expected_mora_count: int
+) -> None:
+    assert _word(pronunciation=pronunciation).mora_count == expected_mora_count
+    parsed_count = sum(len(phrase.moras) for phrase in parse_kana(f"{pronunciation}'"))
+    assert expected_mora_count == parsed_count
 
-    def test_invalid_pronunciation_invalid_sutegana(self):
-        test_value = deepcopy(self.test_model)
-        test_value["pronunciation"] = "アィウェォ"
-        with self.assertRaises(ValidationError):
-            UserDictWord(**test_value)
 
-    def test_invalid_pronunciation_invalid_xwa(self):
-        test_value = deepcopy(self.test_model)
-        test_value["pronunciation"] = "アヮ"
-        with self.assertRaises(ValidationError):
-            UserDictWord(**test_value)
+def test_mora_count_matches_kana_parser_for_all_sutegana_combinations() -> None:
+    excluded = {"ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ", "ヮ"}
+    base_chars = [
+        chr(code) for code in range(12449, 12533) if chr(code) not in excluded
+    ]
+    for base in base_chars:
+        for small in "ァィゥェォャュョ":
+            pronunciation = base + small
+            expected = sum(
+                len(phrase.moras) for phrase in parse_kana(f"{pronunciation}'")
+            )
+            assert _word(pronunciation=pronunciation).mora_count == expected
 
-    def test_count_mora_voiced_sound(self):
-        test_value = deepcopy(self.test_model)
-        test_value["pronunciation"] = "ボイボ"
-        self.assertEqual(UserDictWord(**test_value).mora_count, 3)
 
-    def test_count_mora_extended_foreign_sounds(self):
-        test_value = deepcopy(self.test_model)
-        test_value["pronunciation"] = "キィクァヂェテェ"
-        self.assertEqual(UserDictWord(**test_value).mora_count, 4)
-
-    def test_invalid_accent_type(self):
-        test_value = deepcopy(self.test_model)
-        test_value["accent_type"] = 4
-        with self.assertRaises(ValidationError):
-            UserDictWord(**test_value)
-
-    def test_invalid_accent_type_2(self):
-        test_value = deepcopy(self.test_model)
-        test_value["accent_type"] = -1
-        with self.assertRaises(ValidationError):
-            UserDictWord(**test_value)
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"pronunciation": "ぼいぼ"},
+        {"pronunciation": "アィウェォ"},
+        {"pronunciation": "アヮ"},
+        {"accent_type": 4},
+        {"accent_type": -1},
+    ],
+)
+def test_invalid_pronunciation_or_accent_type_is_rejected(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _word(**overrides)

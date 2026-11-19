@@ -1,3 +1,7 @@
+"""Engine本体・manifest・Core依存・uv.lockのバージョン同期を検証する。"""
+
+from __future__ import annotations
+
 import json
 import tomllib
 from pathlib import Path

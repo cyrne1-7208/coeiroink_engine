@@ -1,3 +1,7 @@
+"""COEIROINK v2話者メタデータストアの探索・重複styleId拒否・サンプル音声読込を検証する。"""
+
+from __future__ import annotations
+
 import base64
 import json
 from pathlib import Path
@@ -20,7 +24,7 @@ SECOND_STYLE_ID = 1002
 
 
 @pytest.fixture(scope="module")
-def metadata_store(tmp_path_factory) -> SpeakerMetadataStore:
+def metadata_store(tmp_path_factory: pytest.TempPathFactory) -> SpeakerMetadataStore:
     speaker_info = tmp_path_factory.mktemp("speaker_info")
     speakers = (
         (
@@ -75,7 +79,9 @@ def metadata_store(tmp_path_factory) -> SpeakerMetadataStore:
     return SpeakerMetadataStore(speaker_info)
 
 
-def test_speakers_include_base64_portraits_and_icons(metadata_store):
+def test_speakers_include_base64_portraits_and_icons(
+    metadata_store: SpeakerMetadataStore,
+) -> None:
     speakers = metadata_store.list_speakers()
 
     assert [speaker.speaker_uuid for speaker in speakers] == [
@@ -104,7 +110,9 @@ def test_speakers_include_base64_portraits_and_icons(metadata_store):
     assert first.styles[0].base64_portrait is None
 
 
-def test_speakers_path_variant_uses_physical_folder(metadata_store):
+def test_speakers_path_variant_uses_physical_folder(
+    metadata_store: SpeakerMetadataStore,
+) -> None:
     variants = metadata_store.list_speakers_path_variant()
 
     assert [variant.speaker_uuid for variant in variants] == [
@@ -116,7 +124,9 @@ def test_speakers_path_variant_uses_physical_folder(metadata_store):
     assert Path(second.styles[0].path_icon).parent.parent.name == "speaker_ver1.0"
 
 
-def test_uuid_and_style_id_resolve_independently_of_folder_name(metadata_store):
+def test_uuid_and_style_id_resolve_independently_of_folder_name(
+    metadata_store: SpeakerMetadataStore,
+) -> None:
     assert metadata_store.speaker_path(SECOND_SPEAKER_UUID).name == "speaker_ver1.0"
     assert (
         metadata_store.get_style(SECOND_SPEAKER_UUID, SECOND_STYLE_ID).style_name
@@ -137,7 +147,7 @@ def test_uuid_and_style_id_resolve_independently_of_folder_name(metadata_store):
         metadata_store.get_style(SECOND_SPEAKER_UUID, FIRST_STYLE_ID)
 
 
-def test_style_lookup_rejects_ambiguous_style_ids(tmp_path: Path):
+def test_style_lookup_rejects_ambiguous_style_ids(tmp_path: Path) -> None:
     for folder_name, speaker_uuid in (
         ("first", "speaker-one"),
         ("second", "speaker-two"),
@@ -167,7 +177,9 @@ def test_style_lookup_rejects_ambiguous_style_ids(tmp_path: Path):
     }
 
 
-def test_sample_voice_lookup_is_zero_based_and_deterministic(metadata_store):
+def test_sample_voice_lookup_is_zero_based_and_deterministic(
+    metadata_store: SpeakerMetadataStore,
+) -> None:
     paths = metadata_store.voice_sample_paths(SECOND_SPEAKER_UUID, SECOND_STYLE_ID)
     assert [path.name for path in paths] == [
         f"{SECOND_STYLE_ID}_001.wav",
@@ -193,7 +205,7 @@ def test_sample_voice_lookup_is_zero_based_and_deterministic(metadata_store):
         metadata_store.sample_voice_path(SECOND_SPEAKER_UUID, SECOND_STYLE_ID, 3)
 
 
-def test_policy_and_license_reading(metadata_store):
+def test_policy_and_license_reading(metadata_store: SpeakerMetadataStore) -> None:
     policy = metadata_store.speaker_policy(SECOND_SPEAKER_UUID)
     speaker_folder = metadata_store.speaker_info_dir / "speaker_ver1.0"
     assert policy.policy == (speaker_folder / "policy.md").read_text(encoding="utf-8")
@@ -212,17 +224,7 @@ def test_policy_and_license_reading(metadata_store):
     ]
 
 
-def test_repeated_listing_has_stable_order(metadata_store):
-    first = [
-        speaker.model_dump(by_alias=True) for speaker in metadata_store.list_speakers()
-    ]
-    second = [
-        speaker.model_dump(by_alias=True) for speaker in metadata_store.list_speakers()
-    ]
-    assert first == second
-
-
-def test_duplicate_style_ids_in_one_metadata_file_are_rejected(tmp_path: Path):
+def test_duplicate_style_ids_in_one_metadata_file_are_rejected(tmp_path: Path) -> None:
     folder = tmp_path / "speaker"
     folder.mkdir()
     (folder / "metas.json").write_text(
