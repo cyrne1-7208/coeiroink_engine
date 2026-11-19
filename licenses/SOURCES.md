@@ -1,34 +1,40 @@
 # ソースコードと再ビルド
 
-Core・Engine本体のソースコードには、個別に示されているものを除きLGPL-3.0-onlyが適用されます。依存ライブラリにはそれぞれのライセンスが適用され、NVIDIAなどのライブラリをLGPLやGPLに変更するものではありません。
+CoreとEngine本体のソースコードには、個別表記があるものを除きLGPL-3.0-onlyが適用されます。各依存ライブラリには固有のライセンスが適用され、NVIDIAなどのライブラリをLGPLやGPLに変更するものではありません。
 
-## リリースパッケージ
+## 配布物に含まれるソースとライセンス
 
-`sources/coeiroink_core.zip` と `sources/coeiroink_engine.zip` に、そのパッケージをビルドした際の本体ソースを収録しています。ZIPを同じディレクトリへ展開すると、CoreとEngineが隣同士に配置されます。
+| 対象 | パスと参照先 |
+| --- | --- |
+| 本体ソースアーカイブ | `sources/coeiroink_core.zip`、`sources/coeiroink_engine.zip` |
+| GPL、LGPL、MPL依存ソース | `sources/`配下のアーカイブ、[sources/README.md](./sources/README.md) |
+| 依存ライブラリのライセンス本文 | `engine_manifest_assets/dependency_licenses.json` |
+| Distance 0.1.3の表記補足 | [distance/ATTRIBUTION.txt](./distance/ATTRIBUTION.txt) |
+| その他の依存とOpenCL拡張設定 | `uv.lock`の`sdist.url`と`source.git`、Coreの`native/opencl/CMakeLists.txt` |
 
-GPL・LGPL・MPL依存のソースアーカイブも `sources/` に収録しています。ライブラリ名とバージョンの対応は [sources/README.md](./sources/README.md)、ライセンス本文はパッケージ内の `engine_manifest_assets/dependency_licenses.json` を参照してください。Distance 0.1.3の上流表記の不整合は [distance/ATTRIBUTION.txt](./distance/ATTRIBUTION.txt) に記載しています。
+`sources/coeiroink_core.zip`と`sources/coeiroink_engine.zip`を同じディレクトリへ展開すると、CoreとEngineが隣同士に配置されます。
 
-その他の依存も、使用したバージョンとソースの配布元をZIP内の `uv.lock` に記録しています。Pythonパッケージのソースは `sdist.url`、Gitから取得するパッケージのソースは `source.git` を参照してください。OpenCL拡張の上流コミットとビルド設定は、Coreの `native/opencl/CMakeLists.txt` にあります。
+## リリースパッケージの再ビルド
 
-再ビルドにはPython 3.14、uv、Git、対象OSのC/C++ビルド環境が必要です。GPU版の追加要件は本体のREADMEを参照してください。Engineのディレクトリで、配布物と同じバックエンドを指定します。
+Python 3.14、uv、Git、対象OSのC/C++ビルド環境が必要です。GPU版の追加要件は本体のREADMEを参照してください。
+
+Engineのディレクトリで、配布物と同じバックエンドを指定して順に実行します。
 
 ```bash
 uv sync --locked --extra cpu --no-dev
 uv pip list --format json > runtime-packages.json
 uv sync --locked --extra cpu --group build --group licenses --no-dev
 uv run --no-sync python generate_licenses.py --package-snapshot runtime-packages.json --output-path engine_manifest_assets/dependency_licenses.json --sources-dir build/licenses/sources
-uv run --no-sync pyinstaller --noconfirm --clean run.spec -- --backend cpu
+uv run --locked --extra cpu --group build --no-dev pyinstaller --noconfirm --clean run.spec -- --backend cpu
 ```
 
-GPU版では、上の3か所の `cpu` を `cuda`、`opencl`、`directml` のいずれかへ置き換えます。依存ライブラリを変更してビルドする場合は、それぞれのソースアーカイブにあるビルド手順に従ってください。
+GPU版をビルドする場合は、コマンド内の`cpu`を`cuda`、`opencl`、`directml`のいずれかへ置き換えてください。依存ライブラリを改変する場合は、それぞれのソースアーカイブ内のビルド手順に従ってください。
 
 ## Dockerイメージ
 
-本体ソースはイメージ内の `/opt/coeiroink/coeiroink_core` と `/opt/coeiroink/coeiroink_engine` にあります。依存のソースアーカイブは `/opt/coeiroink/coeiroink_engine/licenses/sources` に収録しています。再ビルドには、両リポジトリを含む親ディレクトリをコンテキストにして、EngineのDockerfileを使用してください。
+イメージ内では`/opt/coeiroink/coeiroink_core`と`/opt/coeiroink/coeiroink_engine`に本体ソースを、`/opt/coeiroink/coeiroink_engine/licenses/sources`に依存のソースアーカイブを収録しています。再ビルド時は両リポジトリを含む親ディレクトリをビルドコンテキストにして、EngineのDockerfileを使用してください。
 
-## 公開ソース
+## 公開ソースと再配布条件
 
-- [COEIROINK Core](https://github.com/cyrne1-7208/coeiroink_core)
-- [COEIROINK Engine](https://github.com/cyrne1-7208/coeiroink_engine)
-
-再配布するときは、使用したバージョンのソースとビルド用ファイルを、ライセンス本文とともに提供してください。本体の公開リポジトリだけでは、同梱した依存ライブラリのソースを提供したことにはなりません。
+- **公開リポジトリ**：[COEIROINK Core](https://github.com/cyrne1-7208/coeiroink_core)、[COEIROINK Engine](https://github.com/cyrne1-7208/coeiroink_engine)
+- **再配布時の注意**：再配布時は、使用したバージョンのソースとビルド用ファイルをライセンス本文とともに提供してください。本体の公開リポジトリだけでは、同梱した依存ライブラリのソースを提供したことにはなりません。

@@ -1,43 +1,43 @@
 # Sudachi full
 
-Sudachiのfull辞書を使った形態素解析を、実験的な機能として提供します。この機能は、COEIROINKのHTTP API、Open JTalkによる変換、音声合成には使用されません。
+Sudachiのfull辞書を使った実験的な形態素解析機能です。COEIROINKのHTTP API、Open JTalkによる変換、音声合成には使用しません。
 
-## 有効化
+## 有効化と基本実行
 
-通常のEngineセットアップではSudachiをインストールしません。利用する場合だけ、Python 3.14環境で次を実行します。
+通常のEngineセットアップでは導入されないため、利用時のみEngineのディレクトリからPython 3.14環境へインストールします。実行時は`--experimental sudachi`の指定が必須です。
 
 ```bash
 uv sync --locked --extra sudachi
 uv run --locked --extra sudachi python -m voicevox_engine.sudachi --experimental sudachi --json "東京都へ行く"
-```
 
-実行時にも`--experimental sudachi`が必要です。SudachiPyはRust実装を含むビルド済みwheelを利用するため、通常のインストールにRustコンパイラは不要です。対応するwheelがない環境では、この機能を利用できません。
-
-辞書は`SudachiDict`パッケージのfull辞書を読み込みます。辞書データはリポジトリに含まれません。
-
-## Open JTalk辞書
-
-Engineの既定辞書`default.csv`と、OSのユーザーデータ領域に保存された`user_dict.json`を追加して解析できます。`user_dict.json`が存在しない場合は、既定辞書だけを使用します。
-
-```bash
+# Engine既定辞書と保存済みユーザー辞書を併用する例
 uv run --locked --extra sudachi python -m voicevox_engine.sudachi \
   --experimental sudachi --open-jtalk-dictionaries --json "COEIROINKを使う"
 ```
 
-ほかのOpen JTalk辞書を使う場合は、辞書のCSVを`--open-jtalk-csv PATH`で追加します。Engine形式のユーザー辞書は、`--open-jtalk-user-json PATH`で指定します。CSVは複数指定できます。
+- **環境要件**：SudachiPyはRust実装を含むビルド済みwheelを使うため、Rustコンパイラは不要です。対応wheelがない環境では利用できません。
+- **辞書データ**：`SudachiDict`のfull辞書パッケージを読み込みます。辞書本体はリポジトリに含まれません。
 
-既定辞書と、`--open-jtalk-csv`で追加した環境辞書、ユーザー辞書は、起動時に一度だけSudachi形式へ変換します。形態素解析のたびに変換し直すことはありません。
+## 主なCLIオプション
 
-Open JTalkの単語コストは、Sudachiで扱える範囲では変更しません。範囲外の値は`-32767`から`32767`の範囲に収め、警告を出します。Open JTalkと同じく、値が低い単語を優先します。同じ単語が同じコストで登録されている場合は、後から登録したユーザー辞書を優先します。
+| オプション | 説明 |
+| --- | --- |
+| `--experimental sudachi` | 実験的Sudachi機能の有効化。実行時は必須 |
+| `--mode` | 分割単位を`A`、`B`、`C`から選択。既定値は`C` |
+| `--json` | 解析結果をJSON形式で出力 |
+| `--open-jtalk-dictionaries` | Engineの`default.csv`と保存済み`user_dict.json`を追加で読込 |
+| `--open-jtalk-csv PATH` | 追加のOpen JTalk辞書CSVを指定。複数回指定可 |
+| `--open-jtalk-user-json PATH` | Engine形式のユーザー辞書JSONを指定 |
 
-Open JTalkとSudachiでは、接続行列と品詞体系が異なります。そのため、VOICEVOX互換辞書で使う固有名詞、普通名詞、動詞、形容詞、接尾辞を、UniDic 2.1.2を基にしたSudachiの品詞と文脈IDへ変換します。対応していない品詞は普通名詞として扱い、警告を出します。アクセント型とアクセント結合規則はOpen JTalk側に残します。
+## Open JTalk辞書変換の仕様
 
-コンパイル済みのOpen JTalk辞書（`.dic`）からは、変換に必要な語彙情報を復元できません。元になったUTF-8形式のCSVを指定してください。
+- **入力形式と変換時期**：変換は初期化時に一度だけ行い、解析ごとに再変換しません。`.dic`からは変換できないため、UTF-8形式のCSVを指定してください。
+- **単語コスト**：`-32767`から`32767`の範囲外は丸めて警告します。値が低い単語ほど優先され、同語かつ同コストならユーザー辞書を優先します。
+- **品詞と文脈ID**：固有名詞、普通名詞、動詞、形容詞、接尾辞をUniDic 2.1.2に基づくSudachi定義へ変換します。未対応の品詞は普通名詞として警告し、アクセント型とアクセント結合規則はOpen JTalk側に残します。
 
 ## 注意
 
-`normalized_form`はSudachiが正規化した文字列です。活用語では入力と異なる場合があるため、この値を連結してCOEIROINKの読みや音素変換へ渡さないでください。`begin`と`end`は、入力文字列上の位置を表します。
-
-分割単位は`--mode A`、`--mode B`、`--mode C`で選択できます。
-
-上流実装と辞書のライセンスおよび配布条件に従って利用してください。
+- `normalized_form`は正規化後の文字列で入力と異なる場合があるため、連結して読みや音素変換へ渡さないでください。
+- 入力文字列上の位置を参照するときは`begin`と`end`を使います。
+- `--open-jtalk-dictionaries`指定時、`user_dict.json`はOSのユーザーデータ領域から探索され、存在しない場合は既定辞書`default.csv`のみ使います。
+- 利用時は上流実装と辞書のライセンスおよび配布条件に従ってください。
