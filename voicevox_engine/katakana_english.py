@@ -1,4 +1,4 @@
-"""pyopenjtalkが未知語とした英単語へカタカナ読みを補う。"""
+# pyopenjtalkが未知語とした英単語へカタカナ読みを補う処理
 
 import re
 
@@ -94,9 +94,8 @@ def _is_alphabet_feature(feature: dict) -> bool:
     return _halfwidth_alphabet(feature.get("string")) is not None
 
 
+# 未知英単語を補正してから既存pyopenjtalkのラベルを生成する。
 def text_to_full_context_labels(text: str) -> list[str]:
-    """未知英単語を補正してから既存pyopenjtalkのラベルを生成する。"""
-
     if not text.strip():
         return []
     # run_frontendとmake_labelの間で辞書を切り替えず、一つの解析として扱う。

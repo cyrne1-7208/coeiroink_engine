@@ -1,4 +1,4 @@
-"""VOICEVOX互換APIのルート群。"""
+# VOICEVOX互換APIのルート群
 
 import json
 import traceback
@@ -7,8 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryFile
-from typing import Annotated
+from typing import Annotated, Any
 
+import numpy as np
 import soundfile
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
@@ -31,6 +32,7 @@ from voicevox_engine.coeiroink_v2.metadata import (
 from voicevox_engine.engine_manifest import EngineManifestLoader
 from voicevox_engine.engine_manifest.engine_manifest import EngineManifest
 from voicevox_engine.kana_parser import create_kana, parse_kana
+from voicevox_engine.metas.metas import Speaker, SpeakerInfo
 from voicevox_engine.metas.metas_store import MetasStore, construct_lookup
 from voicevox_engine.model import (
     AccentPhrase,
@@ -39,8 +41,6 @@ from voicevox_engine.model import (
     ParseKanaBadRequest,
     ParseKanaError,
     ResourceFormat,
-    Speaker,
-    SpeakerInfo,
     SpeakerNotFoundError,
     SupportedDevicesInfo,
     UserDictWord,
@@ -80,9 +80,8 @@ from voicevox_engine.voicevox_compat.unavailable_apis import add_unavailable_rou
 USER_DICTIONARY_ERRORS = (OSError, RuntimeError, TypeError, ValueError, LookupError)
 
 
-def _wave_file_response(wave, sampling_rate: int) -> FileResponse:
-    """WAV一時ファイルを応答へ移譲し、移譲前の失敗時だけ直ちに削除する。"""
-
+# WAV一時ファイルを応答へ移譲し、移譲前の失敗時だけ直ちに削除する。
+def _wave_file_response(wave: np.ndarray, sampling_rate: int) -> FileResponse:
     path: str | None = None
     try:
         with NamedTemporaryFile(delete=False) as file:
@@ -104,10 +103,9 @@ def _wave_file_response(wave, sampling_rate: int) -> FileResponse:
         raise
 
 
+# 互換ルート群が共有するEngineの既存マネージャー
 @dataclass(slots=True)
 class VoicevoxRouterDependencies:
-    """互換ルート群が共有するEngineの既存マネージャー。"""
-
     synthesis_engines: dict[str, SynthesisEngineBase]
     latest_core_version: str
     preset_manager: PresetManager
@@ -126,11 +124,10 @@ class VoicevoxRouterDependencies:
             return self.synthesis_engines[core_version]
         raise HTTPException(status_code=422, detail="不明なバージョンです")
 
+    # テキスト解析前に従来形式のスタイルIDを検証する。
     def ensure_legacy_style_available(
         self, style_id: int, speaker_uuid: str | None = None
     ) -> None:
-        """テキスト解析前に従来形式のスタイルIDを検証する。"""
-
         try:
             self.speaker_metadata_store.find_style(style_id, speaker_uuid)
         except MetadataAmbiguousStyleError as error:
@@ -162,7 +159,7 @@ def _add_portal_route(
     voicevox_router: APIRouter,
 ) -> None:
     @voicevox_router.get("/", response_class=HTMLResponse, tags=["その他"])
-    def voicevox_portal():
+    def voicevox_portal() -> str:
         return """
         <html><body>
         <h1>COEIROINK Engine (VOICEVOX-compatible API)</h1>
@@ -174,12 +171,10 @@ def _add_portal_route(
         """
 
 
-def _add_tts_routes(
+def _add_query_routes(
     voicevox_router: APIRouter, dependencies: VoicevoxRouterDependencies
 ) -> None:
     preset_manager = dependencies.preset_manager
-    metas_store = dependencies.metas_store
-    cancellable_engine = dependencies.cancellable_engine
     get_engine = dependencies.get_engine
     ensure_legacy_style_available = dependencies.ensure_legacy_style_available
     require_supported_feature = dependencies.require_supported_feature
@@ -195,9 +190,9 @@ def _add_tts_routes(
         speaker: int,
         enable_katakana_english: bool = True,
         core_version: str | None = None,
-    ):
+    ) -> AudioQuery:
         """
-        クエリの初期値を得ます。ここで得られたクエリはそのまま音声合成に利用できます。各値の意味は`Schemas`を参照してください。
+        クエリの初期値を得る。ここで得られたクエリはそのまま音声合成に利用できる。各値の意味は`Schemas`に記載されている。
         """
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
@@ -232,20 +227,19 @@ def _add_tts_routes(
         preset_id: int,
         enable_katakana_english: bool = True,
         core_version: str | None = None,
-    ):
+    ) -> AudioQuery:
         """
-        クエリの初期値を得ます。ここで得られたクエリはそのまま音声合成に利用できます。各値の意味は`Schemas`を参照してください。
+        プリセットの値を適用したクエリの初期値を得る。ここで得られたクエリはそのまま音声合成に利用できる。各値の意味は`Schemas`に記載されている。
         """
         engine = get_engine(core_version)
         try:
             presets = preset_manager.load_presets()
-        except PresetError as err:
-            raise HTTPException(status_code=422, detail=str(err)) from err
-        for preset in presets:
-            if preset.id == preset_id:
-                selected_preset = preset
-                break
-        else:
+        except PresetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        selected_preset = next(
+            (preset for preset in presets if preset.id == preset_id), None
+        )
+        if selected_preset is None:
             raise HTTPException(
                 status_code=422, detail="該当するプリセットIDが見つかりません"
             )
@@ -291,26 +285,26 @@ def _add_tts_routes(
         is_kana: bool = False,
         enable_katakana_english: bool = True,
         core_version: str | None = None,
-    ):
+    ) -> list[AccentPhrase]:
         """
-        テキストからアクセント句を得ます。
-        is_kanaが`true`のとき、テキストは次のようなAquesTalkライクな記法に従う読み仮名として処理されます。デフォルトは`false`です。
-        * 全てのカナはカタカナで記述される
+        テキストからアクセント句を得る。
+        is_kanaが`true`のとき、テキストは次のようなAquesTalkライクな記法に従う読み仮名として処理される。デフォルトは`false`である。
+        * 全てのカナはカタカナで記述される。
         * アクセント句は`/`または`、`で区切る。`、`で区切った場合に限り無音区間が挿入される。
-        * カナの手前に`_`を入れるとそのカナは無声化される
+        * カナの手前に`_`を入れるとそのカナは無声化される。
         * アクセント位置を`'`で指定する。全てのアクセント句にはアクセント位置を1つ指定する必要がある。
-        * アクセント句末に`？`(全角)を入れることにより疑問文の発音ができる。
+        * アクセント句末に全角の`？`を入れることにより疑問文の発音ができる。
         """
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
         if is_kana:
             try:
                 accent_phrases = parse_kana(text)
-            except ParseKanaError as err:
+            except ParseKanaError as error:
                 raise HTTPException(
                     status_code=400,
-                    detail=ParseKanaBadRequest(err).model_dump(),
-                ) from err
+                    detail=ParseKanaBadRequest(error).model_dump(),
+                ) from error
             return engine.replace_mora_data(
                 accent_phrases=accent_phrases, speaker_id=speaker
             )
@@ -326,13 +320,13 @@ def _add_tts_routes(
         response_model=list[AccentPhrase],
         tags=["クエリ編集"],
         summary="アクセント句から音高・音素長を得る",
-        description="Engineマニフェストで必要な調整機能が未対応の場合は501を返します。",
+        description="Engineマニフェストで必要な調整機能が未対応の場合は501を返す。",
     )
     def mora_data(
         accent_phrases: list[AccentPhrase],
         speaker: int,
         core_version: str | None = None,
-    ):
+    ) -> list[AccentPhrase]:
         require_supported_feature("adjust_phoneme_length", "モーラデータ調整機能")
         require_supported_feature("adjust_mora_pitch", "モーラデータ調整機能")
         ensure_legacy_style_available(speaker)
@@ -344,13 +338,13 @@ def _add_tts_routes(
         response_model=list[AccentPhrase],
         tags=["クエリ編集"],
         summary="アクセント句から音素長を得る",
-        description="Engineマニフェストで音素長調整が未対応の場合は501を返します。",
+        description="Engineマニフェストで音素長調整が未対応の場合は501を返す。",
     )
     def mora_length(
         accent_phrases: list[AccentPhrase],
         speaker: int,
         core_version: str | None = None,
-    ):
+    ) -> list[AccentPhrase]:
         require_supported_feature("adjust_phoneme_length", "音素長調整機能")
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
@@ -363,19 +357,28 @@ def _add_tts_routes(
         response_model=list[AccentPhrase],
         tags=["クエリ編集"],
         summary="アクセント句から音高を得る",
-        description="Engineマニフェストでモーラ音高調整が未対応の場合は501を返します。",
+        description="Engineマニフェストでモーラ音高調整が未対応の場合は501を返す。",
     )
     def mora_pitch(
         accent_phrases: list[AccentPhrase],
         speaker: int,
         core_version: str | None = None,
-    ):
+    ) -> list[AccentPhrase]:
         require_supported_feature("adjust_mora_pitch", "モーラ音高調整機能")
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
         return engine.replace_mora_pitch(
             accent_phrases=accent_phrases, speaker_id=speaker
         )
+
+
+def _add_synthesis_routes(
+    voicevox_router: APIRouter, dependencies: VoicevoxRouterDependencies
+) -> None:
+    cancellable_engine = dependencies.cancellable_engine
+    get_engine = dependencies.get_engine
+    ensure_legacy_style_available = dependencies.ensure_legacy_style_available
+    require_supported_feature = dependencies.require_supported_feature
 
     @voicevox_router.post(
         "/synthesis",
@@ -398,7 +401,7 @@ def _add_tts_routes(
             description="疑問形のテキストが与えられたら語尾を自動調整する",
         ),
         core_version: str | None = None,
-    ):
+    ) -> FileResponse:
         if enable_interrogative_upspeak:
             require_supported_feature("interrogative_upspeak", "疑問文の自動調整機能")
         ensure_legacy_style_available(speaker)
@@ -422,7 +425,7 @@ def _add_tts_routes(
             }
         },
         tags=["音声合成"],
-        summary="音声合成する（キャンセル可能）",
+        summary="キャンセル可能な音声合成をする",
     )
     def cancellable_synthesis(
         query: AudioQuery,
@@ -433,7 +436,7 @@ def _add_tts_routes(
             description="疑問形のテキストが与えられたら語尾を自動調整する",
         ),
         core_version: str | None = None,
-    ):
+    ) -> FileResponse:
         if enable_interrogative_upspeak:
             require_supported_feature("interrogative_upspeak", "疑問文の自動調整機能")
         ensure_legacy_style_available(speaker)
@@ -485,9 +488,8 @@ def _add_tts_routes(
             description="疑問形のテキストが与えられたら語尾を自動調整する",
         ),
         core_version: str | None = None,
-    ):
+    ) -> FileResponse:
         """同一話者・サンプリングレートの複数クエリを順に合成し、一時ZIPとして応答する。"""
-
         if enable_interrogative_upspeak:
             require_supported_feature("interrogative_upspeak", "疑問文の自動調整機能")
         if not queries:
@@ -507,10 +509,10 @@ def _add_tts_routes(
             zip_path = f.name
         try:
             with zipfile.ZipFile(zip_path, mode="a") as zip_file:
-                for i in range(len(queries)):
+                for i, query in enumerate(queries):
                     with TemporaryFile() as wav_file:
                         wave = engine.synthesis(
-                            query=queries[i],
+                            query=query,
                             speaker_id=speaker,
                             enable_interrogative_upspeak=enable_interrogative_upspeak,
                         )
@@ -532,6 +534,14 @@ def _add_tts_routes(
             background=BackgroundTask(delete_file, zip_path),
         )
 
+
+def _add_morphing_routes(
+    voicevox_router: APIRouter, dependencies: VoicevoxRouterDependencies
+) -> None:
+    metas_store = dependencies.metas_store
+    get_engine = dependencies.get_engine
+    require_supported_feature = dependencies.require_supported_feature
+
     @voicevox_router.post(
         "/morphable_targets",
         response_model=list[dict[str, MorphableTargetInfo]],
@@ -541,12 +551,12 @@ def _add_tts_routes(
     def morphable_targets(
         base_speakers: list[int],
         core_version: str | None = None,
-    ):
+    ) -> list[dict[str, MorphableTargetInfo]]:
         """
-        指定されたベース話者に対してエンジン内の各話者がモーフィング機能を利用可能か返します。
-        モーフィングの許可/禁止は`/voicevox/speakers`の`speaker.supported_features.synthesis_morphing`に記載されています。
-        プロパティが存在しない場合は、モーフィングが許可されているとみなします。
-        返り値の話者はstring型なので注意。
+        指定されたベース話者に対して、エンジン内の各話者がモーフィング機能を利用可能かを返す。
+        モーフィングの許可と禁止は`/voicevox/speakers`の`speaker.supported_features.synthesis_morphing`に記載されている。
+        プロパティが存在しない場合は、モーフィングが許可されているとみなす。
+        返り値の話者のIDはstring型になる。
         """
         require_supported_feature("synthesis_morphing", "音声モーフィング機能")
         engine = get_engine(core_version)
@@ -556,16 +566,16 @@ def _add_tts_routes(
             morphable_targets = get_morphable_targets(
                 speakers=speakers, base_speakers=base_speakers
             )
-            # jsonはint型のキーを持てないので、string型に変換する
+            # jsonはint型のキーを持てないので、string型に変換する。
             return [
                 {str(k): v for k, v in morphable_target.items()}
                 for morphable_target in morphable_targets
             ]
-        except SpeakerNotFoundError as e:
+        except SpeakerNotFoundError as error:
             raise HTTPException(
                 status_code=404,
-                detail=f"該当する話者(speaker={e.speaker})が見つかりません",
-            ) from e
+                detail=f"該当する話者(speaker={error.speaker})が見つかりません",
+            ) from error
 
     @voicevox_router.post(
         "/synthesis_morphing",
@@ -590,10 +600,10 @@ def _add_tts_routes(
             description="疑問形のテキストが与えられたら語尾を自動調整する",
         ),
         core_version: str | None = None,
-    ):
+    ) -> FileResponse:
         """
-        指定された2人の話者で音声を合成し、指定した割合でモーフィングした音声を得ます。
-        モーフィングの割合は`morph_rate`で指定でき、0.0でベースの話者、1.0でターゲットの話者に近づきます。
+        指定された2人の話者で音声を合成し、指定した割合でモーフィングした音声を得る。
+        モーフィングの割合は`morph_rate`で指定でき、0.0でベースの話者、1.0でターゲットの話者に近づく。
         """
         require_supported_feature("synthesis_morphing", "音声モーフィング機能")
         if enable_interrogative_upspeak:
@@ -611,11 +621,11 @@ def _add_tts_routes(
                     status_code=400,
                     detail="指定された話者ペアでのモーフィングはできません",
                 )
-        except SpeakerNotFoundError as e:
+        except SpeakerNotFoundError as error:
             raise HTTPException(
                 status_code=404,
-                detail=f"該当する話者(speaker={e.speaker})が見つかりません",
-            ) from e
+                detail=f"該当する話者(speaker={error.speaker})が見つかりません",
+            ) from error
 
         morph_param = synthesis_morphing_parameter(
             engine=engine,
@@ -633,6 +643,10 @@ def _add_tts_routes(
 
         return _wave_file_response(morph_wave, int(morph_param.fs))
 
+
+def _add_utility_routes(
+    voicevox_router: APIRouter,
+) -> None:
     @voicevox_router.post(
         "/connect_waves",
         response_class=FileResponse,
@@ -646,14 +660,14 @@ def _add_tts_routes(
         tags=["その他"],
         summary="base64エンコードされた複数のwavデータを一つに結合する",
     )
-    def connect_waves(waves: list[str]):
+    def connect_waves(waves: list[str]) -> FileResponse:
         """
-        base64エンコードされた複数のwavデータを1つに結合し、wavファイルとして返します。
+        base64エンコードされた複数のwavデータを1つに結合し、wavファイルとして返す。
         """
         try:
             waves_nparray, sampling_rate = connect_base64_waves(waves)
-        except ConnectBase64WavesException as err:
-            raise HTTPException(status_code=422, detail=str(err)) from err
+        except ConnectBase64WavesException as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
         return _wave_file_response(waves_nparray, sampling_rate)
 
@@ -664,20 +678,20 @@ def _add_tts_routes(
         summary="テキストがAquesTalkライクな記法に従っているか判定する",
         responses={
             400: {
-                "description": "テキストが不正です",
+                "description": "テキストが不正な場合",
                 "model": ParseKanaBadRequest,
             }
         },
     )
-    def validate_kana(text: str):
+    def validate_kana(text: str) -> bool:
         try:
             parse_kana(text)
             return True
-        except ParseKanaError as err:
+        except ParseKanaError as error:
             raise HTTPException(
                 status_code=400,
-                detail=ParseKanaBadRequest(err).model_dump(),
-            ) from err
+                detail=ParseKanaBadRequest(error).model_dump(),
+            ) from error
 
 
 def _add_preset_routes(
@@ -687,19 +701,19 @@ def _add_preset_routes(
     verify_mutability_allowed = dependencies.verify_mutability_allowed
 
     @voicevox_router.get("/presets", response_model=list[Preset], tags=["その他"])
-    def get_presets():
+    def get_presets() -> list[Preset]:
         """
-        エンジンが保持しているプリセットの設定を返します
+        エンジンが保持しているプリセットの設定を返す。
 
         Returns
         -------
-        presets: List[Preset]
+        presets : list[Preset]
             プリセットのリスト
         """
         try:
             presets = preset_manager.load_presets()
-        except PresetError as err:
-            raise HTTPException(status_code=422, detail=str(err)) from err
+        except PresetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         return presets
 
     @voicevox_router.post(
@@ -708,25 +722,25 @@ def _add_preset_routes(
         tags=["その他"],
         dependencies=[Depends(verify_mutability_allowed)],
     )
-    def add_preset(preset: Preset):
+    def add_preset(preset: Preset) -> int:
         """
-        新しいプリセットを追加します
+        新しいプリセットを追加する。
 
         Parameters
-        -------
-        preset: Preset
-            新しいプリセット。
-            プリセットIDが既存のものと重複している場合は、新規のプリセットIDが採番されます。
+        ----------
+        preset : Preset
+            新しいプリセット
+            プリセットIDが既存のものと重複している場合は、新規のプリセットIDが採番される。
 
         Returns
         -------
-        id: int
+        id : int
             追加したプリセットのプリセットID
         """
         try:
             id = preset_manager.add_preset(preset)
-        except PresetError as err:
-            raise HTTPException(status_code=422, detail=str(err)) from err
+        except PresetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         return id
 
     @voicevox_router.post(
@@ -735,25 +749,25 @@ def _add_preset_routes(
         tags=["その他"],
         dependencies=[Depends(verify_mutability_allowed)],
     )
-    def update_preset(preset: Preset):
+    def update_preset(preset: Preset) -> int:
         """
-        既存のプリセットを更新します
+        既存のプリセットを更新する。
 
         Parameters
-        -------
-        preset: Preset
-            更新するプリセット。
-            プリセットIDが更新対象と一致している必要があります。
+        ----------
+        preset : Preset
+            更新するプリセット
+            プリセットIDが更新対象と一致している必要がある。
 
         Returns
         -------
-        id: int
+        id : int
             更新したプリセットのプリセットID
         """
         try:
             id = preset_manager.update_preset(preset)
-        except PresetError as err:
-            raise HTTPException(status_code=422, detail=str(err)) from err
+        except PresetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         return id
 
     @voicevox_router.post(
@@ -762,20 +776,19 @@ def _add_preset_routes(
         tags=["その他"],
         dependencies=[Depends(verify_mutability_allowed)],
     )
-    def delete_preset(id: int):
+    def delete_preset(id: int) -> Response:
         """
-        既存のプリセットを削除します
+        既存のプリセットを削除する。
 
         Parameters
-        -------
-        id: int
+        ----------
+        id : int
             削除するプリセットのプリセットID
-
         """
         try:
             preset_manager.delete_preset(id)
-        except PresetError as err:
-            raise HTTPException(status_code=422, detail=str(err)) from err
+        except PresetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         return Response(status_code=204)
 
 
@@ -803,7 +816,7 @@ def _add_character_routes(
     @voicevox_router.get("/speakers", response_model=list[Speaker], tags=["その他"])
     def speakers(
         core_version: str | None = None,
-    ):
+    ) -> list[Speaker]:
         engine = get_engine(core_version)
         return metas_store.load_combined_metas(engine=engine)
 
@@ -813,14 +826,15 @@ def _add_character_routes(
         speaker_uuid: str,
         resource_format: ResourceFormat = ResourceFormat.BASE64,
         core_version: str | None = None,
-    ):
+    ) -> dict[str, Any]:
         """
-        指定されたspeaker_uuidに関する情報をjson形式で返します。
-        画像や音声はresource_formatで指定した形式で返されます。
+        指定されたspeaker_uuidに関する情報をjson形式で返す。
+        画像や音声はresource_formatで指定した形式で返される。
 
         Returns
         -------
-        ret_data: SpeakerInfo
+        ret_data : SpeakerInfo
+            話者の追加情報
         """
 
         def resolve_resource(path: Path) -> str:
@@ -884,10 +898,10 @@ def _add_character_routes(
             False, description="既に初期化済みの話者の再初期化をスキップするかどうか"
         ),
         core_version: str | None = None,
-    ):
+    ) -> Response:
         """
-        指定されたspeaker_idの話者を初期化します。
-        実行しなくても他のAPIは使用できますが、初回実行時に時間がかかることがあります。
+        指定されたspeaker_idの話者を初期化する。
+        実行しなくても他のAPIは使用できるが、初回実行時に時間がかかることがある。
         """
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
@@ -897,9 +911,9 @@ def _add_character_routes(
     @voicevox_router.get(
         "/is_initialized_speaker", response_model=bool, tags=["その他"]
     )
-    def is_initialized_speaker(speaker: int, core_version: str | None = None):
+    def is_initialized_speaker(speaker: int, core_version: str | None = None) -> bool:
         """
-        指定されたspeaker_idの話者が初期化されているかどうかを返します。
+        指定されたspeaker_idの話者が初期化されているかどうかを返す。
         """
         ensure_legacy_style_available(speaker)
         engine = get_engine(core_version)
@@ -914,14 +928,14 @@ def _add_user_dictionary_routes(
     @voicevox_router.get(
         "/user_dict", response_model=dict[str, UserDictWord], tags=["ユーザー辞書"]
     )
-    def get_user_dict_words():
+    def get_user_dict_words() -> dict[str, UserDictWord]:
         """
-        ユーザー辞書に登録されている単語の一覧を返します。
-        単語の表層形（surface）は正規化済みの形式で返します。
+        ユーザー辞書に登録されている単語の一覧を返す。
+        単語の表層形であるsurfaceは正規化済みの形式で返す。
 
         Returns
         -------
-        Dict[str, UserDictWord]
+        dict[str, UserDictWord]
             単語のUUIDとその詳細
         """
         try:
@@ -947,23 +961,24 @@ def _add_user_dictionary_routes(
             int | None,
             Query(ge=MIN_PRIORITY, le=MAX_PRIORITY),
         ] = None,
-    ):
+    ) -> str:
         """
-        ユーザー辞書に単語を追加します。
+        ユーザー辞書に単語を追加する。
 
         Parameters
         ----------
         surface : str
             単語の表層形
-        pronunciation: str
-            単語の発音（カタカナ）
-        accent_type: int
-            アクセント型（音が下がる場所を指す）
-        word_type: WordTypes, optional
-            PROPER_NOUN（固有名詞）、COMMON_NOUN（普通名詞）、VERB（動詞）、ADJECTIVE（形容詞）、SUFFIX（接尾辞）のいずれか
-        priority: int, optional
-            単語の優先度（0から10までの整数）
-            数値が大きいほど優先度が高くなります（1から9までの値を推奨）。
+        pronunciation : str
+            カタカナで表した単語の発音
+        accent_type : int
+            音が下がる場所を指すアクセント型
+        word_type : WordTypes, optional
+            PROPER_NOUN、COMMON_NOUN、VERB、ADJECTIVE、SUFFIXのいずれか
+            それぞれ固有名詞、普通名詞、動詞、形容詞、接尾辞を表す。
+        priority : int, optional
+            0から10までの整数で表す単語の優先度
+            数値が大きいほど優先度が高くなり、1から9までの値を推奨する。
         """
         try:
             word_uuid = apply_word(
@@ -974,10 +989,10 @@ def _add_user_dictionary_routes(
                 priority=priority,
             )
             return word_uuid
-        except ValidationError as e:
+        except ValidationError as error:
             raise HTTPException(
-                status_code=422, detail="パラメータに誤りがあります。\n" + str(e)
-            ) from e
+                status_code=422, detail="パラメータに誤りがあります。\n" + str(error)
+            ) from error
         except HTTPException:
             raise
         except USER_DICTIONARY_ERRORS as error:
@@ -1002,25 +1017,26 @@ def _add_user_dictionary_routes(
             int | None,
             Query(ge=MIN_PRIORITY, le=MAX_PRIORITY),
         ] = None,
-    ):
+    ) -> Response:
         """
-        ユーザー辞書に登録されている単語を更新します。
+        ユーザー辞書に登録されている単語を更新する。
 
         Parameters
         ----------
         surface : str
             単語の表層形
-        pronunciation: str
-            単語の発音（カタカナ）
-        accent_type: int
-            アクセント型（音が下がる場所を指す）
-        word_uuid: str
+        pronunciation : str
+            カタカナで表した単語の発音
+        accent_type : int
+            音が下がる場所を指すアクセント型
+        word_uuid : str
             更新する単語のUUID
-        word_type: WordTypes, optional
-            PROPER_NOUN（固有名詞）、COMMON_NOUN（普通名詞）、VERB（動詞）、ADJECTIVE（形容詞）、SUFFIX（接尾辞）のいずれか
-        priority: int, optional
-            単語の優先度（0から10までの整数）
-            数値が大きいほど優先度が高くなります（1から9までの値を推奨）。
+        word_type : WordTypes, optional
+            PROPER_NOUN、COMMON_NOUN、VERB、ADJECTIVE、SUFFIXのいずれか
+            それぞれ固有名詞、普通名詞、動詞、形容詞、接尾辞を表す。
+        priority : int, optional
+            0から10までの整数で表す単語の優先度
+            数値が大きいほど優先度が高くなり、1から9までの値を推奨する。
         """
         try:
             rewrite_word(
@@ -1034,10 +1050,10 @@ def _add_user_dictionary_routes(
             return Response(status_code=204)
         except HTTPException:
             raise
-        except ValidationError as e:
+        except ValidationError as error:
             raise HTTPException(
-                status_code=422, detail="パラメータに誤りがあります。\n" + str(e)
-            ) from e
+                status_code=422, detail="パラメータに誤りがあります。\n" + str(error)
+            ) from error
         except USER_DICTIONARY_ERRORS as error:
             traceback.print_exc()
             raise HTTPException(
@@ -1050,13 +1066,13 @@ def _add_user_dictionary_routes(
         tags=["ユーザー辞書"],
         dependencies=[Depends(verify_mutability_allowed)],
     )
-    def delete_user_dict_word(word_uuid: str):
+    def delete_user_dict_word(word_uuid: str) -> Response:
         """
-        ユーザー辞書に登録されている単語を削除します。
+        ユーザー辞書に登録されている単語を削除する。
 
         Parameters
         ----------
-        word_uuid: str
+        word_uuid : str
             削除する単語のUUID
         """
         try:
@@ -1078,15 +1094,15 @@ def _add_user_dictionary_routes(
     )
     def import_user_dict_words(
         import_dict_data: dict[str, UserDictWord], override: bool
-    ):
+    ) -> Response:
         """
-        他のユーザー辞書をインポートします。
+        他のユーザー辞書をインポートする。
 
         Parameters
         ----------
-        import_dict_data: Dict[str, UserDictWord]
+        import_dict_data : dict[str, UserDictWord]
             インポートするユーザー辞書のデータ
-        override: bool
+        override : bool
             重複したエントリがあった場合、上書きするかどうか
         """
         try:
@@ -1112,7 +1128,7 @@ def _add_engine_info_routes(
     )
     def supported_devices(
         core_version: str | None = None,
-    ):
+    ) -> SupportedDevicesInfo:
         supported_devices = get_engine(core_version).supported_devices
         if supported_devices is None:
             raise HTTPException(status_code=422, detail="非対応の機能です。")
@@ -1128,7 +1144,7 @@ def _add_engine_info_routes(
     @voicevox_router.get(
         "/engine_manifest", response_model=EngineManifest, tags=["その他"]
     )
-    def engine_manifest():
+    def engine_manifest() -> EngineManifest:
         return engine_manifest_loader.load_manifest()
 
 
@@ -1140,7 +1156,7 @@ def _add_setting_routes(
     setting_ui_template = Jinja2Templates(directory=engine_root() / "ui_template")
 
     @voicevox_router.get("/setting", response_class=HTMLResponse, tags=["設定"])
-    def setting_get(request: Request):
+    def setting_get(request: Request) -> HTMLResponse:
         settings = setting_loader.load_setting_file()
 
         cors_policy_mode = settings.cors_policy_mode
@@ -1167,23 +1183,21 @@ def _add_setting_routes(
     def setting_post(
         cors_policy_mode: Annotated[CorsPolicyMode, Form()],
         allow_origin: Annotated[str | None, Form()] = None,
-    ):
+    ) -> Response:
         settings = Setting(
             cors_policy_mode=cors_policy_mode,
             allow_origin=allow_origin,
         )
 
-        # 更新した設定で上書き
         setting_loader.dump_setting_file(settings)
 
         return Response(status_code=204)
 
 
+# 既存のCOEIROINK合成器へ委譲するVOICEVOX互換ルーターを構築する。
 def create_voicevox_router(
     dependencies: VoicevoxRouterDependencies,
 ) -> APIRouter:
-    """既存のCOEIROINK合成器へ委譲するVOICEVOX互換ルーターを構築する。"""
-
     router = APIRouter(
         prefix="/voicevox",
         generate_unique_id_function=lambda route: route.name,
@@ -1193,7 +1207,10 @@ def create_voicevox_router(
 
     # 上流VOICEVOXと同様、機能群ごとにルートを登録してアプリ組み立てからHTTP実装を分離する。
     _add_portal_route(router)
-    _add_tts_routes(router, dependencies)
+    _add_query_routes(router, dependencies)
+    _add_synthesis_routes(router, dependencies)
+    _add_morphing_routes(router, dependencies)
+    _add_utility_routes(router)
     _add_preset_routes(router, dependencies)
     _add_character_routes(router, dependencies)
     _add_user_dictionary_routes(router, dependencies)

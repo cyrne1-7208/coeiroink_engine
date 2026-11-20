@@ -1,4 +1,4 @@
-"""キャンセル可能合成ワーカーのプロセス管理・切断検知・エラー伝播・終了処理を検証する。"""
+# キャンセル可能合成ワーカーのプロセス管理・切断検知・エラー伝播・終了処理のテスト
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from multiprocessing import get_context
 from pathlib import Path
 from tempfile import NamedTemporaryFile as RealNamedTemporaryFile
 from threading import RLock
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
 import numpy as np
@@ -35,6 +36,9 @@ from voicevox_engine.cancellable_engine import (
     start_synthesis_subprocess,
 )
 from voicevox_engine.setting import CorsPolicyMode
+
+if TYPE_CHECKING:
+    from conftest import EngineClientFactory
 
 
 class _FakeProcess:
@@ -471,7 +475,7 @@ def test_subprocess_passes_device_without_preloading_every_model(
 
 
 def test_disabled_cancellable_synthesis_returns_explicit_404(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, _ = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
@@ -488,7 +492,7 @@ def test_disabled_cancellable_synthesis_returns_explicit_404(
 
 
 def test_enabled_cancellable_synthesis_uses_injected_engine(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     wav_path = engine_client_factory.tmp_path / "cancellable.wav"
     wav_path.write_bytes(b"RIFF-cancellable-test")
@@ -528,7 +532,7 @@ def test_enabled_cancellable_synthesis_uses_injected_engine(
     ],
 )
 def test_cancellable_worker_errors_keep_normal_synthesis_status(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     error: Exception,
     expected_status: int,
     caplog: pytest.LogCaptureFixture,
@@ -559,7 +563,7 @@ def test_cancellable_worker_errors_keep_normal_synthesis_status(
 
 
 def test_cancellable_disconnection_monitor_follows_app_lifespan(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     class MonitoringCancellableEngine:
         def __init__(self) -> None:

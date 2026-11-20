@@ -1,4 +1,4 @@
-"""Engine本体・manifest・Core依存・uv.lockのバージョン同期を検証する。"""
+# Engine本体・manifest・Core依存・uv.lockのバージョン同期のテスト
 
 from __future__ import annotations
 
@@ -38,9 +38,8 @@ def _pinned_versions(project: dict, package_name: str) -> set[str]:
     }
 
 
+# 配布物とAPIで公開するEngineバージョンの同期漏れを検出する。
 def test_engine_version_sources_match() -> None:
-    """配布物とAPIで公開するEngineバージョンの同期漏れを検出する。"""
-
     project = _load_toml(REPOSITORY_ROOT / "pyproject.toml")
     lock = _load_toml(REPOSITORY_ROOT / "uv.lock")
     manifest = json.loads(
@@ -53,9 +52,8 @@ def test_engine_version_sources_match() -> None:
     assert _locked_versions(lock, "coeiroink-engine") == {version}
 
 
+# Engine、隣接Core、OpenCL拡張、lockの片側だけが更新される状態を防ぐ。
 def test_core_dependency_versions_match_engine() -> None:
-    """Engine、隣接Core、OpenCL拡張、lockの片側だけが更新される状態を防ぐ。"""
-
     project = _load_toml(REPOSITORY_ROOT / "pyproject.toml")
     lock = _load_toml(REPOSITORY_ROOT / "uv.lock")
     version = project["project"]["version"]

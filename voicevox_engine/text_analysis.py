@@ -1,4 +1,4 @@
-"""Open JTalkの解析結果をEngineのアクセント句へ変換する。"""
+# Open JTalkの解析結果をEngineのアクセント句へ変換する処理
 
 from __future__ import annotations
 
@@ -31,13 +31,12 @@ def full_context_label_moras_to_moras(
     ]
 
 
+# テキストをアクセント句へ変換し、推論前の長さ・音高はゼロで返す。
 def analyze_text(
     text: str,
     *,
     enable_katakana_english: bool = False,
 ) -> list[AccentPhrase]:
-    """テキストをアクセント句へ変換し、推論前の長さ・音高はゼロで返す。"""
-
     if not text.strip():
         return []
 

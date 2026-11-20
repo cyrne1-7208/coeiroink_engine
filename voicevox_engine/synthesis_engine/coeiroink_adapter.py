@@ -1,4 +1,4 @@
-"""VOICEVOX形式をCOEIROINKネイティブ合成へ変換するEngineアダプター。"""
+# VOICEVOX形式をCOEIROINKネイティブ合成へ変換するEngineアダプター
 
 from __future__ import annotations
 
@@ -10,9 +10,8 @@ from ..model import AccentPhrase, AudioQuery
 from .synthesis_engine_base import SynthesisEngineBase
 
 
+# VOICEVOXのDTOだけを変換し、解析・推論・後処理を公開COEIROINK Coreへ委譲するアダプター
 class CoeiroinkVoicevoxAdapter(SynthesisEngineBase):
-    """VOICEVOXのDTOだけを変換し、解析・推論・後処理は公開COEIROINK Coreへ委譲する。"""
-
     def __init__(
         self,
         speakers: str,
@@ -25,10 +24,9 @@ class CoeiroinkVoicevoxAdapter(SynthesisEngineBase):
         self.default_sampling_rate = audio_manager.fs
         self.audio_manager = audio_manager
 
+    # 実際のCoreが選択しているバックエンドを返す。
     @property
     def device(self) -> str:
-        """実際のCoreが選択しているバックエンドを返す。"""
-
         return self.audio_manager.device
 
     @property
@@ -39,18 +37,16 @@ class CoeiroinkVoicevoxAdapter(SynthesisEngineBase):
     def supported_devices(self) -> str | None:
         return self._supported_devices
 
+    # Coreに独立した音素長推論APIがないため、互換入力を変更せず返す。
     def replace_phoneme_length(
         self, accent_phrases: list[AccentPhrase], speaker_id: int
     ) -> list[AccentPhrase]:
-        """Coreに独立した音素長推論APIがないため、互換入力を変更せず返す。"""
-
         return accent_phrases
 
+    # Coreに独立したモーラ音高推論APIがないため、互換入力を変更せず返す。
     def replace_mora_pitch(
         self, accent_phrases: list[AccentPhrase], speaker_id: int
     ) -> list[AccentPhrase]:
-        """Coreに独立したモーラ音高推論APIがないため、互換入力を変更せず返す。"""
-
         return accent_phrases
 
     def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool) -> None:

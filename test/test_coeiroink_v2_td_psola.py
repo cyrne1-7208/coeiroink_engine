@@ -1,4 +1,4 @@
-"""COEIROINK v2のTD-PSOLA音高・抑揚変換の精度・決定性・入力検証を確認する。"""
+# COEIROINK v2のTD-PSOLA音高・抑揚変換の精度・決定性・入力検証のテスト
 
 from __future__ import annotations
 

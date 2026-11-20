@@ -1,7 +1,6 @@
-"""COEIROINK v2の波形後処理。
-
-HTTPルーターはリクエスト値の解決だけを担当し、このモジュールはCoreの公開波形プリミティブを一定の順序で適用する。
-"""
+# COEIROINK v2の波形後処理
+#
+# HTTPルーターはリクエスト値の解決だけを担当し、このモジュールはCoreの公開波形プリミティブを一定の順序で適用する。
 
 import math
 from collections.abc import Sequence
@@ -18,10 +17,9 @@ _PROCESSING_ALGORITHM_ALIASES = {"coeiroink": "td-psola"}
 _PROCESSING_ALGORITHMS = frozenset(("td-psola", "world", "resampling"))
 
 
+# HTTPモデルから解決済みの波形後処理オプション
 @dataclass(frozen=True, slots=True)
 class WaveProcessingOptions:
-    """HTTPモデルから解決済みの波形後処理オプション。"""
-
     volume_scale: float
     pitch_scale: float
     intonation_scale: float
@@ -92,6 +90,7 @@ def _fit_f0_track(track: np.ndarray, size: int) -> np.ndarray:
     return np.interp(target_positions, positions, track).astype(np.float64)
 
 
+# CoreのWORLD処理を使い、指定されていればF0軌跡を適用する。
 def _world_process(
     audio_manager: AudioManager,
     wave: np.ndarray,
@@ -100,8 +99,6 @@ def _world_process(
     intonation_scale: float,
     adjusted_f0: Sequence[float] | None,
 ) -> np.ndarray:
-    """CoreのWORLD処理を使い、指定されていればF0軌跡を適用する。"""
-
     if adjusted_f0 is None:
         return as_waveform(
             audio_manager.pitch_intonation(
@@ -221,7 +218,7 @@ def _optional_adjusted_f0(value: Sequence[float] | None) -> np.ndarray | None:
         return None
     try:
         if len(value) == 0:
-            # 公式リクエスト例の空配列は、F0軌跡が指定されていないことを表す。
+            # 公式リクエスト例の空配列はF0軌跡が指定されていないことを表す。
             return None
     except TypeError:
         pass
@@ -421,14 +418,13 @@ def _resample_output(
         ) from error
 
 
+# Coreの公開プリミティブを使い、v2の波形後処理を定められた順序で適用する。
 def process_wave(
     audio_manager: AudioManager,
     wave: np.ndarray,
     sampling_rate: int,
     options: WaveProcessingOptions,
 ) -> tuple[np.ndarray, int]:
-    """Coreの公開プリミティブを使い、v2の波形後処理を定められた順序で適用する。"""
-
     current = as_waveform(wave)
     _require_processing_size(current.size, "input wave")
     sampling_rate = _processing_sampling_rate(sampling_rate, "sampling_rate")

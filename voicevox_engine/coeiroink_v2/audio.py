@@ -1,11 +1,8 @@
-"""Small, validated audio primitives for the COEIROINK v2 HTTP API.
-
-This module deliberately contains no model or HTTP code.  Waveforms remain
-one-dimensional floating-point NumPy arrays until they cross the HTTP
-boundary, where they are encoded as mono PCM16 WAV data.  Numerical
-post-processing delegates to the public Core ``AudioManager`` implementation
-so the Engine and Core keep the same audio rules.
-"""
+# COEIROINK v2 HTTP APIで使う、入力を検証する小さな音声プリミティブ
+#
+# このモジュールにはモデルやHTTPのコードを意図的に含めない。
+# 波形はHTTPの境界を越えるまで一次元の浮動小数点NumPy配列のまま扱い、境界でモノラルのPCM16 WAVデータへエンコードする。
+# 数値的な後処理は公開Coreの`AudioManager`の実装に委譲し、EngineとCoreで同じ音声処理の規則を保つ。
 
 import base64
 import binascii
@@ -20,12 +17,14 @@ import soundfile
 from .models import MoraDuration, WorldF0
 
 
+# v2 APIで使えない音声の値が渡された場合のエラー
 class AudioValidationError(ValueError):
-    """Raised when an audio value cannot be used by the v2 API."""
+    pass
 
 
+# 公開の音声プリミティブが有限のサンプルを生成できない場合のエラー
 class AudioProcessingError(RuntimeError):
-    """Raised when a public audio primitive cannot produce finite samples."""
+    pass
 
 
 Waveform = np.ndarray
@@ -104,9 +103,25 @@ def _validate_duration(
     return result
 
 
-def encode_pcm_wav(wave: np.ndarray, sampling_rate: int) -> bytes:
-    """Encode a finite mono float waveform as deterministic PCM16 WAV bytes."""
+# モーラごとの継続長の列を検証し、MoraDurationの一覧に揃える。
+def _validate_mora_durations(
+    mora_durations: Sequence[MoraDuration | dict],
+) -> list[MoraDuration]:
+    if isinstance(mora_durations, (str, bytes)):
+        raise AudioValidationError("mora_durations must be a sequence")
+    try:
+        return [
+            item
+            if isinstance(item, MoraDuration)
+            else MoraDuration.model_validate(item)
+            for item in mora_durations
+        ]
+    except (TypeError, ValueError) as error:
+        raise AudioValidationError("mora_durations contains an invalid item") from error
 
+
+# 有限値のモノラル浮動小数点波形を決定的なPCM16 WAVのバイト列へエンコードする。
+def encode_pcm_wav(wave: np.ndarray, sampling_rate: int) -> bytes:
     wave = _require_waveform(wave)
     _require_bounded_waveform_size(wave.size)
     sampling_rate = _require_sampling_rate(sampling_rate, "sampling_rate")
@@ -130,17 +145,14 @@ def encode_pcm_wav(wave: np.ndarray, sampling_rate: int) -> bytes:
     return result
 
 
+# モノラルのPCM WAVをデコードし、float32のサンプルとサンプリングレートの組を返す。
+#
+# v2のサービスはPCM WAVの入力だけを受け付ける。
+# ステレオ、圧縮形式、浮動小数点形式、壊れたデータ、WAV以外のコンテナは、サンプルを返す前に拒否する。
 def decode_pcm_wav(
     wav_bytes: WavInput,
     expected_sampling_rate: int | None = None,
 ) -> tuple[Waveform, int]:
-    """Decode a mono PCM WAV into ``(float32_samples, sampling_rate)``.
-
-    The v2 service accepts PCM WAV input only.  Stereo, compressed, floating
-    point, malformed, and non-WAV containers are rejected before samples are
-    returned.
-    """
-
     if not isinstance(wav_bytes, (bytes, bytearray, memoryview)):
         raise AudioValidationError("wav_bytes must be bytes-like")
     raw = bytes(wav_bytes)
@@ -179,20 +191,18 @@ def decode_pcm_wav(
     return result, sampling_rate
 
 
+# 波形をPCM16 WAVにし、標準のBase64でエンコードする。
 def encode_pcm_wav_base64(wave: np.ndarray, sampling_rate: int) -> str:
-    """Encode a waveform as standard Base64-wrapped PCM16 WAV."""
-
     return base64.standard_b64encode(encode_pcm_wav(wave, sampling_rate)).decode(
         "ascii"
     )
 
 
+# Base64のPCM WAV文字列をデコードし、float32のサンプルとサンプリングレートの組を返す。
 def decode_pcm_wav_base64(
     wav_base64: str,
     expected_sampling_rate: int | None = None,
 ) -> tuple[Waveform, int]:
-    """Decode a Base64 PCM WAV string into ``(float32_samples, rate)``."""
-
     if not isinstance(wav_base64, str):
         raise AudioValidationError("wav_base64 must be a string")
     try:
@@ -202,23 +212,23 @@ def decode_pcm_wav_base64(
     return decode_pcm_wav(raw, expected_sampling_rate=expected_sampling_rate)
 
 
+# WAVだけを扱う補助関数を軽量に保つため、公開Coreのアダプターを遅延読み込みする。
 def _core_audio_manager() -> Any:
-    """Load the public Core adapter lazily so pure WAV helpers stay lightweight."""
-
     from coeirocore.coeiro_manager import AudioManager
 
     return AudioManager
 
 
+# 旧Python APIから、モデルを生成せずにCoreの波形プリミティブだけを利用するためのクラス
 class _CompatibilityWaveProcessor:
-    """旧Python APIから、モデルを生成せずCoreの波形プリミティブだけを利用する。"""
-
     @staticmethod
-    def get_world_f0(wave: np.ndarray, sampling_rate: int):
+    def get_world_f0(wave: np.ndarray, sampling_rate: int) -> np.ndarray:
         return _core_audio_manager().get_world_f0(wave, sampling_rate)
 
     @staticmethod
-    def get_world(wave: np.ndarray, sampling_rate: int):
+    def get_world(
+        wave: np.ndarray, sampling_rate: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         return _core_audio_manager().get_world(wave, sampling_rate)
 
     @staticmethod
@@ -273,17 +283,15 @@ class _CompatibilityWaveProcessor:
 _COMPATIBILITY_WAVE_PROCESSOR = _CompatibilityWaveProcessor()
 
 
+# 前後に指定された長さの音声を残しながら無音を取り除く。
+#
+# Coreと同じRMS判定を使う。trim-buffer値は検出範囲の外側へ残す音声長であり、追加で破棄する長さではない。
 def trim_wave(
     wave: np.ndarray,
     sampling_rate: int,
     start_trim_buffer: float = 0.0,
     end_trim_buffer: float = 0.0,
 ) -> Waveform:
-    """Trim silence while retaining the requested context around both edges.
-
-    Coreと同じRMS判定を使う。trim-buffer値は検出範囲の外側へ残す音声長であり、追加で破棄する長さではない。
-    """
-
     wave = _require_waveform(wave)
     sampling_rate = _require_sampling_rate(sampling_rate, "sampling_rate")
     start_trim_buffer = _validate_duration(
@@ -316,14 +324,13 @@ def trim_wave(
     return trimmed.copy()
 
 
+# 互換用の別名で、trim_waveと同じく前後の音声を残して無音を取り除く。
 def apply_trim_buffer(
     wave: np.ndarray,
     sampling_rate: int,
     start_trim_buffer: float = 0.0,
     end_trim_buffer: float = 0.0,
 ) -> Waveform:
-    """Compatibility alias for buffered silence trimming."""
-
     return trim_wave(
         wave,
         sampling_rate,
@@ -332,6 +339,10 @@ def apply_trim_buffer(
     )
 
 
+# 文中の`pau`の区間を、指定された長さの無音に置き換える。
+#
+# 先頭と末尾の`pau`は発話の端を表し、`trim_wave`で処理する。ここでは文中の句読点による休止だけを置き換える。
+# 2つの休止バッファーは元の休止を両側に少しずつ残し、継続長の境界が音声と重なるモデルでも音声が急に途切れないようにする。
 def replace_pause_segments(
     wave: np.ndarray,
     sampling_rate: int,
@@ -340,15 +351,6 @@ def replace_pause_segments(
     pause_start_trim_buffer: float = 0.0,
     pause_end_trim_buffer: float = 0.0,
 ) -> Waveform:
-    """Replace internal ``pau`` ranges with a requested silence length.
-
-    The leading and trailing ``pau`` records describe the utterance edges and
-    are handled by :func:`trim_wave`.  Only internal punctuation pauses are
-    replaced here.  The two pause buffers retain a small amount of the source
-    pause on each side so a model whose duration boundary overlaps speech is
-    not cut abruptly.
-    """
-
     current = _require_waveform(wave)
     _require_bounded_waveform_size(current.size)
     sampling_rate = _require_sampling_rate(sampling_rate, "sampling_rate")
@@ -367,17 +369,7 @@ def replace_pause_segments(
         "pause_end_trim_buffer",
         maximum=MAX_PAUSE_LENGTH_SECONDS,
     )
-    if isinstance(mora_durations, (str, bytes)):
-        raise AudioValidationError("mora_durations must be a sequence")
-    try:
-        durations = [
-            item
-            if isinstance(item, MoraDuration)
-            else MoraDuration.model_validate(item)
-            for item in mora_durations
-        ]
-    except (TypeError, ValueError) as error:
-        raise AudioValidationError("mora_durations contains an invalid item") from error
+    durations = _validate_mora_durations(mora_durations)
 
     pauses = []
     previous_end = 0
@@ -433,13 +425,12 @@ def replace_pause_segments(
     return result
 
 
+# v2のRESAMPLING方式で長さを変えずに全体の音高を変える。
 def pitch_shift_resampling(
     wave: np.ndarray,
     sampling_rate: int,
     pitch_scale: float,
 ) -> Waveform:
-    """Apply the v2 RESAMPLING-style global pitch shift at fixed duration."""
-
     current = _require_waveform(wave)
     _require_bounded_waveform_size(current.size)
     sampling_rate = _require_sampling_rate(sampling_rate, "sampling_rate")
@@ -468,6 +459,7 @@ def pitch_shift_resampling(
     return result.copy()
 
 
+# 旧Python APIの引数を現行の一元化された波形後処理へ変換する。
 def process_wave(
     wave: np.ndarray,
     sampling_rate: int,
@@ -481,8 +473,6 @@ def process_wave(
     start_trim_buffer: float = 0.0,
     end_trim_buffer: float = 0.0,
 ) -> tuple[Waveform, int]:
-    """旧Python APIの引数を、現行の一元化された波形後処理へ変換する。"""
-
     from .wave_processing import WaveProcessingOptions
     from .wave_processing import process_wave as process_current_wave
 
@@ -507,13 +497,12 @@ def process_wave(
     )
 
 
+# 旧Python APIとしてPCM WAVをデコードし、現行処理後に再エンコードする。
 def process_wav(
     wav_bytes: WavInput,
     sampling_rate: int | None = None,
     **processing: Any,
 ) -> bytes:
-    """旧Python APIとしてPCM WAVをデコードし、現行処理後に再エンコードする。"""
-
     wave, input_sampling_rate = decode_pcm_wav(
         wav_bytes,
         expected_sampling_rate=sampling_rate,
@@ -526,9 +515,8 @@ def process_wav(
     return encode_pcm_wav(output_wave, output_sampling_rate)
 
 
+# 公開Coreの実装で有限値のWORLD F0ベクトルを推定する。
 def estimate_world_f0(wave: np.ndarray, sampling_rate: int) -> np.ndarray:
-    """Estimate a finite WORLD F0 vector with the public Core implementation."""
-
     wave = _require_waveform(wave)
     sampling_rate = _require_sampling_rate(sampling_rate, "sampling_rate")
     try:
@@ -541,24 +529,13 @@ def estimate_world_f0(wave: np.ndarray, sampling_rate: int) -> np.ndarray:
     return f0.copy()
 
 
+# `/v1/estimate_f0`が返す、JSONに変換できるWORLD F0の応答を作る。
 def prepare_world_f0(
     wave: np.ndarray,
     sampling_rate: int,
     mora_durations: Sequence[MoraDuration | dict],
 ) -> WorldF0:
-    """Prepare the JSON-ready WORLD F0 response used by ``/v1/estimate_f0``."""
-
-    if isinstance(mora_durations, (str, bytes)):
-        raise AudioValidationError("mora_durations must be a sequence")
-    try:
-        durations = [
-            item
-            if isinstance(item, MoraDuration)
-            else MoraDuration.model_validate(item)
-            for item in mora_durations
-        ]
-    except (TypeError, ValueError) as error:
-        raise AudioValidationError("mora_durations contains an invalid item") from error
+    durations = _validate_mora_durations(mora_durations)
     f0 = estimate_world_f0(wave, sampling_rate)
     return WorldF0(f0=[float(value) for value in f0], moraDurations=durations)
 

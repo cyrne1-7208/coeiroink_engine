@@ -1,4 +1,4 @@
-"""AquesTalk風記法（kana）のパース・生成・エラーコードを検証する。"""
+# AquesTalkライクな読み仮名のパース・生成・エラーコードのテスト
 
 from __future__ import annotations
 
@@ -167,7 +167,7 @@ def test_accent_phrase_marks(text: str, expected: list[AccentPhrase]) -> None:
         ("__ス'", ParseKanaErrorCode.UNKNOWN_TEXT, None),
         ("ア'/", ParseKanaErrorCode.EMPTY_PHRASE, {"position": "2"}),
         ("/ア'", ParseKanaErrorCode.EMPTY_PHRASE, None),
-        ("", ParseKanaErrorCode.EMPTY_PHRASE, None),
+        ("", ParseKanaErrorCode.EMPTY_PHRASE, {"position": "1"}),
         (
             "ヒト'ツメ/フタツメ",
             ParseKanaErrorCode.ACCENT_NOTFOUND,

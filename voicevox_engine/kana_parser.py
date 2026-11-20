@@ -33,12 +33,12 @@ for text, (consonant, vowel) in openjtalk_text2mora.items():
 _MAX_MORA_TEXT_LENGTH = max(map(len, text2mora_with_unvoice))
 
 
+# 登録済みモーラの最長一致により読み仮名をAccentPhraseへ変換する。
 def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
-    """登録済みモーラの最長一致により、読み仮名をAccentPhraseへ変換する。"""
     accent_index: int | None = None
     moras: list[Mora] = []
 
-    base_index = 0  # パース開始位置。ここから右の文字列をstackに詰めていく。
+    base_index = 0  # パース開始位置で、ここから右の文字列をstackに詰めていく。
     stack = ""  # 保留中の文字列
     matched_text: str | None = None  # 保留中の文字列内で最後にマッチした仮名
 
@@ -76,15 +76,12 @@ def _text_to_accent_phrase(phrase: str) -> AccentPhrase:
     return AccentPhrase(moras=moras, accent=accent_index, pause_mora=None)
 
 
+# AquesTalkライクな読み仮名をパースして音長・音高未指定のAccentPhraseのリストに変換する。
 def parse_kana(text: str) -> list[AccentPhrase]:
-    """
-    AquesTalkライクな読み仮名をパースして音長・音高未指定のAccentPhraseのリストに変換する
-    """
-
     parsed_results: list[AccentPhrase] = []
     phrase_base = 0
     if len(text) == 0:
-        raise ParseKanaError(ParseKanaErrorCode.EMPTY_PHRASE, position=1)
+        raise ParseKanaError(ParseKanaErrorCode.EMPTY_PHRASE, position="1")
 
     for i in range(len(text) + 1):
         if i == len(text) or text[i] in [PAUSE_DELIMITER, NOPAUSE_DELIMITER]:

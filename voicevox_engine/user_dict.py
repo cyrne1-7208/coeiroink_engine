@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import threading
+from contextlib import suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import UUID, uuid4
@@ -31,13 +32,13 @@ mutex_user_dict = threading.RLock()
 mutex_openjtalk_dict = threading.RLock()
 
 
+# pyopenjtalk 0.4.1の公開APIでユーザー辞書をコンパイルする。
 def _create_user_dict(source_path: Path, compiled_path: Path) -> None:
-    """pyopenjtalk 0.4.1の公開APIでユーザー辞書をコンパイルする。"""
     pyopenjtalk.mecab_dict_index(str(source_path), str(compiled_path))
 
 
+# pyopenjtalk 0.4.1の公開APIでコンパイル済み辞書を適用する。
 def _set_user_dict(compiled_path: Path) -> None:
-    """pyopenjtalk 0.4.1の公開APIでコンパイル済み辞書を適用する。"""
     pyopenjtalk.update_global_jtalk_with_user_dict(str(compiled_path))
 
 
@@ -49,17 +50,15 @@ def _reset_user_dict() -> None:
         importlib.reload(pyopenjtalk)
 
 
+# ユーザー辞書更新後のpyopenjtalkを既定辞書へ戻す。
 def reset_user_dict() -> None:
-    """ユーザー辞書更新後のpyopenjtalkを既定辞書へ戻す。"""
     with mutex_openjtalk_dict:
         _reset_user_dict()
 
 
 def _remove_file(path: Path) -> None:
-    try:
+    with suppress(FileNotFoundError):
         path.unlink()
-    except FileNotFoundError:
-        pass
 
 
 def _write_json_atomic(user_dict_json: str, user_dict_path: Path) -> None:
@@ -145,6 +144,9 @@ def _restore_user_dict_json(
         _write_bytes_atomic(previous_user_dict_json, user_dict_path)
 
 
+# 候補辞書をコンパイルし、Open JTalk・JSON・コンパイル済み辞書を一貫して更新する。
+#
+# いずれかの適用に失敗した場合は、永続データとOpen JTalkを更新前の状態へ戻す。
 def _rebuild_and_apply(
     user_dict: dict[str, UserDictWord],
     default_dict_path: Path,
@@ -152,10 +154,6 @@ def _rebuild_and_apply(
     compiled_dict_path: Path,
     persist_json: bool,
 ) -> None:
-    """候補辞書をコンパイルし、Open JTalk・JSON・コンパイル済み辞書を一貫して更新する。
-
-    いずれかの適用に失敗した場合は、永続データとOpen JTalkを更新前の状態へ戻す。
-    """
     previous_user_dict_json = (
         user_dict_path.read_bytes()
         if persist_json and user_dict_path.is_file()
@@ -271,12 +269,12 @@ def _rebuild_and_apply(
             _remove_file(temporary_compiled_path)
 
 
+# 既定辞書とユーザー辞書を再構築し、成功後にOpen JTalkへ適用する。
 def update_dict(
     default_dict_path: Path = default_dict_path,
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
 ) -> None:
-    """既定辞書とユーザー辞書を再構築し、成功後にOpen JTalkへ適用する。"""
     with mutex_openjtalk_dict, mutex_user_dict:
         user_dict_path = Path(user_dict_path)
         _rebuild_and_apply(
@@ -288,6 +286,7 @@ def update_dict(
         )
 
 
+# 辞書全体の保存・コンパイル・適用を一つの更新処理として行う。
 def replace_user_dict(
     user_dict: dict[str, UserDictWord],
     *,
@@ -295,8 +294,6 @@ def replace_user_dict(
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
 ) -> None:
-    """辞書全体の保存・コンパイル・適用を一つの更新処理として行う。"""
-
     with mutex_openjtalk_dict, mutex_user_dict:
         _rebuild_and_apply(
             user_dict,
@@ -381,7 +378,7 @@ def rewrite_word(
     priority: int | None = None,
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
-):
+) -> None:
     word = create_word(
         surface=surface,
         pronunciation=pronunciation,
@@ -411,7 +408,7 @@ def delete_word(
     word_uuid: str,
     user_dict_path: Path = user_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
-):
+) -> None:
     with mutex_openjtalk_dict, mutex_user_dict:
         user_dict_path = Path(user_dict_path)
         user_dict = _read_dict(user_dict_path)
@@ -436,7 +433,7 @@ def import_user_dict(
     user_dict_path: Path = user_dict_path,
     default_dict_path: Path = default_dict_path,
     compiled_dict_path: Path = compiled_dict_path,
-):
+) -> None:
     # インポートデータはassertではなく、実行設定に依存しない例外で検証する。
     for word_uuid, word in dict_data.items():
         try:

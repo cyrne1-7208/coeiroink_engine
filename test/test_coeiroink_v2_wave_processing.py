@@ -1,4 +1,4 @@
-"""COEIROINK v2の波形後処理パイプライン（適用順序・分岐・WORLD F0・上限検証）を検証する。"""
+# COEIROINK v2の波形後処理パイプラインの適用順序・分岐・WORLD F0・上限検証のテスト
 
 from __future__ import annotations
 

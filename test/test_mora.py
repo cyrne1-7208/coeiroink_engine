@@ -1,4 +1,4 @@
-"""モーラ対応表（OpenJTalk双方向変換・単射性）とモーラ表記変換を検証する。"""
+# Open JTalkのモーラ対応表の双方向変換と単射性、およびモーラ表記変換のテスト
 
 from __future__ import annotations
 
@@ -23,9 +23,8 @@ def test_openjtalk_mora2text_maps_special_moras(mora: str, expected: str) -> Non
     assert openjtalk_mora2text[mora] == expected
 
 
+# 異なるモーラが同じ読みがなに対応しないことを確認する。
 def test_openjtalk_mora2text_is_injective() -> None:
-    """異なるモーラが同じ読みがなに対応しないことを確認する。"""
-
     values = list(openjtalk_mora2text.values())
     assert len(values) == len(set(values))
 

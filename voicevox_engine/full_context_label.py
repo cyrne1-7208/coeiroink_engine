@@ -13,33 +13,33 @@ from .user_dict import mutex_openjtalk_dict
 @dataclass
 class Phoneme:
     """
-    音素(母音・子音)クラス、音素の元となるcontextを保持する
-    音素には、母音や子音のほかに無音(silent/pause)も含まれる
+    音素の元となるcontextを保持する音素クラス
+    音素には母音や子音のほかに無音を表すsilentとpauseも含まれる。
 
     Attributes
     ----------
-    contexts: Dict[str, str]
+    contexts : dict[str, str]
         音素の元
     """
 
     contexts: dict[str, str]
 
     @classmethod
-    def from_label(cls, label: str):
+    def from_label(cls, label: str) -> Phoneme:
         """
-        pyopenjtalk.extract_fullcontextで得られる音素の元(ラベル)から、Phonemeクラスを作成する
+        pyopenjtalk.extract_fullcontextで得られる音素の元であるラベルから、Phonemeクラスを作成する。
+
         Parameters
         ----------
         label : str
-            pyopenjtalk.extract_fullcontextで得られるラベルを渡す
+            pyopenjtalk.extract_fullcontextで得られるラベル
 
         Returns
         -------
-        phoneme: Phoneme
-            Phonemeクラスを返す
+        phoneme : Phoneme
+            作成したPhonemeクラス
         """
-
-        # フルコンテキストラベルの仕様は、http://hts.sp.nitech.ac.jp/?Download のHTS-2.3 Japanese tar.bz2に含まれるdata/lab_format.pdfを参照。
+        # フルコンテキストラベルの仕様は、http://hts.sp.nitech.ac.jp/?Download のHTS-2.3 Japanese tar.bz2に含まれるdata/lab_format.pdfに記載されている。
         contexts = re.search(
             r"^(?P<p1>.+?)\^(?P<p2>.+?)\-(?P<p3>.+?)\+(?P<p4>.+?)\=(?P<p5>.+?)"
             r"/A\:(?P<a1>.+?)\+(?P<a2>.+?)\+(?P<a3>.+?)"
@@ -58,13 +58,14 @@ class Phoneme:
         return cls(contexts=contexts)
 
     @property
-    def label(self):
+    def label(self) -> str:
         """
-        pyopenjtalk.extract_fullcontextで得られるラベルと等しい
+        pyopenjtalk.extract_fullcontextで得られるものと等しいラベルを返す。
+
         Returns
         -------
-        label: str
-            ラベルを返す
+        label : str
+            contextsから組み立てたラベル
         """
         return (
             "{p1}^{p2}-{p3}+{p4}={p5}"
@@ -82,27 +83,29 @@ class Phoneme:
         ).format(**self.contexts)
 
     @property
-    def phoneme(self):
+    def phoneme(self) -> str:
         """
-        音素クラスの中で、発声に必要な要素を返す
+        音素クラスの中で発声に必要な要素を返す。
+
         Returns
         -------
         phoneme : str
-            発声に必要な要素を返す
+            発声に必要な要素
         """
         return self.contexts["p3"]
 
-    def is_pause(self):
+    def is_pause(self) -> bool:
         """
-        音素がポーズ(無音、silent/pause)であるかを返す
+        音素が無音を表すsilentかpauseであるかを返す。
+
         Returns
         -------
         is_pause : bool
-            音素がポーズ(無音、silent/pause)であるか(True)否か(False)
+            音素が無音であればTrue、そうでなければFalse
         """
         return self.contexts["f1"] == "xx"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Phoneme phoneme='{self.phoneme}'>"
 
 
@@ -110,11 +113,11 @@ class Phoneme:
 class Mora:
     """
     モーラクラス
-    モーラは1音素(母音や促音「っ」、撥音「ん」など)か、2音素(母音と子音の組み合わせ)で成り立つ
+    モーラは、母音や促音「っ」、撥音「ん」などの1音素か、母音と子音を組み合わせた2音素で成り立つ。
 
     Attributes
     ----------
-    consonant : Optional[Phoneme]
+    consonant : Phoneme | None
         子音
     vowel : Phoneme
         母音
@@ -123,10 +126,11 @@ class Mora:
     consonant: Phoneme | None
     vowel: Phoneme
 
-    def set_context(self, key: str, value: str):
+    def set_context(self, key: str, value: str) -> None:
         """
-        Moraクラス内に含まれるPhonemeのcontextのうち、指定されたキーの値を変更する
-        consonantが存在する場合は、vowelと同じようにcontextを変更する
+        Moraクラス内に含まれるPhonemeのcontextのうち、指定されたキーの値を変更する。
+        consonantが存在する場合は、vowelと同じようにcontextを変更する。
+
         Parameters
         ----------
         key : str
@@ -139,26 +143,28 @@ class Mora:
             self.consonant.contexts[key] = value
 
     @property
-    def phonemes(self):
+    def phonemes(self) -> list[Phoneme]:
         """
-        音素群を返す
+        音素群を返す。
+
         Returns
         -------
-        phonemes : List[Phoneme]
-            母音しかない場合は母音のみ、子音もある場合は子音、母音の順番でPhonemeのリストを返す
+        phonemes : list[Phoneme]
+            母音しかない場合は母音のみ、子音もある場合は子音、母音の順番に並べたPhonemeのリスト
         """
         if self.consonant is not None:
             return [self.consonant, self.vowel]
         return [self.vowel]
 
     @property
-    def labels(self):
+    def labels(self) -> list[str]:
         """
-        ラベル群を返す
+        ラベル群を返す。
+
         Returns
         -------
-        labels : List[str]
-            Moraに含まれるすべてのラベルを返す
+        labels : list[str]
+            Moraに含まれるすべてのラベル
         """
         return [p.label for p in self.phonemes]
 
@@ -167,13 +173,16 @@ class Mora:
 class AccentPhrase:
     """
     アクセント句クラス
-    同じアクセントのMoraを複数保持する
+    同じアクセントのMoraを複数保持する。
+
     Attributes
     ----------
-    moras : List[Mora]
+    moras : list[Mora]
         モーラのリスト
     accent : int
         アクセント
+    is_interrogative : bool
+        疑問形のアクセント句であるか
     """
 
     moras: list[Mora]
@@ -181,26 +190,27 @@ class AccentPhrase:
     is_interrogative: bool
 
     @classmethod
-    def from_phonemes(cls, phonemes: list[Phoneme]):
+    def from_phonemes(cls, phonemes: list[Phoneme]) -> AccentPhrase:
         """
-        PhonemeのリストからAccentPhraseクラスを作成する
+        PhonemeのリストからAccentPhraseクラスを作成する。
+
         Parameters
         ----------
-        phonemes : List[Phoneme]
-            phonemeのリストを渡す
+        phonemes : list[Phoneme]
+            phonemeのリスト
 
         Returns
         -------
         accent_phrase : AccentPhrase
-            AccentPhraseクラスを返す
+            作成したAccentPhraseクラス
         """
         moras: list[Mora] = []
 
         mora_phonemes: list[Phoneme] = []
         for phoneme, next_phoneme in zip(phonemes, [*phonemes[1:], None], strict=True):
-            # workaround for Hihosiba/voicevox_engine#57
-            # (py)openjtalk によるアクセント句内のモーラへの附番は 49 番目まで
-            # 49 番目のモーラについて、続く音素のモーラ番号を単一モーラの特定に使えない
+            # Hihosiba/voicevox_engine#57の回避策
+            # Open JTalkによるアクセント句内のモーラへの附番は49番目までである。
+            # 49番目のモーラについては、続く音素のモーラ番号を単一モーラの特定に使えない。
             if int(phoneme.contexts["a2"]) == 49:
                 break
 
@@ -221,15 +231,16 @@ class AccentPhrase:
                 mora_phonemes = []
 
         accent = int(moras[0].vowel.contexts["f2"])
-        # workaround for Hihosiba/voicevox_engine#55
-        # アクセント位置とするキー f2 の値がアクセント句内のモーラ数を超える場合がある
+        # Hihosiba/voicevox_engine#55の回避策
+        # アクセント位置とするキーf2の値が、アクセント句内のモーラ数を超える場合がある。
         accent = min(accent, len(moras))
         is_interrogative = moras[-1].vowel.contexts["f3"] == "1"
         return cls(moras=moras, accent=accent, is_interrogative=is_interrogative)
 
-    def set_context(self, key: str, value: str):
+    def set_context(self, key: str, value: str) -> None:
         """
-        AccentPhraseに間接的に含まれる全てのPhonemeのcontextの、指定されたキーの値を変更する
+        AccentPhraseに間接的に含まれる全てのPhonemeのcontextのうち、指定されたキーの値を変更する。
+
         Parameters
         ----------
         key : str
@@ -241,31 +252,34 @@ class AccentPhrase:
             mora.set_context(key, value)
 
     @property
-    def phonemes(self):
+    def phonemes(self) -> list[Phoneme]:
         """
-        音素群を返す
+        音素群を返す。
+
         Returns
         -------
-        phonemes : List[Phoneme]
-            AccentPhraseに間接的に含まれる全てのPhonemeを返す
+        phonemes : list[Phoneme]
+            AccentPhraseに間接的に含まれる全てのPhoneme
         """
         return list(chain.from_iterable(m.phonemes for m in self.moras))
 
     @property
-    def labels(self):
+    def labels(self) -> list[str]:
         """
-        ラベル群を返す
+        ラベル群を返す。
+
         Returns
         -------
-        labels : List[str]
-            AccentPhraseに間接的に含まれる全てのラベルを返す
+        labels : list[str]
+            AccentPhraseに間接的に含まれる全てのラベル
         """
         return [p.label for p in self.phonemes]
 
-    def merge(self, accent_phrase: AccentPhrase):
+    def merge(self, accent_phrase: AccentPhrase) -> AccentPhrase:
         """
-        AccentPhraseを結合する
-        (このクラスが保持するmorasの後ろに、引数として渡されたAccentPhraseのmorasを結合する)
+        AccentPhraseを結合する。
+        このクラスが保持するmorasの後ろに、引数として渡されたAccentPhraseのmorasを結合する。
+
         Parameters
         ----------
         accent_phrase : AccentPhrase
@@ -287,28 +301,30 @@ class AccentPhrase:
 class BreathGroup:
     """
     発声の区切りクラス
-    呼気段落（ポーズ間の区間）に含まれる複数のアクセント句を保持する
+    ポーズ間の区間である呼気段落に含まれる複数のアクセント句を保持する。
+
     Attributes
     ----------
-    accent_phrases : List[AccentPhrase]
+    accent_phrases : list[AccentPhrase]
         アクセント句のリスト
     """
 
     accent_phrases: list[AccentPhrase]
 
     @classmethod
-    def from_phonemes(cls, phonemes: list[Phoneme]):
+    def from_phonemes(cls, phonemes: list[Phoneme]) -> BreathGroup:
         """
-        PhonemeのリストからBreathGroupクラスを作成する
+        PhonemeのリストからBreathGroupクラスを作成する。
+
         Parameters
         ----------
-        phonemes : List[Phoneme]
-            phonemeのリストを渡す
+        phonemes : list[Phoneme]
+            phonemeのリスト
 
         Returns
         -------
         breath_group : BreathGroup
-            BreathGroupクラスを返す
+            作成したBreathGroupクラス
         """
         accent_phrases: list[AccentPhrase] = []
         accent_phonemes: list[Phoneme] = []
@@ -326,9 +342,10 @@ class BreathGroup:
 
         return cls(accent_phrases=accent_phrases)
 
-    def set_context(self, key: str, value: str):
+    def set_context(self, key: str, value: str) -> None:
         """
-        BreathGroupに間接的に含まれる全てのPhonemeのcontextの、指定されたキーの値を変更する
+        BreathGroupに間接的に含まれる全てのPhonemeのcontextのうち、指定されたキーの値を変更する。
+
         Parameters
         ----------
         key : str
@@ -340,13 +357,14 @@ class BreathGroup:
             accent_phrase.set_context(key, value)
 
     @property
-    def phonemes(self):
+    def phonemes(self) -> list[Phoneme]:
         """
-        音素群を返す
+        音素群を返す。
+
         Returns
         -------
-        phonemes : List[Phoneme]
-            BreathGroupに間接的に含まれる全てのPhonemeを返す
+        phonemes : list[Phoneme]
+            BreathGroupに間接的に含まれる全てのPhoneme
         """
         return list(
             chain.from_iterable(
@@ -355,13 +373,14 @@ class BreathGroup:
         )
 
     @property
-    def labels(self):
+    def labels(self) -> list[str]:
         """
-        ラベル群を返す
+        ラベル群を返す。
+
         Returns
         -------
-        labels : List[str]
-            BreathGroupに間接的に含まれる全てのラベルを返す
+        labels : list[str]
+            BreathGroupに間接的に含まれる全てのラベル
         """
         return [p.label for p in self.phonemes]
 
@@ -370,12 +389,13 @@ class BreathGroup:
 class Utterance:
     """
     発声クラス
-    発声の区切りと無音を複数保持する
+    発声の区切りと無音を複数保持する。
+
     Attributes
     ----------
-    breath_groups : List[BreathGroup]
+    breath_groups : list[BreathGroup]
         発声の区切りのリスト
-    pauses : List[Phoneme]
+    pauses : list[Phoneme]
         無音のリスト
     """
 
@@ -383,18 +403,19 @@ class Utterance:
     pauses: list[Phoneme]
 
     @classmethod
-    def from_phonemes(cls, phonemes: list[Phoneme]):
+    def from_phonemes(cls, phonemes: list[Phoneme]) -> Utterance:
         """
-        Phonemeの完全なリストからUtteranceクラスを作成する
+        Phonemeの完全なリストからUtteranceクラスを作成する。
+
         Parameters
         ----------
-        phonemes : List[Phoneme]
-            phonemeのリストを渡す
+        phonemes : list[Phoneme]
+            phonemeのリスト
 
         Returns
         -------
         utterance : Utterance
-            Utteranceクラスを返す
+            作成したUtteranceクラス
         """
         pauses: list[Phoneme] = []
 
@@ -414,9 +435,10 @@ class Utterance:
 
         return cls(breath_groups=breath_groups, pauses=pauses)
 
-    def set_context(self, key: str, value: str):
+    def set_context(self, key: str, value: str) -> None:
         """
-        Utteranceに間接的に含まれる全てのPhonemeのcontextの、指定されたキーの値を変更する
+        Utteranceに間接的に含まれる全てのPhonemeのcontextのうち、指定されたキーの値を変更する。
+
         Parameters
         ----------
         key : str
@@ -428,13 +450,14 @@ class Utterance:
             breath_group.set_context(key, value)
 
     @property
-    def phonemes(self):
+    def phonemes(self) -> list[Phoneme]:
         """
-        音素群を返す
+        音素群を返す。
+
         Returns
         -------
-        phonemes : List[Phoneme]
-            Utteranceクラスに直接的・間接的に含まれる、全てのPhonemeを返す
+        phonemes : list[Phoneme]
+            Utteranceクラスに直接的・間接的に含まれる全てのPhoneme
         """
         accent_phrases = list(
             chain.from_iterable(
@@ -511,20 +534,37 @@ class Utterance:
         return phonemes
 
     @property
-    def labels(self):
+    def labels(self) -> list[str]:
         """
-        ラベル群を返す
+        ラベル群を返す。
+
         Returns
         -------
-        labels : List[str]
-            Utteranceクラスに直接的・間接的に含まれる全てのラベルを返す
+        labels : list[str]
+            Utteranceクラスに直接的・間接的に含まれる全てのラベル
         """
         return [p.label for p in self.phonemes]
 
 
-def extract_full_context_label(text: str, enable_katakana_english: bool = False):
-    """通常はCOEIROINK従来解析を保ち、指定時だけ未知英単語の読みを補う。"""
+def extract_full_context_label(
+    text: str, enable_katakana_english: bool = False
+) -> Utterance:
+    """
+    テキストをOpen JTalkで解析し、Utteranceクラスを作成する。
 
+    Parameters
+    ----------
+    text : str
+        解析するテキスト
+    enable_katakana_english : bool
+        未知の英単語にカタカナ読みを補うか
+        Falseの場合はCOEIROINKの従来の解析結果を保つ。
+
+    Returns
+    -------
+    utterance : Utterance
+        解析結果から作成したUtteranceクラス
+    """
     # 辞書の再構築・切替とOpen JTalk解析を同時に走らせない。
     with mutex_openjtalk_dict:
         labels = (

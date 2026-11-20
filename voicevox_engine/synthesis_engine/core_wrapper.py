@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+from contextlib import suppress
 from ctypes import CDLL, POINTER, c_bool, c_char_p, c_float, c_int, c_long
 from ctypes.util import find_library
 from dataclasses import dataclass
@@ -11,19 +12,20 @@ from pathlib import Path
 import numpy as np
 
 
+# 古いコアが使用されている場合に発生するエラー
 class OldCoreError(Exception):
-    """古いコアが使用されている場合に発生するエラー"""
+    pass
 
 
+# ネイティブCoreが報告した推論・初期化エラー
 class CoreRuntimeError(RuntimeError):
-    """ネイティブCoreが報告した推論・初期化エラー。"""
+    pass
 
 
-def load_runtime_lib(runtime_dirs: list[Path]):
-    """候補ランタイムを先に読み込み、共有ライブラリ探索時の依存解決を補助する。"""
-
+# 候補ランタイムを先に読み込み、共有ライブラリ探索時の依存解決を補助する。
+def load_runtime_lib(runtime_dirs: list[Path]) -> None:
     if platform.system() == "Windows":
-        # DirectML.dllはonnxruntimeと互換性のないWindows標準搭載のものを優先して読み込むことがあるため、明示的に読み込む
+        # DirectML.dllはonnxruntimeと互換性のないWindows標準搭載のものを優先して読み込むことがあるため、明示的に読み込む。
         # 参考 1. https://github.com/microsoft/onnxruntime/issues/3360
         # 参考 2. https://tadaoyamaoka.hatenablog.com/entry/2020/06/07/113616
         lib_file_names = [
@@ -44,19 +46,15 @@ def load_runtime_lib(runtime_dirs: list[Path]):
     # 候補の欠落は正常系であり、実際に選択されたCore本体を読めない場合はload_coreが詳細を報告する。
     for lib_path in runtime_dirs:
         for file_name in lib_file_names:
-            try:
+            with suppress(OSError):
                 CDLL(str((lib_path / file_name).resolve(strict=True)))
-            except OSError:
-                pass
     for lib_name in lib_names:
-        try:
+        with suppress(OSError, TypeError):
             CDLL(find_library(lib_name))
-        except OSError, TypeError:
-            pass
 
 
 class GPUType(Enum):
-    # NONEはCPUしか対応していないことを示す
+    # NONEはCPUしか対応していないことを示す。
     NONE = auto()
     CUDA = auto()
     DIRECT_ML = auto()
@@ -71,7 +69,7 @@ class CoreInfo:
     gpu_type: GPUType
 
 
-# version 0.12 より前のコアの情報
+# version 0.12より前のコアの情報
 CORE_INFOS = [
     # Windows
     CoreInfo(
@@ -205,9 +203,9 @@ CORE_INFOS = [
 ]
 
 
-# version 0.12 以降のコアの名前の辞書
-# - version 0.12, 0.13 のコアの名前: core
-# - version 0.14 からのコアの名前: voicevox_core
+# version 0.12以降のコアの名前の辞書
+# - version 0.12, 0.13のコアの名前: core
+# - version 0.14からのコアの名前: voicevox_core
 CORENAME_DICT = {
     "Windows": ("voicevox_core.dll", "core.dll"),
     "Linux": ("libvoicevox_core.so", "libcore.so"),
@@ -215,16 +213,15 @@ CORENAME_DICT = {
 }
 
 
+# core_dirで指定したディレクトリにあるコアライブラリがVersion 0.12以降である場合、見つかった共有ライブラリの名前を返す。
+#
+# Version 0.12以降と判定する条件は次の両方を満たすことである。
+#
+# - core_dirにmetas.jsonが存在しない。
+# - コアライブラリの名前がCORENAME_DICTの定義に従っている。
+#
+# 参考: https://github.com/VOICEVOX/voicevox_engine/issues/385
 def find_version_0_12_core_or_later(core_dir: Path) -> str | None:
-    """
-    core_dir で指定したディレクトリにあるコアライブラリが Version 0.12 以降である場合、見つかった共有ライブラリの名前を返す。
-
-    Version 0.12以降と判定する条件は次の両方を満たすことである。
-
-    - core_dir に metas.json が存在しない
-    - コアライブラリの名前が CORENAME_DICT の定義に従っている
-    cf. https://github.com/VOICEVOX/voicevox_engine/issues/385
-    """
     if (core_dir / "metas.json").exists():
         return None
 
@@ -235,11 +232,9 @@ def find_version_0_12_core_or_later(core_dir: Path) -> str | None:
     return None
 
 
+# platform.machine()が特定のアーキテクチャ上で複数パターンの文字列を返し得るので、一意な文字列に変換する。
+# サポート外のアーキテクチャである場合はNoneを返す。
 def get_arch_name() -> str | None:
-    """
-    platform.machine() が特定のアーキテクチャ上で複数パターンの文字列を返し得るので、一意な文字列に変換する。
-    サポート外のアーキテクチャである場合、None を返す
-    """
     machine = platform.machine()
     if machine in {"x86_64", "x64", "AMD64"}:
         return "x64"
@@ -259,7 +254,7 @@ def get_core_name(
     gpu_type: GPUType,
 ) -> str | None:
     if platform_name == "Darwin":
-        if gpu_type == GPUType.NONE and (arch_name == "x64" or arch_name == "aarch64"):
+        if gpu_type == GPUType.NONE and arch_name in ("x64", "aarch64"):
             arch_name = "universal"
         else:
             return None
@@ -286,7 +281,7 @@ def get_suitable_core_name(
 
 
 def check_core_type(core_dir: Path) -> str | None:
-    # libtorch版はDirectML未対応なので、ここでは`gpu_type=GPUType.DIRECT_ML`は入れない
+    # libtorch版はDirectML未対応なので、ここでは`gpu_type=GPUType.DIRECT_ML`は入れない。
     libtorch_core_names = [
         get_suitable_core_name("libtorch", gpu_type=GPUType.CUDA),
         get_suitable_core_name("libtorch", gpu_type=GPUType.NONE),
@@ -303,9 +298,8 @@ def check_core_type(core_dir: Path) -> str | None:
     return None
 
 
+# Core世代・実装方式・GPU指定に合う共有ライブラリを優先順に読み込む。
 def load_core(core_dir: Path, use_gpu: bool) -> CDLL:
-    """Core世代・実装方式・GPU指定に合う共有ライブラリを優先順に読み込む。"""
-
     load_errors: list[str] = []
     last_load_error: OSError | None = None
 
@@ -361,9 +355,8 @@ def load_core(core_dir: Path, use_gpu: bool) -> CDLL:
     )
 
 
+# 複数世代のVOICEVOX Core共有ライブラリを共通のctypes APIへ適合させるラッパー
 class CoreWrapper:
-    """複数世代のVOICEVOX Core共有ライブラリを共通のctypes APIへ適合させる。"""
-
     def __init__(
         self,
         use_gpu: bool,
@@ -371,7 +364,6 @@ class CoreWrapper:
         cpu_num_threads: int = 0,
         load_all_models: bool = False,
     ) -> None:
-
         self.core = load_core(core_dir, use_gpu)
 
         self.core.initialize.restype = c_bool

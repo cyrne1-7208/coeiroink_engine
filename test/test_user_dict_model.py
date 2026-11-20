@@ -1,4 +1,4 @@
-"""ユーザー辞書単語モデルのバリデーション・モーラ数計算・品詞定義の整合を検証する。"""
+# ユーザー辞書単語モデルのバリデーション・モーラ数計算・品詞定義の整合のテスト
 
 from __future__ import annotations
 
@@ -77,8 +77,10 @@ def test_mora_count_matches_kana_parser_for_all_sutegana_combinations() -> None:
         {"pronunciation": "ぼいぼ"},
         {"pronunciation": "アィウェォ"},
         {"pronunciation": "アヮ"},
+        {"pronunciation": 123},
         {"accent_type": 4},
         {"accent_type": -1},
+        {"mora_count": "abc"},
     ],
 )
 def test_invalid_pronunciation_or_accent_type_is_rejected(

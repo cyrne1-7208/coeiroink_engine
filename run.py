@@ -7,7 +7,8 @@ import re
 import sys
 import time
 import traceback
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from io import TextIOWrapper
 from pathlib import Path
 
@@ -25,7 +26,6 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from packaging.version import Version
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -54,6 +54,7 @@ from voicevox_engine.setting import (
 )
 from voicevox_engine.synthesis_engine import SynthesisEngineBase, make_synthesis_engines
 from voicevox_engine.synthesis_engine.make_synthesis_engines import (
+    get_latest_core_version,
     make_audio_manager,
     resolve_device,
 )
@@ -77,29 +78,22 @@ from voicevox_engine.voicevox_compat.router import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# ウォームアップ合成に使う短い固定文。アクセント句が1つ以上できる長さにする。
+# ウォームアップ合成に使う短い固定文で、アクセント句が1つ以上できる長さにする。
 _WARMUP_TEXT = "こんにちは"
-# Coreの内部サンプリングレート（44100）と異なる値にして、リサンプラー（resampy/numba）の初回JITも起動時に済ませる。
+# Coreの内部サンプリングレートである44100と異なる値にして、resampyとnumbaによるリサンプラーの初回JITも起動時に済ませる。
 _WARMUP_OUTPUT_SAMPLING_RATE = 24000
 
 
-def _version_key(version: str) -> Version:
-    """Return a comparable Core version, including local suffixes such as +cpu."""
-    return Version(version)
-
-
+# デバイス番号として利用できる0以上の整数を解析する。
 def _non_negative_int(value: str) -> int:
-    """デバイス番号として利用できる0以上の整数を解析する。"""
-
     parsed = int(value)
     if parsed < 0:
         raise argparse.ArgumentTypeError("0以上の整数を指定してください。")
     return parsed
 
 
+# モデル保持数、または上限なしを表すallを解析する。
 def _model_cache_limit(value: str) -> int | None:
-    """モデル保持数、または上限なしを表すallを解析する。"""
-
     if value.lower() == "all":
         return None
     try:
@@ -113,9 +107,8 @@ def _model_cache_limit(value: str) -> int | None:
     return parsed
 
 
+# 読み込み済みの話者UUIDとスタイルIDの組をメタデータの公開順で返す。未ロードのスタイルは含めない。
 def _loaded_styles(audio_manager: AudioManager) -> list[tuple[str, int]]:
-    """読み込み済みの（話者UUID, スタイルID）を、メタデータの公開順で返す。未ロードのスタイルは含めない。"""
-
     return [
         (speaker["speaker_uuid"], style["id"])
         for speaker in audio_manager.meta_manager.get_metas_dict()
@@ -126,15 +119,13 @@ def _loaded_styles(audio_manager: AudioManager) -> list[tuple[str, int]]:
     ]
 
 
+# 読み込み済みの全モデルで合成を1回ずつ実行し、最初のリクエストで発生する待ち時間を前倒しする。
+#
+# 対象は読み込み済みのモデルだけなので、ウォームアップで追加のモデル読み込みは起きない。
+# ESPnetの初回import、初回推論、リサンプラーのJITを済ませる。波形は破棄する。
+# ウォームアップは最適化なので、失敗しても警告だけを出して起動を続ける。1モデルの失敗で他のモデルは止めない。
+# 進捗と失敗の詳細は標準エラー出力へ書く。
 def _warm_up(audio_manager: AudioManager) -> None:
-    """読み込み済みの全モデルで合成を1回ずつ実行し、最初のリクエストで発生する待ち時間を前倒しする。
-
-    対象は読み込み済みのモデルだけなので、ウォームアップで追加のモデル読み込みは起きない。
-    ESPnetの初回import、初回推論、リサンプラーのJITを済ませる。波形は破棄する。
-    ウォームアップは最適化なので、失敗しても警告だけを出して起動を続ける。1モデルの失敗で他のモデルは止めない。
-    進捗と失敗の詳細は標準エラー出力へ書く。
-    """
-
     styles = _loaded_styles(audio_manager)
     if not styles:
         print(
@@ -180,11 +171,12 @@ def _warm_up(audio_manager: AudioManager) -> None:
     )
 
 
+# stdout/stderrのエンコーディングをUTF-8に切り替える。
 def set_output_log_utf8() -> None:
-    """stdout/stderrのエンコーディングをUTF-8に切り替える。"""
-    # コンソールがない環境だとNone https://docs.python.org/ja/3/library/sys.html#sys.__stdin__
+    # コンソールがない環境ではsys.stdoutとsys.stderrがNoneになる。
+    # https://docs.python.org/ja/3/library/sys.html#sys.__stdin__
     if sys.stdout is not None:
-        # 必ずしもreconfigure()が実装されているとは限らない
+        # 必ずしもreconfigure()が実装されているとは限らない。
         try:
             sys.stdout.reconfigure(encoding="utf-8")
         except AttributeError:
@@ -202,18 +194,17 @@ def set_output_log_utf8() -> None:
             )
 
 
+# 起動時の辞書更新とモデル準備、キャンセル監視タスクの開始・終了を管理する。
 def _create_lifespan(
     cancellable_engine: CancellableEngine | None,
     audio_manager: AudioManager,
     *,
     warmup: bool = False,
-):
-    """起動時の辞書更新とモデル準備、キャンセル監視タスクの開始・終了を管理する。"""
-
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     cancellable_disconnection_task: asyncio.Task | None = None
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI):
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal cancellable_disconnection_task
         if cancellable_engine is not None:
             cancellable_disconnection_task = asyncio.create_task(
@@ -229,11 +220,9 @@ def _create_lifespan(
         finally:
             if cancellable_disconnection_task is not None:
                 cancellable_disconnection_task.cancel()
-                try:
+                # サーバー終了時にキャンセルした監視タスクなので、異常終了として扱わない。
+                with suppress(asyncio.CancelledError):
                     await cancellable_disconnection_task
-                except asyncio.CancelledError:
-                    # サーバー終了時にキャンセルした監視タスクなので、異常終了として扱わない。
-                    pass
                 cancellable_disconnection_task = None
             if cancellable_engine is not None:
                 await cancellable_engine.shutdown_async()
@@ -241,14 +230,13 @@ def _create_lifespan(
     return lifespan
 
 
+# Coreの公開例外と接続キャンセルをHTTP応答へ変換する。
 def _add_exception_handlers(app: FastAPI) -> None:
-    """Coreの公開例外と接続キャンセルをHTTP応答へ変換する。"""
-
     @app.exception_handler(CancellableRequestDisconnected)
     async def cancellable_disconnected_handler(
         _request: Request, err: CancellableRequestDisconnected
     ) -> JSONResponse:
-        # クライアント切断は合成器の異常ではない。499は接続を閉じたクライアントを表す慣用コード。
+        # クライアント切断は合成器の異常ではない。499は接続を閉じたクライアントを表す慣用的なコードである。
         _LOGGER.info("Cancellable synthesis cancelled: %s", err)
         return JSONResponse(status_code=499, content={"detail": str(err)})
 
@@ -286,13 +274,12 @@ def _add_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=status, content={"detail": err.message})
 
 
+# CLI設定からCORSの許可リストを作り、許可されていないOriginを拒否する。
 def _add_cors_middleware(
     app: FastAPI,
     cors_policy_mode: CorsPolicyMode,
     allow_origin: list[str] | None,
 ) -> None:
-    """CLI設定からCORSの許可リストを作り、許可されていないOriginを拒否する。"""
-
     localhost_regex = "^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$"
     compiled_localhost_regex = re.compile(localhost_regex)
     allowed_origins = ["*"]
@@ -339,6 +326,7 @@ def _add_cors_middleware(
     app.add_middleware(BlockOriginMiddleware)
 
 
+# COEIROINK v2 APIとVOICEVOX互換APIを提供するFastAPIアプリを作る。
 def generate_app(
     synthesis_engines: dict[str, SynthesisEngineBase],
     latest_core_version: str,
@@ -352,8 +340,6 @@ def generate_app(
     disable_mutable_api: bool = False,
     warmup: bool = False,
 ) -> FastAPI:
-    """COEIROINK v2 APIとVOICEVOX互換APIを提供するFastAPIアプリを作る。"""
-
     if root_dir is None:
         root_dir = engine_root()
     if speaker_info_dir is None:
@@ -363,7 +349,7 @@ def generate_app(
     app = FastAPI(
         title="COEIROINK Server OSS Edition",
         description=(
-            "COEIROINK /v1 APIと、/voicevox配下のVOICEVOX互換会話音声APIを提供します。"
+            "COEIROINK /v1 APIと、/voicevox配下のVOICEVOX互換会話音声APIを提供する。"
         ),
         version=__version__,
         lifespan=_create_lifespan(cancellable_engine, audio_manager, warmup=warmup),
@@ -417,20 +403,7 @@ def generate_app(
     return app
 
 
-if __name__ == "__main__":
-    multiprocessing.freeze_support()
-
-    output_log_utf8 = os.getenv("VV_OUTPUT_LOG_UTF8", default="")
-    if output_log_utf8 == "1":
-        set_output_log_utf8()
-    elif not (output_log_utf8 == "" or output_log_utf8 == "0"):
-        print(
-            "WARNING:  invalid VV_OUTPUT_LOG_UTF8 environment variable value",
-            file=sys.stderr,
-        )
-
-    default_cors_policy_mode = CorsPolicyMode.localapps
-
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="COEIROINKのエンジンです。")
     parser.add_argument(
         "--host",
@@ -543,7 +516,6 @@ if __name__ == "__main__":
             "未指定時は環境変数VV_DISABLE_MUTABLE_APIの1を有効、0または空文字を無効として扱います。"
         ),
     )
-
     parser.add_argument(
         "--cpu_num_threads",
         type=int,
@@ -553,7 +525,6 @@ if __name__ == "__main__":
             "VV_CPU_NUM_THREADSが空文字列でなく数値でもない場合はエラー終了します。"
         ),
     )
-
     parser.add_argument(
         "--output_log_utf8",
         action="store_true",
@@ -562,7 +533,6 @@ if __name__ == "__main__":
             "値が1ならUTF-8を使い、0、空文字、未設定の場合は実行環境に合わせて決定します。"
         ),
     )
-
     parser.add_argument(
         "--cors_policy_mode",
         type=CorsPolicyMode,
@@ -574,20 +544,33 @@ if __name__ == "__main__":
             "その他のオリジンはallow_originオプションで追加できます。デフォルトはlocalappsです。"
         ),
     )
-
     parser.add_argument(
         "--allow_origin",
         nargs="*",
         help="許可するオリジンを指定します。スペースで区切ることで複数指定できます。",
     )
-
     parser.add_argument(
         "--setting_file",
         type=Path,
         default=USER_SETTING_PATH,
         help="設定ファイルを指定できます。",
     )
+    return parser
 
+
+def main() -> None:
+    multiprocessing.freeze_support()
+
+    output_log_utf8 = os.getenv("VV_OUTPUT_LOG_UTF8", default="")
+    if output_log_utf8 == "1":
+        set_output_log_utf8()
+    elif output_log_utf8 not in ("", "0"):
+        print(
+            "WARNING:  invalid VV_OUTPUT_LOG_UTF8 environment variable value",
+            file=sys.stderr,
+        )
+
+    parser = _build_parser()
     args = parser.parse_args()
     # CLIで指定された実験的機能を、Coreへ渡す設定に変換する。
     args.resampler = "soxr-vhq" if "soxr" in args.experimental else "resampy"
@@ -635,9 +618,7 @@ if __name__ == "__main__":
         speaker_info_dir=speaker_info_dir,
         audio_manager=audio_manager,
     )
-    if not synthesis_engines:
-        raise RuntimeError("音声合成エンジンがありません。")
-    latest_core_version = max(synthesis_engines, key=_version_key)
+    latest_core_version = get_latest_core_version(synthesis_engines)
 
     cancellable_engine = None
     if args.enable_cancellable_synthesis:
@@ -676,3 +657,7 @@ if __name__ == "__main__":
         host=args.host,
         port=args.port,
     )
+
+
+if __name__ == "__main__":
+    main()

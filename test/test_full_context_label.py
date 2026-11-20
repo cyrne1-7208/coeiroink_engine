@@ -1,4 +1,4 @@
-"""OpenJTalkフルコンテキストラベルの階層構造（Phoneme/Mora/AccentPhrase/BreathGroup/Utterance）を検証する。"""
+# Phoneme・Mora・AccentPhrase・BreathGroup・UtteranceからなるOpen JTalkのフルコンテキストラベルの階層構造のテスト
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from voicevox_engine.full_context_label import (
 
 # pyopenjtalk.extract_fullcontext("こんにちは、ヒホです。")の結果を固定し、外部辞書変更に依存せず検証する。
 HELLO_HIHO_LABELS: tuple[str, ...] = (
-    # sil (無音)
+    # sil: 無音
     (
         "xx^xx-sil+k=o/A:xx+xx+xx/B:xx-xx_xx/C:xx_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
         "/F:xx_xx#xx_xx@xx_xx|xx_xx/G:5_5%0_xx_xx/H:xx_xx/I:xx-xx"
@@ -35,7 +35,7 @@ HELLO_HIHO_LABELS: tuple[str, ...] = (
         "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
         "@1+2&1-2|1+9/J:1_4/K:2+2-9"
     ),
-    # N (ん)
+    # N: ん
     (
         "k^o-N+n=i/A:-3+2+4/B:xx-xx_xx/C:09_xx+xx/D:09+xx_xx/E:xx_xx!xx_xx-xx"
         "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
@@ -77,7 +77,7 @@ HELLO_HIHO_LABELS: tuple[str, ...] = (
         "/F:5_5#0_xx@1_1|1_5/G:4_1%0_xx_0/H:xx_xx/I:1-5"
         "@1+2&1-2|1+9/J:1_4/K:2+2-9"
     ),
-    # pau (読点)
+    # pau: 読点
     (
         "w^a-pau+h=i/A:xx+xx+xx/B:09-xx_xx/C:xx_xx+xx/D:09+xx_xx/E:5_5!0_xx-xx"
         "/F:xx_xx#xx_xx@xx_xx|xx_xx/G:4_1%0_xx_xx/H:1_5/I:xx-xx"
@@ -125,13 +125,13 @@ HELLO_HIHO_LABELS: tuple[str, ...] = (
         "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
         "@2+1&2-1|6+4/J:xx_xx/K:2+2-9"
     ),
-    # U (無声母音)
+    # U: 無声母音
     (
         "e^s-U+sil=xx/A:3+4+1/B:22-xx_xx/C:10_7+2/D:xx+xx_xx/E:5_5!0_xx-0"
         "/F:4_1#0_xx@1_1|1_4/G:xx_xx%xx_xx_xx/H:1_5/I:1-4"
         "@2+1&2-1|6+4/J:xx_xx/K:2+2-9"
     ),
-    # sil (無音)
+    # sil: 無音
     (
         "s^U-sil+xx=xx/A:xx+xx+xx/B:10-7_2/C:xx_xx+xx/D:xx+xx_xx/E:4_1!0_xx-xx"
         "/F:xx_xx#xx_xx@xx_xx|xx_xx/G:xx_xx%xx_xx_xx/H:1_4/I:xx-xx"

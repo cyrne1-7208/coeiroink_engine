@@ -1,4 +1,4 @@
-"""Sudachi任意機能の境界と最小動作を確認する。"""
+# Sudachi任意機能の境界と最小動作のテスト
 
 from __future__ import annotations
 

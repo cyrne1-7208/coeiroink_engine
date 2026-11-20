@@ -1,4 +1,4 @@
-"""COEIROINK本体から分離したSudachi full辞書解析機能。"""
+# COEIROINK本体から分離したSudachi full辞書解析機能
 
 from .analyzer import (
     SudachiAnalyzer,

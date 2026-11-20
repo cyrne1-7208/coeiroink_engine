@@ -1,16 +1,13 @@
-"""Small client for the public COEIROINK catalog API.
-
-The v2 engine endpoints use the catalog values exposed by the public
-COEIROINK website.  The website paths use hyphens while the local engine
-paths use underscores:
-
-``/v1/download_info`` -> ``/api/v1/download-info``
-``/v1/downloadable_speakers`` -> ``/api/v1/downloadable-speakers``
-``/v1/update_info`` -> ``/api/v1/update-info``
-
-This client only reads JSON metadata.  It never follows a catalog download
-URL itself and never writes a response to disk.
-"""
+# 公開されているCOEIROINKカタログAPIの小さなクライアント
+#
+# v2のEngineのエンドポイントは公開COEIROINKサイトが提供するカタログの値を使う。
+# サイトのパスはハイフン区切り、ローカルのEngineのパスはアンダースコア区切りで、次のように対応する。
+#
+# `/v1/download_info` -> `/api/v1/download-info`
+# `/v1/downloadable_speakers` -> `/api/v1/downloadable-speakers`
+# `/v1/update_info` -> `/api/v1/update-info`
+#
+# このクライアントはJSONのメタデータを読むだけで、カタログのダウンロードURLを自らたどることも、応答をディスクに書き込むこともない。
 
 import json
 from typing import Any, TypeVar
@@ -25,17 +22,18 @@ Timeout = float | tuple[float, float]
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
+# カタログの通信・サイズ・スキーマに関するエラーの基底クラス
 class CatalogClientError(RuntimeError):
-    """Base class for catalog transport, size, and schema failures."""
+    pass
 
 
+# カタログへのリクエストを完了できない場合のエラー
 class CatalogNetworkError(CatalogClientError):
-    """Raised when the catalog request cannot be completed."""
+    pass
 
 
+# カタログが成功以外のHTTPステータスを返した場合のエラー
 class CatalogHTTPError(CatalogClientError):
-    """Raised when the catalog returns a non-success HTTP status."""
-
     def __init__(self, status_code: int, url: str, preview: str = "") -> None:
         self.status_code = status_code
         self.url = url
@@ -46,13 +44,13 @@ class CatalogHTTPError(CatalogClientError):
         super().__init__(message)
 
 
+# 成功した応答がサイズ上限内のJSONデータでない場合のエラー
 class CatalogResponseError(CatalogClientError):
-    """Raised when a successful response is not bounded JSON data."""
+    pass
 
 
+# 設定した上限より大きい応答を保持する前に送出するエラー
 class CatalogResponseTooLarge(CatalogResponseError):
-    """Raised before retaining a response larger than the configured limit."""
-
     def __init__(self, url: str, size: int, limit: int) -> None:
         self.url = url
         self.size = size
@@ -62,20 +60,17 @@ class CatalogResponseTooLarge(CatalogResponseError):
         )
 
 
+# カタログのJSONがv2の応答モデルと一致しない場合のエラー
 class CatalogSchemaError(CatalogResponseError):
-    """Raised when catalog JSON does not match a v2 response model."""
+    pass
 
 
+# coeiroink.comから現在のカタログデータを取得して検証するクライアント
+#
+# `session`は外部から渡せるので、呼び出し側は設定済みのrequestsのセッションを使え、テストはネットワークに接続しない小さな偽物を使える。
+# `max_response_bytes`はサイズが分かっている応答と分からない応答の両方の上限になる。
+# 現在のサイトのカタログは画像データを埋め込んでいるため、既定値は現在のJSONが収まる程度に大きく、かつ有限の値にしている。
 class OfficialSiteCatalogClient:
-    """Fetch and validate current catalog data from coeiroink.com.
-
-    ``session`` is injectable so callers can provide a configured requests
-    session and tests can use a small fake without making network calls.
-    ``max_response_bytes`` bounds both known and unknown response sizes.  The
-    current website catalog contains embedded image data, so the default is
-    deliberately large enough for the current JSON while remaining finite.
-    """
-
     DEFAULT_BASE_URL = "https://coeiroink.com/api/v1"
     DEFAULT_TIMEOUT: Timeout = (5.0, 30.0)
     DEFAULT_MAX_RESPONSE_BYTES = 128 * 1024 * 1024
@@ -102,19 +97,16 @@ class OfficialSiteCatalogClient:
         self.timeout = timeout
         self.max_response_bytes = max_response_bytes
 
+    # サイトの`/api/v1/download-info`の項目を返す。
     def get_download_info(self) -> list[DownloadableModel]:
-        """Return website ``/api/v1/download-info`` entries."""
-
         return self._get_model_list("download-info", DownloadableModel)
 
+    # サイトの`/api/v1/downloadable-speakers`の項目を返す。
     def get_downloadable_speakers(self) -> list[DownloadableSpeaker]:
-        """Return website ``/api/v1/downloadable-speakers`` entries."""
-
         return self._get_model_list("downloadable-speakers", DownloadableSpeaker)
 
+    # サイトの`/api/v1/update-info`の項目を返す。
     def get_update_info(self) -> list[UpdateInfo]:
-        """Return website ``/api/v1/update-info`` entries."""
-
         return self._get_model_list("update-info", UpdateInfo)
 
     def _get_model_list(self, endpoint: str, model_type: type[ModelT]) -> list[ModelT]:
@@ -130,20 +122,19 @@ class OfficialSiteCatalogClient:
             try:
                 # 外部JSONとの境界でPydantic 2による型・制約検証を完了させる。
                 parsed.append(model_type.model_validate(item))
-            except PydanticValidationError as exc:
+            except PydanticValidationError as error:
                 raise CatalogSchemaError(
-                    f"invalid catalog item at index {index} from {endpoint!r}: {exc}"
-                ) from exc
+                    f"invalid catalog item at index {index} from {endpoint!r}: {error}"
+                ) from error
         return parsed
 
+    # HTTP状態・Content-Type・サイズ・UTF-8 JSONを順に検証してカタログ本文を返す。
     def _get_json(self, endpoint: str) -> Any:
-        """HTTP状態・Content-Type・サイズ・UTF-8 JSONを順に検証してカタログ本文を返す。"""
-
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         try:
             response = self.session.get(url, timeout=self.timeout, stream=True)
-        except requests.RequestException as exc:
-            raise CatalogNetworkError(f"catalog request failed: {url}") from exc
+        except requests.RequestException as error:
+            raise CatalogNetworkError(f"catalog request failed: {url}") from error
 
         try:
             status_code = response.status_code
@@ -161,28 +152,27 @@ class OfficialSiteCatalogClient:
             body = self._read_bounded(response, url)
             try:
                 return json.loads(body.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise CatalogResponseError(
                     f"catalog response is not valid UTF-8 JSON: {url}"
-                ) from exc
-        except requests.RequestException as exc:
+                ) from error
+        except requests.RequestException as error:
             raise CatalogNetworkError(
                 f"catalog response could not be read: {url}"
-            ) from exc
+            ) from error
         finally:
             response.close()
 
+    # Content-Lengthの有無にかかわらず、ストリームを設定上限以内で読み取る。
     def _read_bounded(self, response: requests.Response, url: str) -> bytes:
-        """Content-Lengthの有無にかかわらず、ストリームを設定上限以内で読み取る。"""
-
         content_length = response.headers.get("Content-Length")
         if content_length is not None:
             try:
                 declared_size = int(content_length)
-            except ValueError as exc:
+            except ValueError as error:
                 raise CatalogResponseError(
                     f"catalog response has invalid Content-Length: {url}"
-                ) from exc
+                ) from error
             if declared_size < 0:
                 raise CatalogResponseError(
                     f"catalog response has negative Content-Length: {url}"
@@ -219,7 +209,6 @@ class OfficialSiteCatalogClient:
 
 
 CatalogClient = OfficialSiteCatalogClient
-
 
 __all__ = [
     "CatalogClient",

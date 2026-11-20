@@ -1,4 +1,4 @@
-"""音声合成プリセットのデータモデル。"""
+# 音声合成プリセットのデータモデル
 
 from pydantic import BaseModel, Field
 
@@ -19,4 +19,4 @@ class Preset(BaseModel):
     prePhonemeLength: float = Field(title="音声の前の無音時間")
     postPhonemeLength: float = Field(title="音声の後の無音時間")
     pauseLength: float | None = Field(default=None, title="句読点などの無音時間")
-    pauseLengthScale: float = Field(default=1, title="句読点などの無音時間（倍率）")
+    pauseLengthScale: float = Field(default=1, title="句読点などの無音時間の倍率")

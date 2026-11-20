@@ -1,23 +1,20 @@
-"""Convert ESPnet token durations into the v2 mora-duration response.
-
-The v2 prosody response describes only moras, while ESPnet returns one
-duration for every token in ``plain``.  This module performs the deterministic
-bookkeeping between those two representations.  Ranges are expressed in
-samples, so the acoustic-frame durations are multiplied by ``hop_length``.
-
-The saved official responses expose the final mora ranges, but not the raw
-per-token duration vector.  Consequently, they cannot establish where a
-non-phoneme token's frames are assigned.  The policy here is explicit:
-
-* ``^`` becomes a leading ``pau`` mora and ``$``/``?`` become a trailing one.
-* ``_`` is an in-stream ``pau`` mora.
-* ``[``, ``]``, ``#`` and other zero-width boundary/accent markers are added
-  to the next semantic unit (phoneme or pause).  Markers after the final
-  phoneme are therefore included in the terminal pause.
-
-This consumes every input frame, keeps all ranges contiguous, and makes the
-remaining parity uncertainty localized to that marker-allocation policy.
-"""
+# ESPnetのトークン継続長をv2のモーラ継続長の応答へ変換する処理
+#
+# v2のプロソディの応答はモーラだけを表すが、ESPnetは`plain`の各トークンに1つずつ継続長を返す。
+# このモジュールはこの2つの表現の間の対応付けを決定的に行う。
+# 範囲はサンプル数で表すので、音響フレーム単位の継続長に`hop_length`を掛ける。
+#
+# 保存してある公式の応答には最終的なモーラの範囲があるが、トークンごとの生の継続長はない。
+# そのため、音素でないトークンのフレームがどこに割り当てられるかは公式の応答から確定できない。
+# ここでは次の方針を明示的に採る。
+#
+# - `^`は先頭の`pau`モーラ、`$`と`?`は末尾の`pau`モーラになる。
+# - `_`は文中の`pau`モーラになる。
+# - `[`、`]`、`#`などの幅を持たない境界やアクセントの記号は、次の音素または休止に加える。
+#   そのため、最後の音素より後の記号は末尾の休止に含まれる。
+#
+# この方針により、入力のフレームをすべて使い切り、すべての範囲を連続させ、
+# 公式実装との一致が不確かな部分をこの記号の割り当て方針だけに限定する。
 
 from __future__ import annotations
 
@@ -28,13 +25,13 @@ from operator import index as to_index
 from .models import MoraDuration, PhonemeDuration, TimeRange
 
 
+# トークン列・プロソディ・継続長が対応しない場合のエラー
 class DurationConversionError(ValueError):
-    """Raised when the token, prosody, and duration streams do not align."""
+    pass
 
 
-# APIで使う名前に合わせた別名。例外の種類は元のまま変えない。
+# APIで使う名前に合わせた別名で、例外の種類は元のまま変えない。
 DurationError = DurationConversionError
-
 
 _ZERO_WIDTH_MARKERS = frozenset(("[", "]", "#"))
 _TERMINAL_MARKERS = frozenset(("$", "?"))
@@ -132,23 +129,31 @@ def convert_duration(
     duration_frames: Sequence[int],
     hop_length: int,
 ) -> list[MoraDuration]:
-    """Convert v2 plain tokens and ESPnet durations to mora ranges.
-
-    Args:
-        plain_tokens: The flat v2 token stream, including boundary markers.
-        prosody_detail: Nested v2 ``Mora`` values in phrase/mora order.
-        duration_frames: One non-negative ESPnet frame count per plain token.
-        hop_length: Number of output samples represented by one acoustic frame.
-
-    Returns:
-        ``MoraDuration`` values in acoustic order.  Their nested phoneme and
-        mora ranges start at zero, are contiguous, and end at
-        ``sum(duration_frames) * hop_length``.
-
-    Raises:
-        DurationConversionError: If the streams are malformed or misaligned.
     """
+    v2のプレーンなトークン列とESPnetの継続長をモーラの範囲へ変換する。
 
+    Parameters
+    ----------
+    plain_tokens : Sequence[str]
+        境界記号を含む平坦なv2のトークン列
+    prosody_detail : Sequence[Sequence[object]]
+        句とモーラの順に入れ子になったv2の`Mora`の値
+    duration_frames : Sequence[int]
+        プレーンなトークンごとの0以上のESPnetのフレーム数
+    hop_length : int
+        1音響フレームが表す出力サンプル数
+
+    Returns
+    -------
+    list[MoraDuration]
+        音声中の順に並べた`MoraDuration`のリスト
+        入れ子の音素とモーラの範囲は0から始まって連続し、`sum(duration_frames) * hop_length`で終わる。
+
+    Raises
+    ------
+    DurationConversionError
+        入力の列が不正な場合や互いに対応しない場合
+    """
     tokens = _as_list(plain_tokens, "plain_tokens")
     frames = [
         _integer(value, f"duration_frames[{i}]")

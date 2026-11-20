@@ -1,4 +1,4 @@
-"""Engine設定のデータモデル。"""
+# Engine設定のデータモデル
 
 from enum import Enum
 
@@ -14,11 +14,8 @@ class CorsPolicyMode(str, Enum):
     localapps = "localapps"  # ローカルアプリケーションからのリクエストを許可
 
 
+# エンジンの設定情報
 class Setting(BaseModel):
-    """
-    エンジンの設定情報
-    """
-
     cors_policy_mode: CorsPolicyMode = Field(title="リソース共有ポリシー")
     allow_origin: str | None = Field(title="許可するオリジン")
 

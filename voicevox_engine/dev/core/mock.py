@@ -33,7 +33,7 @@ def yukarin_sa_forward(length: int, **kwargs: dict[str, Any]) -> np.ndarray:
 
 def decode_forward(length: int, **kwargs: dict[str, Any]) -> np.ndarray:
     """
-    合成音声の波形データをNumPy配列で返します。ただし、常に固定の文言を読み上げます（DUMMY_TEXT）
+    合成音声の波形データをNumPy配列で返す。ただし常にDUMMY_TEXTの文言を読み上げる。
     旧モックAPIとのimport互換用であり、現行の本番合成経路からは呼ばれない。
 
     Parameters
@@ -46,16 +46,11 @@ def decode_forward(length: int, **kwargs: dict[str, Any]) -> np.ndarray:
     wave : np.ndarray
         音声合成した波形データ
 
-    Note
-    -------
-        ここで行う音声合成では、調声（ピッチ等）を反映しない
-        また、入力内容によらず常に固定の文言を読み上げる
-
-        # pyopenjtalk.tts()の出力仕様
-        dtype=np.float64, 16 bit, mono 48000 Hz
-
-        # resampleの説明
-        非モックdecode_forwardと合わせるために、出力を24kHzに変換した。
+    Notes
+    -----
+    ここで行う音声合成ではピッチなどの調声を反映しない。
+    pyopenjtalk.tts()の出力仕様はdtype=np.float64, 16 bit, mono 48000 Hz
+    非モックdecode_forwardと合わせるために、出力を24kHzに変換する。
     """
     logger = getLogger("uvicorn")  # FastAPI / Uvicorn 内からの利用のため
     logger.info(

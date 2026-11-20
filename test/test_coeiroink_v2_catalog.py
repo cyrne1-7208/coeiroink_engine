@@ -1,4 +1,4 @@
-"""COEIROINK v2公開カタログクライアントのレスポンス上限・スキーマ・エラー処理を検証する。"""
+# COEIROINK v2公開カタログクライアントのレスポンス上限・スキーマ・エラー処理のテスト
 
 from __future__ import annotations
 

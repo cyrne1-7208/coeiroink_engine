@@ -1,4 +1,4 @@
-"""エンジンマニフェストの読み込み処理。"""
+# エンジンマニフェストの読み込み処理
 
 import json
 from base64 import b64encode
@@ -9,7 +9,7 @@ from .engine_manifest import EngineManifest, LicenseInfo, UpdateInfo
 
 
 class EngineManifestLoader:
-    def __init__(self, manifest_path: Path, root_dir: Path):
+    def __init__(self, manifest_path: Path, root_dir: Path) -> None:
         self.manifest_path = manifest_path
         self.root_dir = root_dir
         # マニフェスト、ライセンス、アイコンは実行中に変わらないため、一度だけ読み込む。
@@ -22,14 +22,6 @@ class EngineManifestLoader:
                 self.manifest_path.read_text(encoding="utf-8")
             )
         return self._raw_manifest
-
-    @property
-    def downloadable_libraries_path(self):
-        return self._load_json().get("downloadable_libraries_path")
-
-    @property
-    def downloadable_libraries_url(self):
-        return self._load_json().get("downloadable_libraries_url")
 
     def load_manifest(self) -> EngineManifest:
         if self._manifest is None:

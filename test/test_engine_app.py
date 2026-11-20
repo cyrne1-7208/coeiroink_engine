@@ -1,8 +1,9 @@
-"""統合Engineアプリ（run.py）のルート共存・環境変数・変更系API制御・話者配信とエラー変換を検証する。"""
+# run.pyの統合Engineアプリにおけるルート共存・環境変数・変更系API制御・話者配信とエラー変換のテスト
 
 from __future__ import annotations
 
 from base64 import b64decode
+from typing import TYPE_CHECKING
 
 import pytest
 from coeirocore.coeiro_manager import (
@@ -13,6 +14,9 @@ from coeirocore.coeiro_manager import (
 
 import run as engine_run
 import voicevox_engine
+
+if TYPE_CHECKING:
+    from conftest import EngineClientFactory
 
 LEGACY_VOICEVOX_PATHS = {
     "/accent_phrases",
@@ -57,7 +61,7 @@ SINGING_PATHS = {
 
 
 def test_voicevox_routes_are_prefixed_without_moving_coeiroink_v1(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, _ = engine_client_factory.create_client()
     paths = set(client.app.openapi()["paths"])
@@ -83,7 +87,7 @@ def test_voicevox_routes_are_prefixed_without_moving_coeiroink_v1(
 
 
 def test_combined_fastapi_documentation_remains_available(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, _ = engine_client_factory.create_client()
 
@@ -114,7 +118,7 @@ def test_combined_fastapi_documentation_remains_available(
     ],
 )
 def test_disable_mutable_api_returns_403_before_mutation(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     method: str,
     path: str,
 ) -> None:
@@ -127,7 +131,7 @@ def test_disable_mutable_api_returns_403_before_mutation(
 
 
 def test_disable_mutable_api_does_not_disable_read_only_routes(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, _ = engine_client_factory.create_client(disable_mutable_api=True)
 
@@ -166,7 +170,7 @@ def test_invalid_voicevox_boolean_environment_warns_and_disables(
     ],
 )
 def test_ambiguous_style_initialization_returns_422(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     method: str,
     path: str,
 ) -> None:
@@ -181,7 +185,9 @@ def test_ambiguous_style_initialization_returns_422(
     audio_manager.is_speaker_initialized.assert_not_called()
 
 
-def test_metadata_loading_ignores_macos_zip_sidecars(engine_client_factory) -> None:
+def test_metadata_loading_ignores_macos_zip_sidecars(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     (engine_client_factory.tmp_path / "speaker_info" / "__MACOSX").mkdir(parents=True)
     client, _ = engine_client_factory.create_client()
 
@@ -198,7 +204,7 @@ def test_metadata_loading_ignores_macos_zip_sidecars(engine_client_factory) -> N
 
 @pytest.mark.parametrize("version", [1, None])
 def test_metadata_version_matches_core_normalization(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     version: object,
 ) -> None:
     client, _ = engine_client_factory.create_client(metadata_version=version)
@@ -209,7 +215,9 @@ def test_metadata_version_matches_core_normalization(
         assert response.json()[0]["version"] == str(version)
 
 
-def test_speaker_info_enumerates_existing_voice_samples(engine_client_factory) -> None:
+def test_speaker_info_enumerates_existing_voice_samples(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, _ = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
     sample_dir = (
@@ -235,7 +243,9 @@ def test_speaker_info_enumerates_existing_voice_samples(engine_client_factory) -
     ]
 
 
-def test_speaker_info_supports_non_uuid_folder_name(engine_client_factory) -> None:
+def test_speaker_info_supports_non_uuid_folder_name(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, _ = engine_client_factory.create_client(folder_name="speaker_ver1.0")
 
     response = client.get(
@@ -247,7 +257,9 @@ def test_speaker_info_supports_non_uuid_folder_name(engine_client_factory) -> No
     assert response.json()["style_infos"][0]["id"] == engine_client_factory.style_id
 
 
-def test_unknown_legacy_style_is_rejected_by_audio_query(engine_client_factory) -> None:
+def test_unknown_legacy_style_is_rejected_by_audio_query(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, _ = engine_client_factory.create_client()
 
     response = client.post(
@@ -261,7 +273,9 @@ def test_unknown_legacy_style_is_rejected_by_audio_query(engine_client_factory) 
     }
 
 
-def test_v1_unknown_style_is_rejected_as_not_found(engine_client_factory) -> None:
+def test_v1_unknown_style_is_rejected_as_not_found(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, audio_manager = engine_client_factory.create_client()
     audio_manager.predict.side_effect = StyleNotFoundError(
         "MYCOEIROINK style is not installed for speakerUuid unknown: 999999999"
@@ -285,7 +299,9 @@ def test_v1_unknown_style_is_rejected_as_not_found(engine_client_factory) -> Non
     }
 
 
-def test_v2_routes_use_the_public_core_audio_manager(engine_client_factory) -> None:
+def test_v2_routes_use_the_public_core_audio_manager(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, audio_manager = engine_client_factory.create_client(
         folder_name="speaker_ver1.0",
         device="directml",
@@ -328,7 +344,7 @@ def test_v2_routes_use_the_public_core_audio_manager(engine_client_factory) -> N
 
 
 def test_corrupt_model_returns_explicit_error(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     client, audio_manager = engine_client_factory.create_client()
@@ -355,7 +371,9 @@ def test_corrupt_model_returns_explicit_error(
     assert len(caplog.records) == 1
 
 
-def test_invalid_synthesis_parameter_returns_422(engine_client_factory) -> None:
+def test_invalid_synthesis_parameter_returns_422(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, audio_manager = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
     audio_manager.synthesis.side_effect = InvalidSynthesisParameterError(

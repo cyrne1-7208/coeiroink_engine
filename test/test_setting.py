@@ -1,4 +1,4 @@
-"""CORSミドルウェアのOrigin制限とSettingLoaderの原子的・直列化保存を検証する。"""
+# CORSミドルウェアのOrigin制限とSettingLoaderの原子的・直列化保存のテスト
 
 from __future__ import annotations
 

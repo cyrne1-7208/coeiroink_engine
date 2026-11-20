@@ -1,4 +1,4 @@
-"""Coreごとのメタデータを統合するストア。"""
+# Coreごとのメタデータを統合するストア
 
 from __future__ import annotations
 
@@ -19,11 +19,8 @@ if TYPE_CHECKING:
     )
 
 
+# 話者やスタイルのメタ情報を管理するクラス
 class MetasStore:
-    """
-    話者やスタイルのメタ情報を管理する
-    """
-
     def __init__(self, engine_speakers_path: Path) -> None:
         self._engine_speakers_path = engine_speakers_path
         self._loaded_metas: dict[str, EngineSpeaker] = {}
@@ -53,9 +50,8 @@ class MetasStore:
     def speaker_path(self, speaker_uuid: str) -> Path:
         return self._speaker_paths[speaker_uuid]
 
+    # Coreの話者メタデータに、Engineが管理する対応機能を結合する。
     def combine_metas(self, core_metas: list[CoreSpeaker]) -> list[Speaker]:
-        """Coreの話者メタデータに、Engineが管理する対応機能を結合する。"""
-
         return [
             Speaker(
                 **self.speaker_engine_metas(speaker_meta.speaker_uuid).model_dump(),
@@ -64,12 +60,9 @@ class MetasStore:
             for speaker_meta in core_metas
         ]
 
+    # 与えられたエンジンから、コア・エンジン両方の情報を含んだMetasを返す。
     # FIXME: CoreSpeakerの一覧を直接受け取る形に変更し、SynthesisEngineBaseへの型依存を解消する。
     def load_combined_metas(self, engine: SynthesisEngineBase) -> list[Speaker]:
-        """
-        与えられたエンジンから、コア・エンジン両方の情報を含んだMetasを返す
-        """
-
         core_metas = [CoreSpeaker(**speaker) for speaker in json.loads(engine.speakers)]
         return self.combine_metas(core_metas)
 
@@ -82,11 +75,10 @@ class MetasStore:
         return self._loaded_metas
 
 
+# スタイルIDから話者とスタイルを引くための変換テーブルを作る。
 def construct_lookup(
     speakers: list[Speaker],
 ) -> dict[int, tuple[Speaker, SpeakerStyle]]:
-    """スタイルIDから話者とスタイルを引くための変換テーブルを作る。"""
-
     lookup_table = {}
     for speaker in speakers:
         for style in speaker.styles:

@@ -1,4 +1,4 @@
-"""Base64エンコードされた複数WAVの連結・変換・入力上限チェックを検証する。"""
+# Base64エンコードされた複数WAVの連結・変換・入力上限チェックのテスト
 
 from __future__ import annotations
 

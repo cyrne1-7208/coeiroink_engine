@@ -1,4 +1,4 @@
-"""COEIROINK v2の音素フレーム長からモーラ別サンプル区間への変換と境界検証を確認する。"""
+# COEIROINK v2の音素フレーム長からモーラ別サンプル区間への変換と境界検証のテスト
 
 from __future__ import annotations
 

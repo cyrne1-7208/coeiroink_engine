@@ -1,4 +1,4 @@
-"""話者・スタイルのメタデータモデル。"""
+# 話者・スタイルのメタデータモデル
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class SpeakerStyle(BaseModel):
         title="スタイルの種類",
         description=(
             "talk:音声合成クエリの作成と音声合成が可能。"
-            "COEIROINKではtalkのみを提供します。"
+            "COEIROINKではtalkのみを提供する。"
         ),
     )
 
@@ -52,22 +52,16 @@ class SpeakerSupportedFeatures(BaseModel):
     )
 
 
+# コアに含まれるスピーカー情報
 class CoreSpeaker(BaseModel):
-    """
-    コアに含まれるスピーカー情報
-    """
-
     name: str = Field(title="名前")
     speaker_uuid: str = Field(title="スピーカーのUUID")
     styles: list[SpeakerStyle] = Field(title="スピーカースタイルの一覧")
     version: str = Field(title="スピーカーのバージョン")
 
 
+# エンジンに含まれるスピーカー情報
 class EngineSpeaker(BaseModel):
-    """
-    エンジンに含まれるスピーカー情報
-    """
-
     supported_features: SpeakerSupportedFeatures = Field(
         title="スピーカーの対応機能", default_factory=SpeakerSupportedFeatures
     )

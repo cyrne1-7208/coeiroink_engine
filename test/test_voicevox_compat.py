@@ -1,9 +1,10 @@
-"""VOICEVOX互換API（voicevox_compat）のクエリ・プリセット・未提供機能501・OpenAPI契約を検証する。"""
+# voicevox_compatのVOICEVOX互換APIにおけるクエリ・プリセット・未提供機能の501・OpenAPI契約のテスト
 
 from __future__ import annotations
 
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -16,6 +17,9 @@ from voicevox_engine.voicevox_compat.resources import (
     ResourceManager,
     ResourceNotFoundError,
 )
+
+if TYPE_CHECKING:
+    from conftest import EngineClientFactory
 
 
 def _preset(speaker_uuid: str, style_id: int, **overrides: object) -> Preset:
@@ -48,7 +52,7 @@ def test_manifest_cache_is_not_mutable_from_callers() -> None:
 
 
 def test_audio_query_matches_voicevox_0252_defaults_and_legacy_body(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, audio_manager = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
@@ -81,7 +85,7 @@ def test_audio_query_matches_voicevox_0252_defaults_and_legacy_body(
     ],
 )
 def test_voicevox_audio_query_rejects_allocation_heavy_numeric_values(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     field: str,
     value: float,
 ) -> None:
@@ -102,7 +106,7 @@ def test_voicevox_audio_query_rejects_allocation_heavy_numeric_values(
 
 
 def test_katakana_english_parameter_changes_only_unknown_english_reading(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, _ = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
@@ -126,7 +130,7 @@ def test_katakana_english_parameter_changes_only_unknown_english_reading(
 
 @pytest.mark.parametrize("pause_length", [None, 0.25])
 def test_audio_query_from_preset_preserves_0252_pause_controls(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     monkeypatch: pytest.MonkeyPatch,
     pause_length: float | None,
 ) -> None:
@@ -155,7 +159,7 @@ def test_audio_query_from_preset_preserves_0252_pause_controls(
 
 
 def test_audio_query_from_preset_rejects_duplicate_style_id(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     preset = _preset(engine_client_factory.speaker_uuid, engine_client_factory.style_id)
@@ -174,7 +178,7 @@ def test_audio_query_from_preset_rejects_duplicate_style_id(
 
 
 def test_multi_synthesis_accepts_modern_interrogative_flag(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, audio_manager = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
@@ -212,7 +216,7 @@ def test_multi_synthesis_accepts_modern_interrogative_flag(
 
 
 def test_multi_synthesis_removes_partial_zip_after_failure(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, audio_manager = engine_client_factory.create_client()
@@ -267,7 +271,7 @@ def test_wave_response_removes_temporary_file_after_write_failure(
     [("pauseLength", 0.25), ("pauseLengthScale", 1.5)],
 )
 def test_pause_controls_are_forwarded_to_core(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     field: str,
     value: float,
 ) -> None:
@@ -288,7 +292,9 @@ def test_pause_controls_are_forwarded_to_core(
     assert call["pause_length_scale"] == query.get("pauseLengthScale", 1)
 
 
-def test_missing_required_audio_query_field_returns_422(engine_client_factory) -> None:
+def test_missing_required_audio_query_field_returns_422(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, audio_manager = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
     query = engine_client_factory.post_audio_query(client)
@@ -317,7 +323,7 @@ def test_missing_required_audio_query_field_returns_422(engine_client_factory) -
     ],
 )
 def test_out_of_scope_apis_return_explicit_501(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     method: str,
     path: str,
 ) -> None:
@@ -330,7 +336,7 @@ def test_out_of_scope_apis_return_explicit_501(
 
 @pytest.mark.parametrize("path", ["mora_data", "mora_length", "mora_pitch"])
 def test_manifest_disabled_mora_editing_returns_501(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
     path: str,
 ) -> None:
     client, _ = engine_client_factory.create_client()
@@ -347,7 +353,9 @@ def test_manifest_disabled_mora_editing_returns_501(
     assert "提供していません" in response.json()["detail"]
 
 
-def test_manifest_disabled_morphing_returns_501(engine_client_factory) -> None:
+def test_manifest_disabled_morphing_returns_501(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, audio_manager = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
     query = engine_client_factory.post_audio_query(client)
@@ -370,7 +378,7 @@ def test_manifest_disabled_morphing_returns_501(engine_client_factory) -> None:
 
 
 def test_manifest_disabled_interrogative_upspeak_is_not_enabled_implicitly(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, audio_manager = engine_client_factory.create_client()
     style_id = engine_client_factory.style_id
@@ -393,20 +401,25 @@ def test_manifest_disabled_interrogative_upspeak_is_not_enabled_implicitly(
     assert audio_manager.synthesis.call_count == 1
 
 
-def test_validate_kana_matches_voicevox_0252_contract(engine_client_factory) -> None:
+def test_validate_kana_matches_voicevox_0252_contract(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, _ = engine_client_factory.create_client()
 
     valid = client.post("/voicevox/validate_kana", params={"text": "ア'"})
     invalid = client.post("/voicevox/validate_kana", params={"text": "ア'ク'セント"})
+    empty = client.post("/voicevox/validate_kana", params={"text": ""})
 
     assert valid.status_code == 200
     assert valid.json() is True
     assert invalid.status_code == 400
     assert invalid.json()["detail"]["error_name"] == "ACCENT_TWICE"
+    assert empty.status_code == 400
+    assert empty.json()["detail"]["error_args"] == {"position": "1"}
 
 
 def test_connect_waves_returns_http_error_for_invalid_input(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, _ = engine_client_factory.create_client()
 
@@ -416,7 +429,9 @@ def test_connect_waves_returns_http_error_for_invalid_input(
     assert "wav" in response.json()["detail"]
 
 
-def test_modern_metadata_device_and_manifest_shapes(engine_client_factory) -> None:
+def test_modern_metadata_device_and_manifest_shapes(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, _ = engine_client_factory.create_client()
     speaker_uuid = engine_client_factory.speaker_uuid
     style_id = engine_client_factory.style_id
@@ -469,7 +484,9 @@ def test_modern_metadata_device_and_manifest_shapes(engine_client_factory) -> No
     assert manifest_json["supported_features"]["return_resource_url"] is True
 
 
-def test_openapi_contains_voicevox_0252_talk_parameters(engine_client_factory) -> None:
+def test_openapi_contains_voicevox_0252_talk_parameters(
+    engine_client_factory: EngineClientFactory,
+) -> None:
     client, _ = engine_client_factory.create_client()
     schema = client.app.openapi()
 
@@ -541,7 +558,7 @@ def test_resource_manager_restricts_registration_to_files_under_root(
 
 
 def test_setting_post_uses_voicevox_0252_no_content_response(
-    engine_client_factory,
+    engine_client_factory: EngineClientFactory,
 ) -> None:
     client, _ = engine_client_factory.create_client()
 

@@ -1,6 +1,7 @@
 import os
 import sys
 import traceback
+from contextlib import suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -16,12 +17,12 @@ def engine_root() -> Path:
     return root_dir.resolve(strict=True)
 
 
+# PyInstallerやNuitkaで凍結した環境でなければ開発環境と判定する。
 def is_development() -> bool:
-    """凍結環境（PyInstallerまたはNuitka）でなければ開発環境と判定する。"""
     return not ("__compiled__" in globals() or getattr(sys, "frozen", False))
 
 
-def get_save_dir():
+def get_save_dir() -> Path:
     app_name = "coeiroink-engine-dev" if is_development() else "coeiroink-engine"
     return Path(user_data_dir(app_name))
 
@@ -33,9 +34,8 @@ def delete_file(file_path: str) -> None:
         traceback.print_exc()
 
 
+# 同じディレクトリの一時ファイルを同期し、既存のファイルを原子的に置き換える。
 def atomic_write_text(path: Path, content: str) -> None:
-    """同じディレクトリの一時ファイルを同期し、既存のファイルを原子的に置き換える。"""
-
     temporary_path: Path | None = None
     try:
         with NamedTemporaryFile(
@@ -54,7 +54,5 @@ def atomic_write_text(path: Path, content: str) -> None:
         temporary_path = None
     finally:
         if temporary_path is not None:
-            try:
+            with suppress(FileNotFoundError):
                 temporary_path.unlink()
-            except FileNotFoundError:
-                pass

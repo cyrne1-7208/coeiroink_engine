@@ -1,9 +1,7 @@
-"""Public-source prosody conversion for the COEIROINK v2 HTTP API.
-
-Text and kana are analysed by the frozen public Engine frontend, while the
-frozen public Core ``query2tokens_prosody`` function creates the flat token
-stream.  This module only performs the small v2 wire-format conversion.
-"""
+# 公開ソースだけで行う、COEIROINK v2 HTTP API向けのプロソディ変換
+#
+# テキストとカナは仕様を固定した公開Engineのフロントエンドで解析し、平坦なトークン列は仕様を固定した公開Coreの`query2tokens_prosody`関数で作る。
+# このモジュールはv2の通信形式への小さな変換だけを行う。
 
 from collections.abc import Sequence
 
@@ -20,8 +18,9 @@ from .models import Mora as ProsodyMora
 from .models import Prosody
 
 
+# v2のプロソディのリクエストを決定的に解析できない場合のエラー
 class ProsodyError(ValueError):
-    """Raised when a v2 prosody request cannot be analysed deterministically."""
+    pass
 
 
 def _require_string(value: object, field_name: str) -> str:
@@ -41,11 +40,10 @@ def _to_core_mora(mora: EngineMora) -> CoreMora:
     )
 
 
+# Engineの解析結果を、Coreのプロソディ変換に必要なAudioQueryへ変換する。
 def _to_core_query(
     accent_phrases: Sequence[EngineAccentPhrase],
 ) -> CoreAudioQuery:
-    """Engineの解析結果を、Coreのプロソディ変換に必要なAudioQueryへ変換する。"""
-
     return CoreAudioQuery(
         accent_phrases=[
             CoreAccentPhrase(
@@ -72,17 +70,15 @@ def _to_core_query(
     )
 
 
+# 公開Engineのカタカナのモーラ表記をひらがなに変換する。
 def _to_hiragana(text: str) -> str:
-    """Convert the public Engine's katakana mora spelling to hiragana."""
-
     return "".join(
         chr(ord(char) - 0x60) if "\u30a1" <= char <= "\u30f6" else char for char in text
     )
 
 
+# 1モーラ分のv2の高低アクセントの記号を返す。
 def _mora_accent(index: int, accent: int, mora_count: int) -> int:
-    """Return the v2 high/low accent marker for one mora."""
-
     if not 0 <= accent <= mora_count:
         raise ProsodyError("accent must be between 0 and the number of moras")
     if accent == 0:
@@ -122,15 +118,14 @@ def _build_prosody(
         detail.append(_to_prosody_moras(phrase))
         if phrase.pause_mora is not None:
             detail.append(_special_detail("_", "、"))
-        # Coreのトークン列では疑問符は文末記号。途中の疑問文は休止として表す。
+        # Coreのトークン列では疑問符は文末記号なので、途中の疑問文は休止として表す。
         if index == len(accent_phrases) - 1 and phrase.is_interrogative:
             detail.append(_special_detail("?", "？"))
     return Prosody(plain=plain, detail=detail)
 
 
+# 現在のユーザー辞書でテキストを解析し、v2形式のプロソディを返す。
 def estimate_prosody(text: str) -> Prosody:
-    """現在のユーザー辞書でテキストを解析し、v2形式のプロソディを返す。"""
-
     text = _require_string(text, "text")
     # 辞書を更新する経路にかかわらず、同じ文章でも最新の読みを使う。
     try:
@@ -140,13 +135,13 @@ def estimate_prosody(text: str) -> Prosody:
     return _build_prosody(accent_phrases)
 
 
+# 旧importとの互換用の関数で、解析結果を保持しなくなったため何もしない。
 def clear_prosody_cache() -> None:
-    """旧importとの互換用。解析結果を保持しなくなったため、何もしない。"""
+    pass
 
 
+# 公開EngineのAquesTalkライクな読み仮名から、v2のプロソディを推定する。
 def estimate_prosody_from_kana(kana: str) -> Prosody:
-    """Estimate v2 prosody from the public Engine's AquesTalk-like kana."""
-
     kana = _require_string(kana, "kana")
     try:
         accent_phrases = parse_kana(kana)

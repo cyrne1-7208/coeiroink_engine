@@ -1,4 +1,4 @@
-"""python -m voicevox_engine.sudachi のエントリポイント。"""
+# python -m voicevox_engine.sudachi のエントリポイント
 
 from .cli import main
 

@@ -1,4 +1,4 @@
-"""Pydantic models for the public COEIROINK v2 HTTP API."""
+# 公開するCOEIROINK v2 HTTP APIのPydanticモデル
 
 from .models import (
     AccentPhrase,

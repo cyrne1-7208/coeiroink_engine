@@ -1,4 +1,4 @@
-"""VOICEVOX互換APIで公開する静的リソースをハッシュIDで管理する。"""
+# VOICEVOX互換APIで公開する静的リソースをハッシュIDで管理する処理
 
 from base64 import b64encode
 from hashlib import sha256
@@ -10,20 +10,19 @@ from starlette.responses import FileResponse
 from ..model import ResourceFormat
 
 
+# 未登録または公開対象外のリソースが指定された場合のエラー
 class ResourceNotFoundError(LookupError):
-    """未登録または公開対象外のリソースが指定された。"""
+    pass
 
 
+# speaker_info配下で明示的に登録されたファイルだけを公開するクラス
 class ResourceManager:
-    """speaker_info配下で明示的に登録されたファイルだけを公開する。"""
-
     def __init__(self, root_dir: Path) -> None:
         self._root_dir = root_dir.expanduser().resolve()
         self._resources: dict[str, Path] = {}
 
+    # 公開対象ファイルを登録し、内容に対応するIDを返す。
     def register(self, resource_path: Path) -> str:
-        """公開対象ファイルを登録し、内容に対応するIDを返す。"""
-
         try:
             resolved = resource_path.expanduser().resolve(strict=True)
             resolved.relative_to(self._root_dir)
@@ -35,32 +34,29 @@ class ResourceManager:
         self._resources[resource_hash] = resolved
         return resource_hash
 
+    # 登録済みIDに対応するファイルを返す。
     def path(self, resource_hash: str) -> Path:
-        """登録済みIDに対応するファイルを返す。"""
-
         try:
             return self._resources[resource_hash]
         except KeyError as error:
             raise ResourceNotFoundError(resource_hash) from error
 
 
+# 指定形式に応じてbase64本体または同一サーバー上のURLを返す。
 def resource_value(
     manager: ResourceManager,
     request: Request,
     resource_format: ResourceFormat,
     path: Path,
 ) -> str:
-    """指定形式に応じてbase64本体または同一サーバー上のURLを返す。"""
-
     if resource_format == ResourceFormat.BASE64:
         return b64encode(path.read_bytes()).decode("utf-8")
     resource_hash = manager.register(path)
     return str(request.url_for("voicevox_resource", resource_hash=resource_hash))
 
 
+# 登録済みリソースだけを取得できる非公開ルートを追加する。
 def add_resource_route(router: APIRouter, manager: ResourceManager) -> None:
-    """登録済みリソースだけを取得できる非公開ルートを追加する。"""
-
     @router.get(
         "/_resources/{resource_hash}",
         include_in_schema=False,

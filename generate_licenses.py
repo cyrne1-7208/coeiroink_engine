@@ -49,19 +49,18 @@ class License:
     text: str
 
 
+# ライセンス一覧の生成に失敗した場合に発生するエラー
 class LicenseGenerationError(RuntimeError):
-    """ライセンス一覧の生成に失敗した場合に発生するエラー。"""
+    pass
 
 
+# PEP 503と同じ規則で比較用に依存名を正規化する。
 def _canonicalize_package_name(name: str) -> str:
-    """PEP 503と同じ規則で依存名を比較する。"""
-
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+# `uv pip list --format json`で保存した実行時依存を読み込む。
 def _read_package_snapshot(path: Path) -> dict[str, tuple[str, str]]:
-    """`uv pip list --format json`で保存した実行時依存を読み込む。"""
-
     try:
         raw_packages: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -93,16 +92,14 @@ def _read_package_snapshot(path: Path) -> dict[str, tuple[str, str]]:
     return packages
 
 
+# 通信障害で処理が止まり続けないよう、タイムアウトを設けて本文を取得する。
 def _read_url(url: str) -> str:
-    """通信障害で処理が止まり続けないよう、タイムアウトを設けて本文を取得する。"""
-
     with urllib.request.urlopen(url, timeout=URL_TIMEOUT_SECONDS) as response:
         return response.read().decode()
 
 
+# 隣接Coreを優先し、単体ビルド時だけ公開リポジトリから本文を取得する。
 def _coeirocore_license_text() -> str:
-    """隣接Coreを優先し、単体ビルド時だけ公開リポジトリから本文を取得する。"""
-
     local_license = Path("../coeiroink_core/LICENSE")
     if local_license.is_file():
         return local_license.read_text(encoding="utf-8")
@@ -111,9 +108,8 @@ def _coeirocore_license_text() -> str:
     )
 
 
+# パッケージメタデータに本文がない既知の依存だけ、一次配布元から補完する。
 def _unknown_license_text(name: str, version: str | None) -> str:
-    """パッケージメタデータに本文がない既知の依存だけ、一次配布元から補完する。"""
-
     normalized_name = _canonicalize_package_name(name)
     if normalized_name == "torch-complex":
         return _combine_legal_documents(
@@ -201,9 +197,8 @@ def _unknown_license_text(name: str, version: str | None) -> str:
     )
 
 
+# Pythonパッケージのメタデータだけでは表現できない同梱物のライセンスを返す。
 def _bundled_licenses() -> list[License]:
-    """Pythonパッケージのメタデータだけでは表現できない同梱物のライセンスを返す。"""
-
     python_version = ".".join(
         str(component)
         for component in (
@@ -282,11 +277,10 @@ def _bundled_licenses() -> list[License]:
     ]
 
 
+# wheelの`.dist-info/licenses`へ移されたLicense-Fileも元の相対パスで照合する。
 def _matches_declared_license_file(
     path: PurePosixPath, declared_path: PurePosixPath
 ) -> bool:
-    """wheelの`.dist-info/licenses`へ移されたLicense-Fileも元の相対パスで照合する。"""
-
     if path == declared_path:
         return True
     # 一部のeditable metadataはサブディレクトリを保たず、ライセンス関連ファイルを`.dist-info`直下へ配置する。
@@ -302,9 +296,8 @@ def _matches_declared_license_file(
     return any(part.endswith(".dist-info") for part in parent_parts)
 
 
+# メタデータで指定されたファイルと、一般的なライセンス・NOTICEファイルを返す。
 def _legal_documents(package_name: str) -> list[tuple[str, str]]:
-    """メタデータで指定されたファイルと、一般的なライセンス・NOTICEファイルを返す。"""
-
     try:
         distribution = metadata.distribution(package_name)
     except metadata.PackageNotFoundError as error:
@@ -366,19 +359,17 @@ def _legal_documents(package_name: str) -> list[tuple[str, str]]:
     return sorted(documents, key=lambda item: item[0].lower())
 
 
+# 複数のライセンス関連ファイルを改変せず、元のファイル名が分かる形で結合する。
 def _combine_legal_documents(documents: list[tuple[str, str]]) -> str:
-    """複数のライセンス関連ファイルを改変せず、元のファイル名が分かる形で結合する。"""
-
     if len(documents) == 1:
         return documents[0][1]
     return "\n\n".join(f"===== {path} =====\n{text}" for path, text in documents)
 
 
+# pip-licensesを実行し、配布パッケージに含まれるライブラリだけを返す。
 def _pip_license_rows(
     runtime_packages: dict[str, tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """pip-licensesを実行し、配布パッケージに含まれるライブラリだけを返す。"""
-
     command = [
         sys.executable,
         "-m",
@@ -412,13 +403,12 @@ def _pip_license_rows(
     return package_rows
 
 
+# パッケージ名とバージョンが、事前に保存した依存一覧と一致するか確認する。
 def _validate_runtime_package(
     package: dict[str, Any],
     canonical_name: str,
     runtime_packages: dict[str, tuple[str, str]] | None,
 ) -> None:
-    """パッケージ名とバージョンが、事前に保存した依存一覧と一致するか確認する。"""
-
     if runtime_packages is None:
         return
     expected = runtime_packages.get(canonical_name)
@@ -433,9 +423,8 @@ def _validate_runtime_package(
         )
 
 
+# 一つのPython配布物から表示用ライセンス情報を構築する。
 def _package_license(package: dict[str, Any], canonical_name: str) -> License:
-    """一つのPython配布物から表示用ライセンス情報を構築する。"""
-
     documents = _legal_documents(package["Name"])
     license_text = (
         _combine_legal_documents(documents)
@@ -519,9 +508,8 @@ def generate_licenses(
     return [*_bundled_licenses(), *_python_package_licenses(runtime_packages)]
 
 
+# 配布するGPL・LGPL・MPL依存のソースを、lockと同じバージョンで同梱する。
 def collect_sources(licenses: list[License], destination: Path) -> None:
-    """配布するGPL・LGPL・MPL依存のソースを、lockと同じバージョンで同梱する。"""
-
     with Path("uv.lock").open("rb") as file:
         packages = tomllib.load(file)["package"]
     license_by_package = {

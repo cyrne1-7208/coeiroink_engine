@@ -1,13 +1,10 @@
-"""Pydantic models for the COEIROINK v2 HTTP server contract.
-
-The field definitions in this module are reconstructed from the public
-OpenAPI contract.  It intentionally contains only data models: HTTP routes,
-GUI behavior, downloading, and synthesis implementation belong elsewhere.
-
-The API has two different models named ``Mora``.  ``Mora`` below is the
-``coeirocore.mora.Mora`` shape used by prosody-related endpoints, while
-``UtilMora`` is the ``coeirocore.v_util.Mora`` shape used by AudioQuery.
-"""
+# COEIROINK v2 HTTPサーバーの仕様を表すPydanticモデル
+#
+# このモジュールのフィールド定義は、公開されているOpenAPIの仕様から再構成したものである。
+# 意図的にデータモデルだけを置き、HTTPのルート、GUIの動作、ダウンロード、合成の実装は別の場所に置く。
+#
+# APIには`Mora`という名前のモデルが2種類ある。
+# 下の`Mora`はプロソディ関連のエンドポイントで使う`coeirocore.mora.Mora`の形、`UtilMora`はAudioQueryで使う`coeirocore.v_util.Mora`の形である。
 
 import json
 from typing import Any
@@ -15,34 +12,27 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# v2の通信用モデルに共通するPydanticの設定
 class V2BaseModel(BaseModel):
-    """Common Pydantic configuration for the v2 wire models."""
-
     # Python側の属性名とAPI上のaliasをどちらも入力で受け付け、FastAPIの応答ではaliasを維持する。
     model_config = ConfigDict(populate_by_name=True)
 
+    # このAPIで使う、Pydantic 1のモデルと辞書の比較を保つ。
+    #
+    # Pydantic 2は意図的に`model == dict`を等しいとみなさなくなった。
+    # v2の変換層とその呼び出し側は従来この動作に依存していたので、この互換性の境界で維持する。
     def __eq__(self, other: object) -> bool:
-        """Keep the Pydantic 1 model-to-dict comparison used by this API.
-
-        Pydantic 2 intentionally stopped treating ``model == dict`` as equal.
-        The v2 conversion layer and its callers historically relied on that
-        behavior, so preserve it at this compatibility boundary.
-        """
-
         if isinstance(other, dict):
             return self.model_dump() == other
         return super().__eq__(other)
 
+    # 暗黙の`null`の既定値を除いた従来の通信用スキーマを出力する。
+    #
+    # Pydantic 2は既定値が`None`の省略可能なフィールドに`default: null`を加える。
+    # 既存のCOEIROINK v2のスキーマはこの項目を公開していなかったので、
+    # `0.0`や`"0.0.1"`のような実際の既定値は残し、この暗黙の既定値だけを取り除く。
     @classmethod
     def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        """Emit the old wire schema without implicit ``null`` defaults.
-
-        Pydantic 2 adds ``default: null`` for optional fields with a
-        ``None`` default.  The existing COEIROINK v2 schema did not expose
-        those entries, so remove only these implicit defaults while retaining
-        real defaults such as ``0.0`` and ``"0.0.1"``.
-        """
-
         schema = super().model_json_schema(*args, **kwargs)
 
         def strip_implicit_null_defaults(value: Any) -> None:
@@ -58,9 +48,8 @@ class V2BaseModel(BaseModel):
         strip_implicit_null_defaults(schema)
         return schema
 
+    # 呼び出し側が使うPydantic 1互換のJSON整形を提供する。
     def json(self, *args: Any, **kwargs: Any) -> str:
-        """Provide the Pydantic 1-compatible JSON formatting used by callers."""
-
         if args:
             raise TypeError("positional arguments are not supported")
         include = kwargs.pop("include", None)
@@ -87,7 +76,7 @@ class V2BaseModel(BaseModel):
 
 
 class Mora(V2BaseModel):
-    """A mora used by prosody and waveform parameter models."""
+    """プロソディと波形パラメータのモデルで使うモーラ"""
 
     phoneme: str
     hira: str
@@ -95,7 +84,7 @@ class Mora(V2BaseModel):
 
 
 class UtilMora(V2BaseModel):
-    """A mora used inside the AudioQuery/AccentPhrase representation."""
+    """AudioQueryとAccentPhraseの表現の中で使うモーラ"""
 
     text: str
     consonant: str | None = None
@@ -105,7 +94,7 @@ class UtilMora(V2BaseModel):
     pitch: float
 
 
-# OpenAPI上の名前に依存せず、2種類のMoraスキーマを区別するための別名。
+# OpenAPI上の名前に依存せず、2種類のMoraスキーマを区別するための別名
 AudioQueryMora = UtilMora
 VUtilMora = UtilMora
 
@@ -239,7 +228,7 @@ class DictionaryWords(V2BaseModel):
 
 
 class Style(V2BaseModel):
-    """The compact style object returned by ``/v1/speakers``."""
+    """`/v1/speakers`が返す簡潔なスタイルのオブジェクト"""
 
     name: str
     id: int

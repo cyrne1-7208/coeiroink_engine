@@ -1,4 +1,4 @@
-"""Engine設定ファイルの読み書き。"""
+# Engine設定ファイルの読み書き
 
 from pathlib import Path
 from threading import RLock

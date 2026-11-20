@@ -13,8 +13,8 @@ unvoiced_mora_phoneme_list = ["A", "I", "U", "E", "O", "cl", "pau"]
 mora_phoneme_list = ["a", "i", "u", "e", "o", "N", *unvoiced_mora_phoneme_list]
 
 
+# アクセント句のモーラと休止モーラを一つのリストにまとめる。
 def to_flatten_moras(accent_phrases: list[AccentPhrase]) -> list[Mora]:
-    """アクセント句のモーラと休止モーラを、一つのリストにまとめる。"""
     return list(
         chain.from_iterable(
             [
@@ -30,8 +30,8 @@ def to_flatten_moras(accent_phrases: list[AccentPhrase]) -> list[Mora]:
     )
 
 
-def to_phoneme_data_list(phoneme_str_list: list[str]):
-    """音素の文字列をOjtPhonemeへ変換する。"""
+# 音素の文字列をOjtPhonemeへ変換する。
+def to_phoneme_data_list(phoneme_str_list: list[str]) -> list[OjtPhoneme]:
     phoneme_data_list = [
         OjtPhoneme(phoneme=p, start=i, end=i + 1)
         for i, p in enumerate(phoneme_str_list)
@@ -39,8 +39,11 @@ def to_phoneme_data_list(phoneme_str_list: list[str]):
     return OjtPhoneme.convert(phoneme_data_list)
 
 
-def split_mora(phoneme_list: list[OjtPhoneme]):
-    """音素列をモーラ単位の子音・母音と、元の音素列における母音位置へ分割する。
+def split_mora(
+    phoneme_list: list[OjtPhoneme],
+) -> tuple[list[OjtPhoneme | None], list[OjtPhoneme], list[int]]:
+    """
+    音素列をモーラ単位の子音・母音と、元の音素列における母音位置へ分割する。
 
     子音を持たないモーラに対応する`consonant_phoneme_list`の要素は`None`になる。
 
@@ -73,10 +76,10 @@ def split_mora(phoneme_list: list[OjtPhoneme]):
     return consonant_phoneme_list, vowel_phoneme_list, vowel_indexes
 
 
+# アクセント句からモーラのリストと、前後に休止を加えた音素列を作る。
 def pre_process(
     accent_phrases: list[AccentPhrase],
 ) -> tuple[list[Mora], list[OjtPhoneme]]:
-    """アクセント句から、モーラと前後の休止を含む音素列を作る。"""
     flatten_moras = to_flatten_moras(accent_phrases)
 
     phoneme_each_mora = [
@@ -94,14 +97,13 @@ def pre_process(
     return flatten_moras, phoneme_data_list
 
 
+# 旧VOICEVOX Coreと開発用モックの互換性を維持する合成エンジン
 class SynthesisEngine(SynthesisEngineBase):
-    """旧VOICEVOX Coreと開発用モックの互換性を維持する合成エンジン。"""
-
+    # Coreのメタデータと対応デバイスを読み込み、推論用のロックを作る。
     def __init__(
         self,
         core: CoreWrapper,
-    ):
-        """Coreのメタデータと対応デバイスを読み込み、推論用のロックを作る。"""
+    ) -> None:
         super().__init__()
         self.core = core
         self._speakers = self.core.metas()
@@ -120,7 +122,7 @@ class SynthesisEngine(SynthesisEngineBase):
     def supported_devices(self) -> str | None:
         return self._supported_devices
 
-    def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool):
+    def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool) -> None:
         # 旧Coreはモデルを明示的に読み込むAPIを持たないため、対応の有無を先に確認する。
         if not getattr(self.core, "exist_load_model", True):
             return
@@ -142,7 +144,8 @@ class SynthesisEngine(SynthesisEngineBase):
     def replace_phoneme_length(
         self, accent_phrases: list[AccentPhrase], speaker_id: int
     ) -> list[AccentPhrase]:
-        """Coreで音素長を推論し、入力アクセント句の各モーラを直接更新する。
+        """
+        Coreで音素長を推論し、入力アクセント句の各モーラを直接更新する。
 
         Parameters
         ----------
@@ -184,7 +187,8 @@ class SynthesisEngine(SynthesisEngineBase):
     def replace_mora_pitch(
         self, accent_phrases: list[AccentPhrase], speaker_id: int
     ) -> list[AccentPhrase]:
-        """Coreでモーラ音高を推論し、入力アクセント句の各モーラを直接更新する。
+        """
+        Coreでモーラ音高を推論し、入力アクセント句の各モーラを直接更新する。
 
         Parameters
         ----------
@@ -205,8 +209,10 @@ class SynthesisEngine(SynthesisEngineBase):
 
         flatten_moras, phoneme_data_list = pre_process(accent_phrases)
 
-        def _create_one_hot(accent_phrase: AccentPhrase, position: int):
-            """指定モーラの位置だけを1にし、休止を持つ句には末尾の0を追加する。"""
+        # 指定モーラの位置だけを1にし、休止を持つ句には末尾の0を追加する。
+        def _create_one_hot(
+            accent_phrase: AccentPhrase, position: int
+        ) -> numpy.ndarray:
             one_hot = numpy.zeros(len(accent_phrase.moras), dtype=numpy.int64)
             one_hot[position] = 1
             return (
@@ -217,7 +223,7 @@ class SynthesisEngine(SynthesisEngineBase):
 
         start_accent_list = numpy.concatenate(
             [
-                # accentは1始まり。先頭アクセントとそれ以外で上昇位置が異なる。
+                # accentは1始まりで、先頭アクセントとそれ以外で上昇位置が異なる。
                 _create_one_hot(accent_phrase, 0 if accent_phrase.accent == 1 else 1)
                 for accent_phrase in accent_phrases
             ]
@@ -292,8 +298,8 @@ class SynthesisEngine(SynthesisEngineBase):
 
         return accent_phrases
 
-    def _synthesis_impl(self, query: AudioQuery, speaker_id: int):
-        """AudioQueryをCoreの入力へ変換し、音声波形を生成する。"""
+    # AudioQueryをCoreの入力へ変換し、音声波形を生成する。
+    def _synthesis_impl(self, query: AudioQuery, speaker_id: int) -> numpy.ndarray:
         self.initialize_speaker_synthesis(speaker_id, skip_reinit=True)
         flatten_moras, phoneme_data_list = pre_process(query.accent_phrases)
 
@@ -301,7 +307,7 @@ class SynthesisEngine(SynthesisEngineBase):
             [p.phoneme_id for p in phoneme_data_list], dtype=numpy.int64
         )
 
-        # 音素長には、前後の無音時間も含める。
+        # 音素長には前後の無音時間も含める。
         phoneme_length_list = (
             [query.prePhonemeLength]
             + [
@@ -333,7 +339,7 @@ class SynthesisEngine(SynthesisEngineBase):
         _, _, vowel_indexes_data = split_mora(phoneme_data_list)
         vowel_indexes = numpy.array(vowel_indexes_data)
 
-        # 秒単位の音素長を、Coreが扱うフレーム数へ変換する。
+        # 秒単位の音素長をCoreが扱うフレーム数へ変換する。
         rate = 24000 / 256
         phoneme_bin_num = numpy.round(phoneme_length * rate).astype(numpy.int32)
 

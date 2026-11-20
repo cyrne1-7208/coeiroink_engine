@@ -7,13 +7,14 @@ from itertools import chain
 import numpy as np
 from coeirocore.pyworld_compat import load_pyworld
 
-from .metas.metas import Speaker, SpeakerSupportPermittedSynthesisMorphing, StyleInfo
+from .metas.metas import Speaker, SpeakerStyle, SpeakerSupportPermittedSynthesisMorphing
 from .metas.metas_store import construct_lookup
 from .model import AudioQuery, MorphableTargetInfo, SpeakerNotFoundError
 from .synthesis_engine.synthesis_engine_base import SynthesisEngineBase
 
 
-# FIXME: ndarray type hint, https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/blob/2b64f86197573497c685c785c6e0e743f407b63e/pyworld/pyworld.pyx#L398
+# FIXME: ndarrayの型ヒントをpyworldの定義に合わせる。
+# https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/blob/2b64f86197573497c685c785c6e0e743f407b63e/pyworld/pyworld.pyx#L398
 @dataclass(frozen=True)
 class MorphingParameter:
     fs: float
@@ -54,8 +55,19 @@ def get_morphable_targets(
     base_speakers: list[int],
 ) -> list[dict[int, MorphableTargetInfo]]:
     """
-    speakers: 全話者の情報
-    base_speakers: モーフィング可能か判定したいベースの話者リスト（スタイルID）
+    ベースの話者ごとにエンジン内の各スタイルとモーフィング可能かを判定する。
+
+    Parameters
+    ----------
+    speakers : list[Speaker]
+        全話者の情報
+    base_speakers : list[int]
+        モーフィング可能か判定したいベースの話者のスタイルIDのリスト
+
+    Returns
+    -------
+    list[dict[int, MorphableTargetInfo]]
+        ベースの話者ごとのスタイルIDとモーフィング可否の対応表
     """
     speaker_lookup = construct_lookup(speakers)
 
@@ -75,18 +87,15 @@ def get_morphable_targets(
     return morphable_targets_arr
 
 
+# 指定されたspeakerがモーフィング可能かどうかを返す。
+# speakerが見つからない場合はSpeakerNotFoundErrorを送出する。
 def is_synthesis_morphing_permitted(
-    speaker_lookup: dict[int, tuple[Speaker, StyleInfo]],
+    speaker_lookup: dict[int, tuple[Speaker, SpeakerStyle]],
     base_speaker: int,
     target_speaker: int,
 ) -> bool:
-    """
-    指定されたspeakerがモーフィング可能かどうか返す
-    speakerが見つからない場合はSpeakerNotFoundErrorを送出する
-    """
-
-    base_speaker_data = speaker_lookup[base_speaker]
-    target_speaker_data = speaker_lookup[target_speaker]
+    base_speaker_data = speaker_lookup.get(base_speaker)
+    target_speaker_data = speaker_lookup.get(target_speaker)
 
     if base_speaker_data is None or target_speaker_data is None:
         raise SpeakerNotFoundError(
@@ -107,16 +116,14 @@ def is_synthesis_morphing_permitted(
         target_speaker_info.supported_features.permitted_synthesis_morphing
     )
 
-    if (
-        base_speaker_morphing_info == SpeakerSupportPermittedSynthesisMorphing.NOTHING
-        or target_speaker_morphing_info
-        == SpeakerSupportPermittedSynthesisMorphing.NOTHING
+    if SpeakerSupportPermittedSynthesisMorphing.NOTHING in (
+        base_speaker_morphing_info,
+        target_speaker_morphing_info,
     ):
         return False
-    if (
-        base_speaker_morphing_info == SpeakerSupportPermittedSynthesisMorphing.SELF_ONLY
-        or target_speaker_morphing_info
-        == SpeakerSupportPermittedSynthesisMorphing.SELF_ONLY
+    if SpeakerSupportPermittedSynthesisMorphing.SELF_ONLY in (
+        base_speaker_morphing_info,
+        target_speaker_morphing_info,
     ):
         return base_speaker_uuid == target_speaker_uuid
     return (
@@ -125,6 +132,9 @@ def is_synthesis_morphing_permitted(
     )
 
 
+# 両話者のモノラル合成結果をWORLDで解析し、モーフィング用パラメータを作る。
+#
+# 入力クエリは複製するため変更されない。WORLD解析のため、`outputStereo`の指定にかかわらず内部合成はモノラルで行う。
 def synthesis_morphing_parameter(
     engine: SynthesisEngineBase,
     query: AudioQuery,
@@ -132,11 +142,6 @@ def synthesis_morphing_parameter(
     target_speaker: int,
     enable_interrogative_upspeak: bool = False,
 ) -> MorphingParameter:
-    """両話者のモノラル合成結果をWORLDで解析し、モーフィング用パラメーターを作る。
-
-    入力クエリは複製するため変更されない。WORLD解析のため、`outputStereo`の指定にかかわらず内部合成はモノラルで行う。
-    """
-
     query = deepcopy(query)
 
     # WORLDで解析するため合成はモノラルで行う。
@@ -166,16 +171,17 @@ def synthesis_morphing(
     output_stereo: bool = False,
 ) -> np.ndarray:
     """
-    指定した割合で、パラメータをもとにモーフィングした音声を生成します。
+    指定した割合でパラメータをもとにモーフィングした音声を生成する。
 
     Parameters
     ----------
     morph_param : MorphingParameter
         `synthesis_morphing_parameter`または`create_morphing_parameter`で作成したパラメータ
-
     morph_rate : float
         モーフィングの割合
-        0.0でベースの話者、1.0でターゲットの話者に近づきます。
+        0.0でベースの話者、1.0でターゲットの話者に近づく。
+    output_stereo : bool
+        同じ波形を2チャンネルに複製してステレオで返すか
 
     Returns
     -------
@@ -183,11 +189,10 @@ def synthesis_morphing(
         モーフィングした音声
 
     Raises
-    -------
+    ------
     ValueError
-        morph_rate ∉ [0, 1]
+        morph_rateが0.0から1.0の範囲外の場合
     """
-
     if morph_rate < 0.0 or morph_rate > 1.0:
         raise ValueError("morph_rateは0.0から1.0の範囲で指定してください")
 

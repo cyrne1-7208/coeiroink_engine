@@ -1,4 +1,4 @@
-"""本番アダプターのCoreへの変換と、起動設定の受け渡しを検証する。"""
+# 本番アダプターのCoreへの変換と起動設定の受け渡しのテスト
 
 from __future__ import annotations
 

@@ -3,6 +3,7 @@ import asyncio
 import queue
 import time
 import traceback
+from contextlib import suppress
 from dataclasses import dataclass, field
 from multiprocessing import Process, get_context
 from multiprocessing.connection import Connection
@@ -13,12 +14,14 @@ from typing import Any
 import soundfile
 
 # FIXME: ワーカー層からFastAPIへの依存を取り除く。
-from fastapi import HTTPException, Request
-from packaging.version import Version
+from fastapi import Request
 
 from .model import AudioQuery
 from .synthesis_engine import make_synthesis_engines
-from .synthesis_engine.make_synthesis_engines import resolve_device
+from .synthesis_engine.make_synthesis_engines import (
+    get_latest_core_version,
+    resolve_device,
+)
 from .utility import delete_file
 
 _WORKER_WAIT_TIMEOUT = 0.1
@@ -26,10 +29,9 @@ _DISCONNECTION_POLL_INTERVAL = 1.0
 _PROCESS_JOIN_TIMEOUT = 1.0
 
 
+# 待機中または合成中のリクエストとワーカーの所有関係を表す状態
 @dataclass
 class _RequestState:
-    """待機中または合成中のリクエストとワーカーの所有関係を保持する。"""
-
     request: Request
     proc: Process | None = None
     connection: Connection | None = None
@@ -37,15 +39,13 @@ class _RequestState:
     finalized: bool = False
 
 
+# キャンセル用ワーカーとの通信または終了に関するエラー
 class CancellableWorkerError(RuntimeError):
-    """キャンセル用ワーカーとの通信または終了に関するエラー。"""
-
     reusable = False
 
 
+# 子プロセスの合成例外を構造化したまま親へ伝えるエラー
 class CancellableWorkerSynthesisError(CancellableWorkerError):
-    """子プロセスの合成例外を構造化したまま親へ伝えるエラー。"""
-
     reusable = True
 
     def __init__(self, payload: dict[str, str]) -> None:
@@ -62,13 +62,13 @@ class CancellableWorkerSynthesisError(CancellableWorkerError):
         super().__init__(details)
 
 
+# ワーカー取得前または合成中にHTTP接続が切断された場合のエラー
 class CancellableRequestDisconnected(CancellableWorkerError):
-    """ワーカー取得前または合成中にHTTP接続が切断された場合のエラー。"""
+    pass
 
 
+# pickleできない例外本体の代わりに診断に必要な情報だけを送る。
 def _child_error_payload(error: Exception) -> dict[str, str]:
-    """pickleできない例外本体の代わりに、診断に必要な情報だけを送る。"""
-
     return {
         "kind": "error",
         "exception_type": f"{type(error).__module__}.{type(error).__qualname__}",
@@ -87,26 +87,21 @@ def _is_process_alive(proc: Process) -> bool:
 def _close_connection(connection: Connection | None) -> None:
     if connection is None:
         return
-    try:
+    with suppress(OSError, ValueError):
         connection.close()
-    except OSError, ValueError:
-        pass
 
 
 def _join_process(proc: Process, timeout: float) -> None:
-    try:
+    with suppress(AssertionError, OSError, ValueError):
         proc.join(max(0.0, timeout))
-    except AssertionError, OSError, ValueError:
-        pass
 
 
 def _close_process(proc: Process) -> None:
-    try:
+    with suppress(AssertionError, OSError, ValueError):
         proc.close()
-    except AssertionError, OSError, ValueError:
-        pass
 
 
+# プロセスを期限内に停止し、PipeとProcessを閉じる。
 def _stop_process(
     proc: Process,
     connection: Connection | None,
@@ -114,8 +109,6 @@ def _stop_process(
     *,
     graceful: bool = False,
 ) -> None:
-    """プロセスを期限内に停止し、PipeとProcessを閉じる。"""
-
     deadline = time.monotonic() + max(0.0, timeout)
     if graceful and connection is not None:
         try:
@@ -133,18 +126,14 @@ def _stop_process(
 
     _join_process(proc, max(0.0, deadline - time.monotonic()))
     if _is_process_alive(proc):
-        try:
+        with suppress(OSError, ValueError):
             proc.terminate()
-        except OSError, ValueError:
-            pass
         _join_process(proc, max(0.0, deadline - time.monotonic()))
     if _is_process_alive(proc):
         kill = getattr(proc, "kill", None)
         if kill is not None:
-            try:
+            with suppress(OSError, ValueError):
                 kill()
-            except OSError, ValueError:
-                pass
         _join_process(proc, max(0.0, deadline - time.monotonic()))
     _close_connection(connection)
     _close_process(proc)
@@ -164,32 +153,22 @@ def _receive_worker_response(connection: Connection) -> str:
     raise CancellableWorkerError("サブプロセスから不正な応答種別を受信しました")
 
 
-def _version_key(version: str) -> Version:
-    """`+cpu`などのローカル接尾辞を含むCoreバージョンを比較可能な値へ変換する。"""
-    return Version(version)
-
-
 class CancellableEngine:
     """
-    マルチプロセスで音声合成を実行し、クライアント切断時に処理をキャンセルできるエンジン。
+    マルチプロセスで音声合成を実行し、クライアント切断時に処理をキャンセルできるエンジン
 
     Attributes
     ----------
-    watch_con_list: List[_RequestState]
-        待機中を含むリクエストの状態を保持する。状態の確定はロック下で一度だけ行う
-    procs_and_cons: queue.Queue[Tuple[Process, Connection]]
-        音声合成の準備が完了したプロセスとコネクションを保持するQueue
-        （音声合成中のプロセスは入っていない）
+    watch_con_list : list[_RequestState]
+        待機中を含むリクエストの状態を保持する。状態の確定はロック下で一度だけ行う。
+    procs_and_cons : queue.Queue[tuple[Process, Connection]]
+        音声合成の準備が完了したプロセスとコネクションを保持するQueueで、
+        音声合成中のプロセスは入っていない。
     """
 
+    # 指定された数の音声合成ワーカープロセスを事前起動し、プールを初期化する。
     def __init__(self, args: argparse.Namespace) -> None:
-        """指定された数の音声合成ワーカープロセスを事前起動し、プールを初期化する。"""
         self.args = args
-        if not self.args.enable_cancellable_synthesis:
-            raise HTTPException(
-                status_code=404,
-                detail="実験的機能はデフォルトで無効になっています。使用するには引数を指定してください。",
-            )
         if self.args.init_processes < 1:
             raise ValueError("init_processes must be at least 1")
 
@@ -207,13 +186,13 @@ class CancellableEngine:
         self,
     ) -> tuple[Process, Connection]:
         """
-        新しく開始したプロセスを返す関数
+        新しく開始したプロセスと、そのプロセスと通信するためのPipeを返す。
 
         Returns
         -------
-        ret_proc: Process
+        ret_proc : Process
             新規のプロセス
-        sub_proc_con1: Connection
+        sub_proc_con1 : Connection
             ret_procのプロセスと通信するためのPipe
         """
         sub_proc_con1, sub_proc_con2 = self._mp_context.Pipe(True)
@@ -240,9 +219,8 @@ class CancellableEngine:
             self.watch_con_list.append(state)
         return state
 
+    # リクエストの後処理を一つの経路だけが担当するように確定する。
     def _claim_state(self, state: _RequestState) -> bool:
-        """リクエストの後処理を一つの経路だけが担当するように確定する。"""
-
         with self._state_lock:
             if state.finalized:
                 return False
@@ -276,9 +254,8 @@ class CancellableEngine:
         _stop_process(proc, connection, _PROCESS_JOIN_TIMEOUT)
         return False
 
+    # 切断または終了要求を監視しながら利用可能なワーカーを一つ確保する。
     def _checkout_worker(self, state: _RequestState) -> tuple[Process, Connection]:
-        """切断または終了要求を監視しながら、利用可能なワーカーを一つ確保する。"""
-
         while True:
             if state.cancelled.is_set():
                 raise CancellableRequestDisconnected("HTTP接続が切断されました")
@@ -312,6 +289,7 @@ class CancellableEngine:
                 raise CancellableWorkerError("キャンセル用ワーカーは終了処理中です")
             raise CancellableRequestDisconnected("HTTP接続が切断されました")
 
+    # 後処理の担当が確定したワーカーを状態に応じて再利用または交換する。
     def _finish_claimed_state(
         self,
         state: _RequestState,
@@ -319,8 +297,6 @@ class CancellableEngine:
         *,
         reusable: bool,
     ) -> None:
-        """後処理の担当が確定したワーカーを、状態に応じて再利用または交換する。"""
-
         proc = state.proc
         if proc is None:
             return
@@ -340,14 +316,13 @@ class CancellableEngine:
         _stop_process(proc, connection, _PROCESS_JOIN_TIMEOUT)
         self._replace_worker()
 
+    # リクエスト状態を一度だけ確定し、正常なワーカーは再利用、通信不能なワーカーは交換する。
     def finalize_con(
         self,
         req: Request,
         proc: Process,
         sub_proc_con: Connection | None,
     ) -> None:
-        """リクエスト状態を一度だけ確定し、正常なワーカーは再利用、通信不能なワーカーは交換する。"""
-
         state = self._find_state(req, proc)
         if state is None or not self._claim_state(state):
             return
@@ -365,22 +340,23 @@ class CancellableEngine:
         enable_interrogative_upspeak: bool,
         core_version: str | None,
     ) -> str:
-        """ワーカーへ合成を委譲し、生成された一時WAVのパスを返す。
+        """
+        ワーカーへ合成を委譲し、生成された一時WAVのパスを返す。
 
-        クライアント切断を監視するため通常の合成器と異なり`Request`を受け取る。返却後の一時ファイルは呼び出し元が削除する。
+        クライアント切断を監視するため、通常の合成器と異なり`Request`を受け取る。返却後の一時ファイルは呼び出し元が削除する。
 
         Parameters
         ----------
-        query: AudioQuery
+        query : AudioQuery
             音声合成用のクエリ
-        speaker_id: int
+        speaker_id : int
             話者スタイルID
-        request: Request
+        request : Request
             切断を監視するHTTPリクエスト
-        enable_interrogative_upspeak: bool
+        enable_interrogative_upspeak : bool
             疑問文の語尾を自動調整するか
-        core_version: str | None
-            使用するCoreのバージョン。Noneの場合は最新バージョンを使用する
+        core_version : str | None
+            使用するCoreのバージョンで、Noneの場合は最新バージョンを使用する。
 
         Returns
         -------
@@ -455,9 +431,8 @@ class CancellableEngine:
             reusable=False,
         )
 
-    async def catch_disconnection(self):
-        """待機中を含む接続を監視し、切断されたリクエストをキャンセルする。"""
-
+    # 待機中を含む接続を監視し、切断されたリクエストをキャンセルする。
+    async def catch_disconnection(self) -> None:
         while not self._shutting_down:
             await asyncio.sleep(self._disconnection_poll_interval)
             with self._state_lock:
@@ -467,9 +442,8 @@ class CancellableEngine:
                     continue
                 await self._finalize_disconnected(state)
 
+    # 全ワーカーを期限内に停止する。二度目以降の呼び出しは何もしない。
     def shutdown(self, timeout: float = 5.0) -> None:
-        """全ワーカーを期限内に停止する。二度目以降の呼び出しは何もしない。"""
-
         if timeout < 0:
             raise ValueError("timeout must be non-negative")
         deadline = time.monotonic() + timeout
@@ -498,17 +472,17 @@ class CancellableEngine:
                 graceful=True,
             )
 
+    # イベントループを止めずに明示的なワーカー終了処理を行う。
     async def shutdown_async(self, timeout: float = 5.0) -> None:
-        """イベントループを止めずに、明示的なワーカー終了処理を行う。"""
-
         await asyncio.to_thread(self.shutdown, timeout)
 
 
 def start_synthesis_subprocess(
     args: argparse.Namespace,
     sub_proc_con: Connection,
-):
-    """Pipeから要求を受け取り続ける音声合成ワーカーのエントリーポイント。
+) -> None:
+    """
+    音声合成ワーカーのエントリーポイントとしてPipeから要求を受け取り続ける。
 
     spawn起動時にpickle可能なターゲットとするため、モジュール直下の関数として定義する。
 
@@ -519,7 +493,6 @@ def start_synthesis_subprocess(
     sub_proc_con : Connection
         親プロセスと通信する双方向Pipe
     """
-
     device = resolve_device(
         device=getattr(args, "device", None),
         use_gpu=getattr(args, "use_gpu", None),
@@ -543,9 +516,7 @@ def start_synthesis_subprocess(
         voice_smoothing=args.voice_smoothing,
         dangerous_skip_check=getattr(args, "dangerous_skip_check", False),
     )
-    if not synthesis_engines:
-        raise RuntimeError("音声合成エンジンがありません。")
-    latest_core_version = max(synthesis_engines, key=_version_key)
+    latest_core_version = get_latest_core_version(synthesis_engines)
     try:
         while True:
             try:

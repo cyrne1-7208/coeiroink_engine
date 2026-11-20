@@ -14,10 +14,10 @@ from ..text_analysis import (
 __all__ = ["SynthesisEngineBase", "full_context_label_moras_to_moras", "mora_to_text"]
 
 
+# 疑問文に指定されたアクセント句の末尾へ、音高を上げた疑問形発音用モーラを追加する。
 def adjust_interrogative_accent_phrases(
     accent_phrases: list[AccentPhrase],
 ) -> list[AccentPhrase]:
-    """疑問文に指定されたアクセント句の末尾へ、音高を上げた疑問形発音用モーラを追加する。"""
     return [
         AccentPhrase(
             moras=adjust_interrogative_moras(accent_phrase),
@@ -71,24 +71,27 @@ class SynthesisEngineBase(metaclass=ABCMeta):
 
     def initialize_speaker_synthesis(self, speaker_id: int, skip_reinit: bool) -> None:
         """
-        指定した話者での音声合成を初期化する。何度も実行可能。
-        未実装の場合は何もしない
+        指定した話者での音声合成を初期化する。何度も実行できる。
+        未実装の場合は何もしない。
+
         Parameters
         ----------
         speaker_id : int
             話者ID
         skip_reinit : bool
-            Trueの場合、既に初期化済みの話者の再初期化をスキップする
+            Trueの場合、既に初期化済みの話者の再初期化をスキップする。
         """
         return
 
     def is_initialized_speaker_synthesis(self, speaker_id: int) -> bool:
         """
-        指定した話者での音声合成が初期化されているかどうかを返す
+        指定した話者での音声合成が初期化されているかどうかを返す。
+
         Parameters
         ----------
         speaker_id : int
             話者ID
+
         Returns
         -------
         bool
@@ -101,16 +104,18 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         self, accent_phrases: list[AccentPhrase], speaker_id: int
     ) -> list[AccentPhrase]:
         """
-        accent_phrasesの母音・子音の長さを設定する
+        accent_phrasesの母音・子音の長さを設定する。
+
         Parameters
         ----------
-        accent_phrases : List[AccentPhrase]
+        accent_phrases : list[AccentPhrase]
             アクセント句モデルのリスト
         speaker_id : int
             話者ID
+
         Returns
         -------
-        accent_phrases : List[AccentPhrase]
+        accent_phrases : list[AccentPhrase]
             母音・子音の長さが設定されたアクセント句モデルのリスト
         """
         raise NotImplementedError()
@@ -120,27 +125,28 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         self, accent_phrases: list[AccentPhrase], speaker_id: int
     ) -> list[AccentPhrase]:
         """
-        accent_phrasesの音高(ピッチ)を設定する
+        accent_phrasesの音高を設定する。
+
         Parameters
         ----------
-        accent_phrases : List[AccentPhrase]
+        accent_phrases : list[AccentPhrase]
             アクセント句モデルのリスト
         speaker_id : int
             話者ID
+
         Returns
         -------
-        accent_phrases : List[AccentPhrase]
-            音高(ピッチ)が設定されたアクセント句モデルのリスト
+        accent_phrases : list[AccentPhrase]
+            音高が設定されたアクセント句モデルのリスト
         """
         raise NotImplementedError()
 
+    # 音素長、モーラ音高の順に推論結果をアクセント句へ反映する。
     def replace_mora_data(
         self,
         accent_phrases: list[AccentPhrase],
         speaker_id: int,
     ) -> list[AccentPhrase]:
-        """音素長、モーラ音高の順に推論結果をアクセント句へ反映する。"""
-
         return self.replace_mora_pitch(
             accent_phrases=self.replace_phoneme_length(
                 accent_phrases=accent_phrases,
@@ -149,14 +155,13 @@ class SynthesisEngineBase(metaclass=ABCMeta):
             speaker_id=speaker_id,
         )
 
+    # Open JTalkのフルコンテキストラベルをアクセント句へ変換し、継続長と音高を補完する。
     def create_accent_phrases(
         self,
         text: str,
         speaker_id: int,
         enable_katakana_english: bool = False,
     ) -> list[AccentPhrase]:
-        """Open JTalkのフルコンテキストラベルをアクセント句へ変換し、継続長と音高を補完する。"""
-
         return self.replace_mora_data(
             accent_phrases=analyze_text(
                 text,
@@ -172,7 +177,8 @@ class SynthesisEngineBase(metaclass=ABCMeta):
         enable_interrogative_upspeak: bool = False,
     ) -> np.ndarray:
         """
-        音声合成クエリ内で疑問文に指定されたMoraを変形した後、継承先の`_synthesis_impl`を使って音声合成を行う
+        音声合成クエリ内で疑問文に指定されたMoraを変形した後、継承先の`_synthesis_impl`を使って音声合成を行う。
+
         Parameters
         ----------
         query : AudioQuery
@@ -181,9 +187,10 @@ class SynthesisEngineBase(metaclass=ABCMeta):
             話者ID
         enable_interrogative_upspeak : bool
             疑問形のテキストの語尾を自動調整する機能を有効にするか
+
         Returns
         -------
-        wave : numpy.ndarray
+        wave : np.ndarray
             音声合成結果
         """
         if enable_interrogative_upspeak:
@@ -197,16 +204,18 @@ class SynthesisEngineBase(metaclass=ABCMeta):
     @abstractmethod
     def _synthesis_impl(self, query: AudioQuery, speaker_id: int) -> np.ndarray:
         """
-        音声合成クエリから音声合成に必要な情報を構成し、実際に音声合成を行う
+        音声合成クエリから音声合成に必要な情報を構成し、実際に音声合成を行う。
+
         Parameters
         ----------
         query : AudioQuery
             音声合成クエリ
         speaker_id : int
             話者ID
+
         Returns
         -------
-        wave : numpy.ndarray
+        wave : np.ndarray
             音声合成結果
         """
         raise NotImplementedError()

@@ -1,4 +1,4 @@
-"""全DTOの写しではなく、v1互換処理と混在するwire形式の境界を検証する。"""
+# 全DTOの写しではなく、v1互換処理と混在するwire形式の境界を検証するテスト
 
 from __future__ import annotations
 

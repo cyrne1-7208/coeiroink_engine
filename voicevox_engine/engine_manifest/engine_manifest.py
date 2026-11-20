@@ -1,4 +1,4 @@
-"""エンジンマニフェストのデータモデル。"""
+# エンジンマニフェストのデータモデル
 
 from pydantic import BaseModel, Field
 

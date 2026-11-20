@@ -1,4 +1,4 @@
-"""COEIROINK v2のPCM WAV入出力・トリムバッファ・休止置換・F0推定を検証する。"""
+# COEIROINK v2のPCM WAV入出力・トリムバッファ・休止置換・F0推定のテスト
 
 from __future__ import annotations
 

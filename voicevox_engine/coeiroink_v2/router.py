@@ -1,8 +1,7 @@
-"""公開COEIROINK v2 APIをHTTPへ接続するアダプター。
-
-ルーターは`run.py`から独立させ、AudioManager互換オブジェクトと話者メタデータストアを外部から受け取る。
-音声合成と波形処理はCoreの公開APIまたはこのパッケージのv2ヘルパーへ委譲する。
-"""
+# 公開COEIROINK v2 APIをHTTPへ接続するアダプター
+#
+# ルーターは`run.py`から独立させ、AudioManager互換オブジェクトと話者メタデータストアを外部から受け取る。
+# 音声合成と波形処理はCoreの公開APIまたはこのパッケージのv2ヘルパーへ委譲する。
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
@@ -67,6 +66,8 @@ from .models import (
 )
 from .prosody import (
     ProsodyError,
+    _mora_accent,
+    _to_hiragana,
     estimate_prosody,
     estimate_prosody_from_kana,
 )
@@ -93,8 +94,9 @@ DictionaryCallback = Callable[[DictionaryWords], Any]
 _LOGGER = logging.getLogger(__name__)
 
 
+# 単独利用されるv2ルーターでは従来どおり変更APIを許可する。
 def _allow_mutation() -> None:
-    """単独利用されるv2ルーターでは従来どおり変更APIを許可する。"""
+    pass
 
 
 # 想定済みの公開APIエラーだけをHTTPへ変換し、未知の例外はASGIまで伝播させてtracebackを残す。
@@ -122,9 +124,8 @@ def _model_value(value: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
+# 既知の例外だけをHTTPエラーへ変換する。未知の例外は呼び出し側で再送出する。
 def _as_http_error(error: Exception, default_status: int = 500) -> HTTPException:
-    """既知の例外だけをHTTPエラーへ変換する。未知の例外は呼び出し側で再送出する。"""
-
     if isinstance(error, HTTPException):
         return error
     if isinstance(
@@ -166,9 +167,8 @@ def _mora_phonemes(mora: Any) -> list[str]:
     return [phoneme if phoneme == "N" else phoneme.lower() for phoneme in result]
 
 
+# 公式v2形式の特殊プロソディ句を検証して分類する。
 def _detail_special_kind(phrase: Sequence[Any]) -> str | None:
-    """公式v2形式の特殊プロソディ句を検証して分類する。"""
-
     moras = list(phrase)
     if not moras:
         raise ProsodyError("prosodyDetail contains an empty phrase")
@@ -196,11 +196,10 @@ def _detail_special_kind(phrase: Sequence[Any]) -> str | None:
     return first_phoneme
 
 
+# 通常句と公式形式の休止・疑問句を分離する。
 def _split_prosody_detail(
     detail: Sequence[Sequence[Any]],
 ) -> tuple[list[list[Any]], list[bool], bool, bool]:
-    """通常句と公式形式の休止・疑問句を分離する。"""
-
     try:
         phrases = [list(phrase) for phrase in detail]
     except TypeError as error:
@@ -249,16 +248,11 @@ def _split_prosody_detail(
 
 
 def _accent_markers(accent: int, mora_count: int) -> list[int]:
-    if accent == 0:
-        return [0] * mora_count
-    if accent == 1:
-        return [int(index == 0) for index in range(mora_count)]
-    return [int(0 < index < accent) for index in range(mora_count)]
+    return [_mora_accent(index, accent, mora_count) for index in range(mora_count)]
 
 
+# v2の高低アクセント値からCoreのアクセント位置を復元する。
 def _detail_accent(moras: Sequence[Any]) -> int:
-    """v2の高低アクセント値からCoreのアクセント位置を復元する。"""
-
     accents = [_model_value(mora, "accent") for mora in moras]
     if not accents or any(
         isinstance(value, bool) or value not in (0, 1) for value in accents
@@ -274,13 +268,12 @@ def _detail_accent(moras: Sequence[Any]) -> int:
     return candidates[0]
 
 
+# v2のprosodyDetailからCore公開形式のトークン列を組み立てる。
 def _detail_to_plain(
     detail: Sequence[Sequence[Any]],
     pause_moras: Sequence[bool] | None = None,
     terminal_interrogative: bool = False,
 ) -> list[str]:
-    """v2のprosodyDetailからCore公開形式のトークン列を組み立てる。"""
-
     phrases, detail_pause_moras, detail_terminal, has_special = _split_prosody_detail(
         detail
     )
@@ -327,17 +320,8 @@ def _mora_to_prosody(mora: Any, index: int, accent: int, count: int) -> Mora:
     text = _model_value(mora, "text", "hira", default="")
     if not isinstance(text, str):
         text = str(text)
-    hira = "".join(
-        chr(ord(char) - 0x60) if "\u30a1" <= char <= "\u30f6" else char for char in text
-    )
-    if not 0 <= accent <= count:
-        raise ProsodyError("accent must be between 0 and the number of moras")
-    if accent == 0:
-        high = 0
-    elif accent == 1:
-        high = int(index == 0)
-    else:
-        high = int(0 < index < accent)
+    hira = _to_hiragana(text)
+    high = _mora_accent(index, accent, count)
     return Mora(phoneme="-".join(phonemes), hira=hira, accent=high)
 
 
@@ -377,6 +361,7 @@ def _hop_length(
     return value
 
 
+# 公開Coreの通常推論または継続長付き推論を呼び分ける。
 def _call_prediction(
     audio_manager: AudioManager,
     tokens: Sequence[str],
@@ -385,8 +370,6 @@ def _call_prediction(
     speed_scale: float,
     with_duration: bool,
 ) -> tuple[np.ndarray, list[int]]:
-    """公開Coreの通常推論または継続長付き推論を呼び分ける。"""
-
     arguments = {
         "text": list(tokens),
         "style_id": style_id,
@@ -425,9 +408,8 @@ def _catalog_result(callback: CatalogCallback) -> Any:
     return [] if result is None else result
 
 
+# 辞書エンドポイントが使われた時だけ公開辞書アダプターを読み込む。
 def _public_dictionary_callback(payload: DictionaryWords) -> None:
-    """辞書エンドポイントが使われた時だけ公開辞書アダプターを読み込む。"""
-
     from .dictionary import set_dictionary
 
     set_dictionary(payload)
@@ -439,13 +421,12 @@ def _first_speaker_uuid(store: SpeakerMetadataStore) -> str:
     raise SpeakerNotFoundError("<first>")
 
 
+# 明示指定、スタイル検索、先頭話者の順にサンプル音声用の話者・スタイルを確定する。
 def _speaker_style(
     store: SpeakerMetadataStore,
     speaker_uuid: str | None,
     style_id: int | None,
 ) -> tuple[str, int]:
-    """明示指定、スタイル検索、先頭話者の順にサンプル音声用の話者・スタイルを確定する。"""
-
     if speaker_uuid is not None and style_id is not None:
         store.get_style(speaker_uuid, style_id)
         return speaker_uuid, style_id
@@ -482,10 +463,9 @@ def _default_trim_values(
     }
 
 
+# v2ルート群が共有する、解決済みの依存オブジェクトと可変設定
 @dataclass(slots=True)
 class _V2RouterContext:
-    """v2ルート群が共有する、解決済みの依存オブジェクトと可変設定。"""
-
     audio_manager: AudioManager
     metadata_store: SpeakerMetadataStore | None
     catalog: OfficialSiteCatalogClient
@@ -541,13 +521,12 @@ class _V2RouterContext:
         )
         return wave, frames, plain, detail, _sampling_rate(self.audio_manager)
 
+    # リクエスト値を優先し、未指定値だけをサーバー既定値で補う。
     def processing_options(
         self,
         param: WavProcessingParam | SynthesisParam,
         mora_durations: Sequence[Any] | None,
     ) -> WaveProcessingOptions:
-        """リクエスト値を優先し、未指定値だけをサーバー既定値で補う。"""
-
         start = (
             param.start_trim_buffer
             if param.start_trim_buffer is not None
@@ -792,7 +771,6 @@ def _add_processing_routes(router: APIRouter, context: _V2RouterContext) -> None
     )
     def synthesis(param: SynthesisParam) -> Response:
         """生波形を一度推論し、音声補正または休止長変更が必要な場合だけ継続長も取得する。"""
-
         try:
             voice_smoothing = audio_manager.voice_smoothing
             needs_pause_durations = param.pause_length is not None
@@ -865,7 +843,6 @@ def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
     )
     def set_default_processing_algorithm(param: AlgorithmSettings) -> None:
         """稼働中の既定波形処理アルゴリズムを変更する。設定は再起動後に引き継がれない。"""
-
         try:
             settings["processing_algorithm"] = _normalize_processing_algorithm(
                 param.processing_algorithm
@@ -885,7 +862,6 @@ def _add_settings_routes(router: APIRouter, context: _V2RouterContext) -> None:
     )
     def set_default_trim_buffer(param: TrimBufferSettings) -> None:
         """稼働中の既定トリム範囲を変更する。設定は再起動後に引き継がれない。"""
-
         settings.update(
             start_trim_buffer=param.start_trim_buffer,
             end_trim_buffer=param.end_trim_buffer,
@@ -984,7 +960,7 @@ def _add_metadata_lookup_routes(router: APIRouter, context: _V2RouterContext) ->
     def style_id_to_speaker_meta(
         style_id: int | None = Query(None, alias="styleId"),
     ) -> SpeakerMetaForTextBox:
-        # 未指定・未導入スタイルを`None`文字列で返すのは、公式v2 APIの既存レスポンス契約に合わせた挙動。
+        # 未指定・未導入スタイルを`None`文字列で返すのは、公式v2 APIの既存レスポンス契約に合わせるためである。
         if style_id is None:
             return SpeakerMetaForTextBox(
                 speakerUuid="None",
@@ -1060,6 +1036,10 @@ def _add_speaker_asset_routes(router: APIRouter, context: _V2RouterContext) -> N
             raise _as_http_error(error) from error
 
 
+# ルートパスに依存しないCOEIROINK v2ルーターを構築する。
+#
+# audio_managerとmetadata_storeは公開実装または同じAPIを持つテストダブルを受け付ける。
+# 外部カタログのコールバックが未指定なら、公式サイトから一覧を取得する。
 def create_v2_router(
     audio_manager: AudioManager,
     metadata_store: SpeakerMetadataStore | str | Path | None = None,
@@ -1075,12 +1055,6 @@ def create_v2_router(
     default_trim_buffer: TrimBufferSettings | Mapping[str, Any] | None = None,
     verify_mutability_allowed: Callable[[], Any] = _allow_mutation,
 ) -> APIRouter:
-    """ルートパスに依存しないCOEIROINK v2ルーターを構築する。
-
-    audio_managerとmetadata_storeは公開実装または同じAPIを持つテストダブルを受け付ける。
-    外部カタログのコールバックが未指定なら、公式サイトから一覧を取得する。
-    """
-
     if audio_manager is None:
         raise ValueError("audio_manager is required")
 

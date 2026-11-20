@@ -1,4 +1,4 @@
-"""PresetManagerのYAML検証・CRUD・ロールバック・並行追加をCWD非依存で検証する。"""
+# PresetManagerのYAML検証・CRUD・ロールバック・並行追加をCWD非依存で検証するテスト
 
 from __future__ import annotations
 

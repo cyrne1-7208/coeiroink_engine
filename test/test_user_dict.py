@@ -1,4 +1,4 @@
-"""ユーザー辞書のCRUD・インポート・OpenJTalk反映・原子的永続化とロールバックを検証する。"""
+# ユーザー辞書のCRUD・インポート・Open JTalkへの反映・原子的永続化とロールバックのテスト
 
 from __future__ import annotations
 

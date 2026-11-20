@@ -1,4 +1,4 @@
-"""Engineテストで共有するアプリ構築フィクスチャとv2用フェイクを提供する。"""
+# Engineテストで共有するアプリ構築フィクスチャとv2用フェイク
 
 from __future__ import annotations
 
@@ -22,10 +22,9 @@ SECOND_SPEAKER_UUID = "00000000-0000-4000-8000-000000000002"
 STYLE_ID = 1234567890
 
 
+# 実モデルに依存せず統合FastAPIアプリとTestClientを構築するクラス
 @dataclass(frozen=True, slots=True)
 class EngineClientFactory:
-    """実モデルに依存せず統合FastAPIアプリとTestClientを構築する。"""
-
     tmp_path: Path
     speaker_uuid: str = SPEAKER_UUID
     second_speaker_uuid: str = SECOND_SPEAKER_UUID
@@ -148,9 +147,8 @@ def engine_client_factory(tmp_path: Path) -> EngineClientFactory:
     return EngineClientFactory(tmp_path=tmp_path)
 
 
+# COEIROINK v2ルーター・波形後処理テストで共有するCore AudioManager代替
 class V2FakeAudioManager:
-    """COEIROINK v2ルーター・波形後処理テストで共有するCore AudioManager代替。"""
-
     fs = 16000
     device = "cpu"
 

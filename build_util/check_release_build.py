@@ -1,4 +1,4 @@
-"""リリース用の配布パッケージが単体で起動できるか確認する。"""
+# リリース用の配布パッケージが単体で起動できるか確認するスクリプト
 
 from __future__ import annotations
 
@@ -12,9 +12,8 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 
+# 対象OSのEngine実行ファイルを返す。
 def executable_path(dist_dir: Path) -> Path:
-    """対象OSのEngine実行ファイルを返す。"""
-
     for name in ("run", "run.exe"):
         candidate = dist_dir / name
         if candidate.is_file():
@@ -22,14 +21,13 @@ def executable_path(dist_dir: Path) -> Path:
     raise FileNotFoundError(f"Engine executable was not found in {dist_dir}")
 
 
+# マニフェストとHTTP起動を検査する。
 def check_release_build(
     dist_dir: Path,
     expected_version: str,
     *,
     experimental_voice_smoothing: bool = False,
 ) -> None:
-    """マニフェストとHTTP起動を検査する。"""
-
     dist_dir = dist_dir.resolve(strict=True)
     executable = executable_path(dist_dir)
     manifest = json.loads(

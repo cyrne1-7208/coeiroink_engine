@@ -1,4 +1,4 @@
-"""旧CamelCaseモジュールおよび互換再エクスポートのimport経路を維持していることを検証する。"""
+# 旧CamelCaseモジュールおよび互換再エクスポートのimport経路を維持していることを検証するテスト
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import importlib
 import pytest
 
 
+# 旧CamelCase importを維持しながら、実装をsnake_caseへ集約する。
 @pytest.mark.parametrize(
     ("legacy_name", "canonical_name"),
     [
@@ -40,8 +41,6 @@ def test_legacy_module_import_resolves_to_canonical_module(
     legacy_name: str,
     canonical_name: str,
 ) -> None:
-    """旧CamelCase importを維持しながら、実装をsnake_caseへ集約する。"""
-
     assert importlib.import_module(legacy_name) is importlib.import_module(
         canonical_name
     )

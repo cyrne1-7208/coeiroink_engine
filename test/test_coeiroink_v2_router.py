@@ -1,4 +1,4 @@
-"""COEIROINK v2 HTTPルーターのエンドポイント契約・エラー応答・OpenAPIスキーマを検証する。"""
+# COEIROINK v2 HTTPルーターのエンドポイント契約・エラー応答・OpenAPIスキーマのテスト
 
 from __future__ import annotations
 

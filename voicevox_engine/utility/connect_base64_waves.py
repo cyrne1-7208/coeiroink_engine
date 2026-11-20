@@ -13,7 +13,7 @@ MAX_CONNECTED_SAMPLING_RATE = 384_000
 
 
 class ConnectBase64WavesException(Exception):
-    def __init__(self, message: str):
+    def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
 
@@ -32,15 +32,17 @@ def _channel_count(wave: np.ndarray) -> int:
 
 def decode_base64_waves(waves: list[str]) -> list[tuple[np.ndarray, int]]:
     """
-    base64エンコードされた複数のwavデータをデコードする
+    base64エンコードされた複数のwavデータをデコードする。
+
     Parameters
     ----------
-    waves: list[str]
+    waves : list[str]
         base64エンコードされたwavデータのリスト
+
     Returns
     -------
-    waves_nparray_sr: List[Tuple[np.ndarray, int]]
-        (NumPy配列の音声波形データ, サンプリングレート) 形式のタプルのリスト
+    waves_nparray_sr : list[tuple[np.ndarray, int]]
+        NumPy配列の音声波形データとサンプリングレートのタプルのリスト
     """
     if len(waves) == 0:
         raise ConnectBase64WavesException("wavファイルが含まれていません")
@@ -93,12 +95,10 @@ def decode_base64_waves(waves: list[str]) -> list[tuple[np.ndarray, int]]:
     return waves_nparray_sr
 
 
+# 検証済みWAVを最大サンプリングレートとチャンネル数へ揃え、時間方向に連結する。
+#
+# モノラルとステレオが混在する場合はモノラルをステレオへ複製し、変換後もモジュール定数の合計サンプル数上限を適用する。
 def connect_base64_waves(waves: list[str]) -> tuple[np.ndarray, int]:
-    """検証済みWAVを最大サンプリングレートとチャンネル数へ揃え、時間方向に連結する。
-
-    モノラルとステレオが混在する場合はモノラルをステレオへ複製し、変換後もモジュール定数の合計サンプル数上限を適用する。
-    """
-
     waves_nparray_sr = decode_base64_waves(waves)
 
     max_sampling_rate = max(sr for _, sr in waves_nparray_sr)

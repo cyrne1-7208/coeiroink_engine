@@ -1,4 +1,4 @@
-"""COEIROINK v2のテキスト・かな記法からの韻律推定と入力エラー契約を検証する。"""
+# COEIROINK v2のテキスト・かな記法からの韻律推定と入力エラー契約のテスト
 
 from __future__ import annotations
 

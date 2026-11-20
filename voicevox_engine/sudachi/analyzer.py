@@ -1,4 +1,4 @@
-"""Sudachi full辞書を明示的に利用するための独立した解析API。"""
+# Sudachi full辞書を明示的に利用するための独立した解析API
 
 from __future__ import annotations
 
@@ -13,18 +13,19 @@ from typing import Any, Self
 from .open_jtalk_dictionary import compile_open_jtalk_dictionaries
 
 
+# Sudachi解析で発生したエラー
 class SudachiError(RuntimeError):
-    """Sudachi解析で発生したエラー。"""
+    pass
 
 
+# Sudachiの任意依存がインストールされていない場合のエラー
 class SudachiUnavailableError(SudachiError):
-    """Sudachiの任意依存がインストールされていない。"""
+    pass
 
 
+# Pythonの値として保持したSudachiの形態素
 @dataclass(frozen=True, slots=True)
 class SudachiMorpheme:
-    """Sudachiの形態素をPythonの値として保持する。"""
-
     surface: str
     normalized_form: str
     dictionary_form: str
@@ -35,8 +36,8 @@ class SudachiMorpheme:
     dictionary_id: int
     is_oov: bool
 
+    # CLIや外部検証で扱いやすい辞書へ変換する。
     def to_dict(self) -> dict[str, Any]:
-        """CLIや外部検証で扱いやすい辞書へ変換する。"""
         return {
             "surface": self.surface,
             "normalized_form": self.normalized_form,
@@ -50,8 +51,8 @@ class SudachiMorpheme:
         }
 
 
+# 任意依存を必要な時だけ読み込む。
 def _load_sudachipy() -> Any:
-    """任意依存を必要な時だけ読み込む。"""
     try:
         import sudachipy
     except ModuleNotFoundError as error:
@@ -64,9 +65,8 @@ def _load_sudachipy() -> Any:
     return sudachipy
 
 
+# Sudachi full辞書を一度ロードして繰り返し解析するクラス
 class SudachiAnalyzer:
-    """Sudachi full辞書を一度ロードして繰り返し解析する。"""
-
     _MODES = frozenset({"A", "B", "C"})
 
     def __init__(
@@ -120,8 +120,8 @@ class SudachiAnalyzer:
             self._resources.close()
             raise
 
+    # 入力を解析し、元文字列上の形態素境界と属性を返す。
     def tokenize(self, text: str) -> list[SudachiMorpheme]:
-        """入力を解析し、元文字列上の形態素境界と属性を返す。"""
         if not isinstance(text, str):
             raise TypeError("text must be str")
 
@@ -140,8 +140,8 @@ class SudachiAnalyzer:
             for morpheme in self._tokenizer.tokenize(text)
         ]
 
+    # mmap辞書を閉じ、リソースを解放する。
     def close(self) -> None:
-        """mmap辞書を閉じ、リソースを解放する。"""
         if self._dictionary is None:
             return
         try:

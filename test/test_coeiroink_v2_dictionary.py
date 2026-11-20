@@ -1,4 +1,4 @@
-"""COEIROINK v2辞書APIから公開ユーザー辞書への変換・モーラ数検証・反映呼び出しを確認する。"""
+# COEIROINK v2辞書APIから公開ユーザー辞書への変換・モーラ数検証・反映呼び出しのテスト
 
 from __future__ import annotations
 

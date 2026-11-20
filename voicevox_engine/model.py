@@ -6,15 +6,13 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from .metas.metas import Speaker, SpeakerInfo
-
 _MAX_OUTPUT_SAMPLING_RATE = 384_000
 _MAX_SILENCE_SECONDS = 60.0
 
 
 class Mora(BaseModel):
     """
-    モーラ（子音＋母音）ごとの情報
+    モーラごとの子音と母音の情報
     """
 
     text: str = Field(title="文字")
@@ -24,9 +22,9 @@ class Mora(BaseModel):
     vowel_length: float = Field(title="母音の音長")
     pitch: float = Field(
         title="音高"
-    )  # デフォルト値をつけるとts側のOpenAPIで生成されたコードの型がOptionalになる
+    )  # デフォルト値をつけるとts側のOpenAPIで生成されたコードの型がOptionalになる。
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         items = [
             (k, tuple(v)) if isinstance(v, list) else (k, v)
             for k, v in self.__dict__.items()
@@ -47,7 +45,7 @@ class AccentPhrase(BaseModel):
     )
     is_interrogative: bool = Field(default=False, title="疑問形かどうか")
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         items = [
             (k, tuple(v)) if isinstance(v, list) else (k, v)
             for k, v in self.__dict__.items()
@@ -88,7 +86,7 @@ class AudioQuery(BaseModel):
         default=1,
         ge=0,
         allow_inf_nan=False,
-        title="句読点などの無音時間（倍率）",
+        title="句読点などの無音時間の倍率",
     )
     outputSamplingRate: int = Field(
         gt=0,
@@ -101,7 +99,7 @@ class AudioQuery(BaseModel):
         title="[読み取り専用]AquesTalkライクな読み仮名。音声合成クエリとしては無視される",
     )
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         items = [
             (k, tuple(v)) if isinstance(v, list) else (k, v)
             for k, v in self.__dict__.items()
@@ -120,7 +118,7 @@ class ParseKanaErrorCode(Enum):
 
 
 class ParseKanaError(Exception):
-    def __init__(self, errcode: ParseKanaErrorCode, **kwargs):
+    def __init__(self, errcode: ParseKanaErrorCode, **kwargs: str) -> None:
         self.errcode = errcode
         self.errname = errcode.name
         self.kwargs: dict[str, str] = kwargs
@@ -139,7 +137,7 @@ class ParseKanaBadRequest(BaseModel):
     )
     error_args: dict[str, str] = Field(title="エラーを起こした箇所")
 
-    def __init__(self, err: ParseKanaError):
+    def __init__(self, err: ParseKanaError) -> None:
         super().__init__(text=err.text, error_name=err.errname, error_args=err.kwargs)
 
 
@@ -156,30 +154,6 @@ class SpeakerNotFoundError(LookupError):
     def __init__(self, speaker: int, *args: object, **kywrds: object) -> None:
         self.speaker = speaker
         super().__init__(f"speaker {speaker} is not found.", *args, **kywrds)
-
-
-class DownloadableModel(BaseModel):
-    """
-    ダウンロード可能な音声ライブラリの情報（最新情報をwebで取得することを考慮して、ローカルの情報はない）
-    """
-
-    download_path: str = Field(title="音声ライブラリのダウンロードURL")
-    volume: str = Field(title="音声ライブラリのバイト数")
-    speaker: Speaker = Field(title="話者情報")
-    speaker_info: SpeakerInfo = Field(title="話者の追加情報")
-
-
-class DownloadInfo(BaseModel):
-    """
-    ダウンロード話者情報（ローカルの情報が付与されたもの）
-    """
-
-    downloadable_model: DownloadableModel = Field(title="ダウンロードモデル情報")
-    current_version: str = Field(title="現在のバージョン")
-    character_exists: bool = Field(
-        title="このキャラクターのライブラリがローカルに存在するか"
-    )
-    latest_model_exists: bool = Field(title="最新モデルがローカルに存在するか")
 
 
 USER_DICT_MIN_PRIORITY = 0
@@ -213,7 +187,7 @@ class UserDictWord(BaseModel):
     model_config = ConfigDict(validate_assignment=True, validate_default=True)
 
     @field_validator("surface")
-    def convert_to_zenkaku(cls, surface):
+    def convert_to_zenkaku(cls, surface: str) -> str:
         return surface.translate(
             str.maketrans(
                 "".join(chr(0x21 + i) for i in range(94)),
@@ -221,8 +195,8 @@ class UserDictWord(BaseModel):
             )
         )
 
-    @field_validator("pronunciation", mode="before")
-    def check_is_katakana(cls, pronunciation):
+    @field_validator("pronunciation", mode="after")
+    def check_is_katakana(cls, pronunciation: str) -> str:
         if not fullmatch(r"[ァ-ヴー]+", pronunciation):
             raise ValueError("発音は有効なカタカナでなくてはいけません。")
         sutegana = ["ァ", "ィ", "ゥ", "ェ", "ォ", "ャ", "ュ", "ョ", "ヮ", "ッ"]
@@ -248,10 +222,11 @@ class UserDictWord(BaseModel):
                 raise ValueError("無効な発音です。(「くゎ」「ぐゎ」以外の「ゎ」の使用)")
         return pronunciation
 
-    @field_validator("mora_count", mode="before")
-    def check_mora_count_and_accent_type(cls, mora_count, info: ValidationInfo):
-        """発音表記からモーラ数を補完し、アクセント位置がその範囲内か検証する。"""
-
+    # 発音表記からモーラ数を補完し、アクセント位置がその範囲内か検証する。
+    @field_validator("mora_count", mode="after")
+    def check_mora_count_and_accent_type(
+        cls, mora_count: int | None, info: ValidationInfo
+    ) -> int | None:
         values = info.data
         if "pronunciation" not in values or "accent_type" not in values:
             return mora_count
@@ -280,11 +255,8 @@ class UserDictWord(BaseModel):
         return mora_count
 
 
+# 品詞ごとの情報
 class PartOfSpeechDetail(BaseModel):
-    """
-    品詞ごとの情報
-    """
-
     part_of_speech: str = Field(title="品詞")
     part_of_speech_detail_1: str = Field(title="品詞細分類1")
     part_of_speech_detail_2: str = Field(title="品詞細分類2")
@@ -314,24 +286,7 @@ class SupportedDevicesInfo(BaseModel):
     """
 
     cpu: bool = Field(title="CPUに対応しているか")
-    cuda: bool = Field(title="CUDA(Nvidia GPU)に対応しているか")
-    dml: bool = Field(title="DirectML(Nvidia GPU/Radeon GPU等)に対応しているか")
-
-
-class SupportedFeaturesInfo(BaseModel):
-    """
-    エンジンの機能の情報
-    """
-
-    support_adjusting_mora: bool = Field(title="モーラが調整可能かどうか")
-    support_adjusting_speed_scale: bool = Field(title="話速が調整可能かどうか")
-    support_adjusting_pitch_scale: bool = Field(title="音高が調整可能かどうか")
-    support_adjusting_intonation_scale: bool = Field(title="抑揚が調整可能かどうか")
-    support_adjusting_volume_scale: bool = Field(title="音量が調整可能かどうか")
-    support_adjusting_silence_scale: bool = Field(
-        title="前後の無音時間が調整可能かどうか"
+    cuda: bool = Field(title="Nvidia GPUのCUDAに対応しているか")
+    dml: bool = Field(
+        title="Nvidia GPUやRadeon GPUなどで使えるDirectMLに対応しているか"
     )
-    support_interrogative_upspeak: bool = Field(
-        title="疑似疑問文に対応しているかどうか"
-    )
-    support_switching_device: bool = Field(title="CPU/GPUの切り替えが可能かどうか")

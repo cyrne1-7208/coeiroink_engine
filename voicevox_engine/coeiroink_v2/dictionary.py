@@ -1,9 +1,7 @@
-"""Adapter from the COEIROINK v2 dictionary payload to the public Engine.
-
-The v2 endpoint submits the complete dictionary rather than individual UUID
-operations.  This module converts that list to the frozen public Engine's
-``UserDictWord`` representation and replaces the compiled user dictionary.
-"""
+# COEIROINK v2の辞書データを公開Engineへ渡すアダプター
+#
+# v2のエンドポイントはUUIDごとの個別操作ではなく辞書全体を送る。
+# このモジュールはその一覧を、仕様を固定した公開Engineの`UserDictWord`形式へ変換し、コンパイル済みのユーザー辞書を置き換える。
 
 from collections.abc import Sequence
 from pathlib import Path
@@ -20,8 +18,9 @@ from voicevox_engine.user_dict import user_dict_path as default_user_dict_path
 from .models import DictionaryWord, DictionaryWords
 
 
+# v2の辞書データを安全にコンパイルできない場合のエラー
 class DictionaryError(ValueError):
-    """Raised when a v2 dictionary payload cannot be compiled safely."""
+    pass
 
 
 def _validated_words(
@@ -42,11 +41,10 @@ def _validated_words(
         raise DictionaryError("dictionary contains an invalid word") from error
 
 
+# v2の辞書データから公開Engine形式の安定した辞書レコードを作る。
 def build_user_dictionary(
     payload: DictionaryWords | Sequence[DictionaryWord],
 ) -> dict[str, UserDictWord]:
-    """Build stable public-Engine dictionary records from a v2 payload."""
-
     result: dict[str, UserDictWord] = {}
     for index, item in enumerate(_validated_words(payload)):
         try:
@@ -71,6 +69,7 @@ def build_user_dictionary(
     return result
 
 
+# 公開Engineのユーザー辞書を置き換えてコンパイルする。
 def set_dictionary(
     payload: DictionaryWords | Sequence[DictionaryWord],
     *,
@@ -78,8 +77,6 @@ def set_dictionary(
     compiled_dict_path: Path | None = None,
     default_dict_path: Path | None = None,
 ) -> None:
-    """Replace and compile the public Engine user dictionary."""
-
     target_json = Path(user_dict_path or default_user_dict_path)
     target_compiled = Path(compiled_dict_path or default_compiled_dict_path)
     source_default = Path(default_dict_path or bundled_dict_path)

@@ -1,11 +1,10 @@
-"""COEIROINKが提供しないVOICEVOX APIへ明示的な応答を返す。"""
+# COEIROINKが提供しないVOICEVOX APIへ明示的な応答を返す処理
 
 from fastapi import APIRouter, HTTPException
 
 
+# 歌唱と音声ライブラリ管理の互換パスを501応答として登録する。
 def add_unavailable_routes(router: APIRouter) -> None:
-    """歌唱と音声ライブラリ管理の互換パスを501応答として登録する。"""
-
     @router.get("/singers", include_in_schema=False)
     @router.get("/singer_info", include_in_schema=False)
     @router.post("/sing_frame_audio_query", include_in_schema=False)

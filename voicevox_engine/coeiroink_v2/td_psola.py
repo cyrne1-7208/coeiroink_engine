@@ -1,9 +1,7 @@
-"""A small, deterministic time-domain PSOLA processor.
-
-The processor is intentionally independent from the packaged COEIROINK
-application.  It only needs NumPy and, when an F0 track is not supplied, the
-public WORLD estimator exposed by :mod:`voicevox_engine.coeiroink_v2.audio`.
-"""
+# 小さく決定的な時間領域PSOLAの処理
+#
+# この処理は、パッケージ化されたCOEIROINKアプリケーションから意図的に独立させている。
+# 必要なのはNumPyと、F0軌跡が渡されない場合に使う`voicevox_engine.coeiroink_v2.audio`の公開WORLD推定器だけである。
 
 import math
 import numbers
@@ -14,7 +12,7 @@ import numpy as np
 PROCESSING_ALGORITHM = "td-psola"
 DEFAULT_FRAME_PERIOD = 0.005
 
-# 過大な入力によるmarkとgrainの無制限な確保を防ぐ。音高の変化は、隣接するgrainが重なる1オクターブ以内に制限する。
+# 過大な入力によるmarkとgrainの無制限な確保を防ぐ。音高の変化は隣接するgrainが重なる1オクターブ以内に制限する。
 MIN_F0_HZ = 20.0
 MAX_F0_HZ = 2000.0
 MIN_PITCH_RATIO = 0.5
@@ -23,12 +21,14 @@ MAX_MARKS = 1000000
 FLOAT32_MAX = float(np.finfo(np.float32).max)
 
 
+# TD-PSOLAの処理への入力が不正な場合のエラー
 class TDPSOLAValidationError(ValueError):
-    """Raised when an input to the TD-PSOLA processor is invalid."""
+    pass
 
 
+# 処理が有限値の波形を生成できない場合のエラー
 class TDPSOLAProcessingError(RuntimeError):
-    """Raised when the processor cannot produce a finite waveform."""
+    pass
 
 
 def _require_waveform(wave: object) -> np.ndarray:
@@ -108,14 +108,13 @@ def _as_f0_array(f0: object) -> np.ndarray:
     return values
 
 
+# サンプル単位またはフレーム単位のF0軌跡を波形の長さまで展開する。
 def _sample_f0_track(
     f0: np.ndarray,
     sample_count: int,
     sampling_rate: int,
     frame_period: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Expand a sample- or frame-aligned F0 track to the waveform length."""
-
     if f0.size == sample_count:
         samples = f0.copy()
         voiced = samples > 0.0
@@ -180,6 +179,7 @@ def _period_at(f0: np.ndarray, sample: int, sampling_rate: int) -> float:
     return max(2.0, float(sampling_rate) / frequency)
 
 
+# 1つの有声区間の中で局所的にエネルギーが高い位置のmarkを決定的に求める。
 def _source_marks(
     wave: np.ndarray,
     f0: np.ndarray,
@@ -187,8 +187,6 @@ def _source_marks(
     end: int,
     sampling_rate: int,
 ) -> np.ndarray:
-    """Find deterministic, local high-energy marks in one voiced run."""
-
     marks: list[int] = []
     expected = float(start)
     previous = start - 1
@@ -230,6 +228,7 @@ def _nearest_mark(marks: np.ndarray, sample: int) -> int:
     return after
 
 
+# 目標F0の周期で合成markを進め、各markに最も近い入力grainのインデックスを割り当てる。
 def _target_marks(
     source_marks: np.ndarray,
     target_f0: np.ndarray,
@@ -237,8 +236,6 @@ def _target_marks(
     end: int,
     sampling_rate: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """目標F0の周期で合成markを進め、各markに最も近い入力grainのインデックスを割り当てる。"""
-
     marks: list[int] = []
     source_indices: list[int] = []
     expected = float(source_marks[0])
@@ -260,11 +257,10 @@ def _target_marks(
     return np.asarray(marks, dtype=np.int64), np.asarray(source_indices, dtype=np.int64)
 
 
+# 有声区間の外で0になるレイズドコサインのゲートを返す。
 def _edge_gate(
     indices: np.ndarray, start: int, end: int, fade_samples: int
 ) -> np.ndarray:
-    """Return a raised-cosine gate that is zero outside a voiced run."""
-
     values = np.asarray(indices, dtype=np.float64)
     gate = np.ones(values.shape, dtype=np.float64)
     gate[(values < start) | (values >= end)] = 0.0
@@ -316,27 +312,47 @@ def process_td_psola(
     target_f0: Sequence[float] | None = None,
     frame_period: float = DEFAULT_FRAME_PERIOD,
 ) -> np.ndarray:
-    """Pitch/intonation-process a mono waveform while retaining its length.
-
-    ``pitch_scale`` follows the COEIROINK/VOICEVOX convention: one unit is an
-    octave and the frequency multiplier is ``2 ** pitch_scale``.
-    ``intonation_scale`` expands or contracts the voiced F0 deviations around
-    their voiced mean.  ``f0`` is the analysed source track and
-    ``target_f0`` is an optional caller-adjusted destination track; either may
-    be sample-aligned or WORLD-style.  When ``f0`` is omitted, the existing
-    public WORLD estimator supplies the source track.
-
-    The implementation is a bounded PSOLA adapter: marks are generated only
-    inside voiced runs, each grain is at most two source periods wide, and the
-    output has exactly the input sample count.  Unvoiced samples are retained
-    and all overlap-add divisions are guarded.
-
-    Algorithm basis: E. Moulines and F. Charpentier, "Pitch-synchronous
-    waveform processing techniques for text-to-speech synthesis using
-    diphones", Speech Communication 9(5-6), 453-467 (1990),
-    https://doi.org/10.1016/0167-6393(90)90021-Z .
     """
+    モノラル波形の長さを保ったまま音高と抑揚を変える。
 
+    実装は範囲を限定したPSOLAで、markは有声区間の中だけに生成し、各grainの幅は入力の2周期以内にし、出力のサンプル数は入力と完全に一致させる。
+    無声音のサンプルはそのまま残し、重ね合わせの除算はすべて0除算を防ぐ。
+
+    Parameters
+    ----------
+    wave : np.ndarray
+        処理するモノラル波形
+    sampling_rate : int
+        波形のサンプリングレート
+    pitch_scale : float
+        COEIROINKとVOICEVOXの規約に従う音高の変化量
+        1が1オクターブに当たり、周波数を`2 ** pitch_scale`倍にする。
+    intonation_scale : float
+        有声音のF0の平均からのずれを広げる、または縮める倍率
+    f0 : Sequence[float] | None
+        解析済みの入力のF0軌跡で、サンプル単位とWORLD形式のどちらでもよい。
+        省略した場合は既存の公開WORLD推定器で求める。
+    target_f0 : Sequence[float] | None
+        呼び出し側が調整した任意の目標のF0軌跡で、サンプル単位とWORLD形式のどちらでもよい。
+    frame_period : float
+        WORLD形式のF0軌跡のフレーム周期の秒数
+
+    Returns
+    -------
+    np.ndarray
+        入力と同じサンプル数の処理後の波形
+
+    Raises
+    ------
+    TDPSOLAValidationError
+        入力が不正な場合
+    TDPSOLAProcessingError
+        有限値の波形を生成できない場合
+
+    References
+    ----------
+    E. Moulines and F. Charpentier, "Pitch-synchronous waveform processing techniques for text-to-speech synthesis using diphones", Speech Communication 9(5-6), 453-467 (1990), https://doi.org/10.1016/0167-6393(90)90021-Z
+    """
     validated_wave = _require_waveform(wave)
     sampling_rate = _require_rate(sampling_rate)
     pitch_scale = _require_scale(pitch_scale, "pitch_scale")
@@ -477,6 +493,7 @@ def process_td_psola(
     return result
 
 
+# v2の波形後処理アダプター向けの互換用の名前で、process_td_psolaをそのまま呼ぶ。
 def apply_td_psola(
     wave: np.ndarray,
     sampling_rate: int,
@@ -487,8 +504,6 @@ def apply_td_psola(
     target_f0: Sequence[float] | None = None,
     frame_period: float = DEFAULT_FRAME_PERIOD,
 ) -> np.ndarray:
-    """Compatibility name for the v2 waveform-processing adapter."""
-
     return process_td_psola(
         wave,
         sampling_rate,

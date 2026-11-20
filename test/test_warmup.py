@@ -1,4 +1,4 @@
-"""起動時ウォームアップとlifespan（辞書・モデル準備・ワーカー終了）の順序を検証する。"""
+# 起動時ウォームアップと、辞書・モデル準備・ワーカー終了を行うlifespanの順序のテスト
 
 from __future__ import annotations
 
@@ -25,9 +25,8 @@ class FakeMetaManager:
         return self._metas
 
 
+# 実モデルを読み込まず、ウォームアップの呼び出しだけを記録するフェイク
 class FakeAudioManager:
-    """実モデルを読み込まず、ウォームアップの呼び出しだけを記録する。"""
-
     def __init__(
         self,
         metas: list[dict],

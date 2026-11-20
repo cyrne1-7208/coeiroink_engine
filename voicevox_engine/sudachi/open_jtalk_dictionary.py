@@ -1,4 +1,4 @@
-"""Open JTalkの辞書ソースをSudachiユーザー辞書へ変換する。"""
+# Open JTalkの辞書ソースをSudachiユーザー辞書へ変換する処理
 
 from __future__ import annotations
 
@@ -12,18 +12,19 @@ from pathlib import Path
 from typing import Any
 
 
+# Open JTalk辞書を安全に変換できない場合のエラー
 class OpenJTalkDictionaryError(ValueError):
-    """Open JTalk辞書を安全に変換できない場合のエラー。"""
+    pass
 
 
+# 互換性を維持するため辞書値を補正した場合の警告
 class OpenJTalkDictionaryWarning(UserWarning):
-    """互換性を維持するため辞書値を補正した場合の警告。"""
+    pass
 
 
+# Sudachiでも利用するOpen JTalk辞書の共通項目
 @dataclass(frozen=True, slots=True)
 class OpenJTalkDictionaryEntry:
-    """Sudachiでも利用するOpen JTalk辞書の共通項目。"""
-
     surface: str
     cost: int
     part_of_speech: tuple[str, str, str, str, str, str]
@@ -55,7 +56,7 @@ _SUDACHI_ADJECTIVE_POS = (
 )
 _SUDACHI_NOUN_SUFFIX_POS = ("接尾辞", "名詞的", "一般", "*", "*", "*")
 
-# 詳細な人名を先に判定する。先頭一致にすることでOpen JTalk固有の活用欄を保持したまま代表的なSudachi文脈へ寄せられる。
+# 詳細な人名を先に判定する。先頭一致にすることで、Open JTalk固有の活用欄を保持したまま代表的なSudachi文脈へ寄せられる。
 _SUDACHI_POS_MAPPINGS = (
     (
         ("名詞", "固有名詞", "人名", "名"),
@@ -133,9 +134,8 @@ def _reading(primary: object, fallback: object, source: Path, location: str) -> 
     raise _source_error(source, location, "reading or pronunciation is missing")
 
 
+# Open JTalkのUTF-8 CSVを入力順のまま読み込む。
 def load_open_jtalk_csv(paths: Sequence[Path]) -> list[OpenJTalkDictionaryEntry]:
-    """Open JTalkのUTF-8 CSVを入力順のまま読み込む。"""
-
     entries: list[OpenJTalkDictionaryEntry] = []
     for source in (Path(path) for path in paths):
         if source.suffix.lower() == ".dic":
@@ -181,9 +181,8 @@ def load_open_jtalk_csv(paths: Sequence[Path]) -> list[OpenJTalkDictionaryEntry]
     return entries
 
 
+# Engineが保存したOpen JTalkユーザー辞書JSONを読み込む。
 def load_open_jtalk_user_json(path: Path) -> list[OpenJTalkDictionaryEntry]:
-    """Engineが保存したOpen JTalkユーザー辞書JSONを読み込む。"""
-
     source = Path(path)
     if not source.is_file():
         raise OpenJTalkDictionaryError(
@@ -233,11 +232,10 @@ def load_open_jtalk_user_json(path: Path) -> list[OpenJTalkDictionaryEntry]:
     return entries
 
 
+# Open JTalkの代表品詞をUniDic 2.1.2由来のSudachi文脈へ対応付ける。
 def _sudachi_part_of_speech(
     entry: OpenJTalkDictionaryEntry,
 ) -> tuple[int, tuple[str, str, str, str, str, str]]:
-    """Open JTalkの代表品詞をUniDic 2.1.2由来のSudachi文脈へ対応付ける。"""
-
     part_of_speech = entry.part_of_speech
     for source_prefix, context_id, sudachi_part_of_speech in _SUDACHI_POS_MAPPINGS:
         if part_of_speech[: len(source_prefix)] == source_prefix:
@@ -305,6 +303,7 @@ def _compile_dictionary(
     return output_path
 
 
+# 環境CSVを先、ユーザーJSONを後にコンパイルして優先順を保持する。
 def compile_open_jtalk_dictionaries(
     sudachipy: Any,
     *,
@@ -313,8 +312,6 @@ def compile_open_jtalk_dictionaries(
     csv_paths: Sequence[Path] = (),
     user_json_path: Path | None = None,
 ) -> tuple[Path, ...]:
-    """環境CSVを先、ユーザーJSONを後にコンパイルして優先順を保持する。"""
-
     if not system_dictionary.is_file():
         raise OpenJTalkDictionaryError(
             f"Sudachi full system dictionary was not found: {system_dictionary}"

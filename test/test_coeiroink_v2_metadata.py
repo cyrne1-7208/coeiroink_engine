@@ -1,4 +1,4 @@
-"""COEIROINK v2話者メタデータストアの探索・重複styleId拒否・サンプル音声読込を検証する。"""
+# COEIROINK v2話者メタデータストアの探索・重複styleId拒否・サンプル音声読込のテスト
 
 from __future__ import annotations
 

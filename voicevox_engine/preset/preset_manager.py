@@ -1,4 +1,4 @@
-"""プリセットの永続化と検証を管理する。"""
+# プリセットの永続化と検証の管理
 
 from pathlib import Path
 from threading import RLock
@@ -24,21 +24,20 @@ class PresetManager:
     def __init__(
         self,
         preset_path: Path,
-    ):
+    ) -> None:
         self.presets = []
         self.last_modified_time = 0
         self.preset_path = Path(preset_path)
 
-    def load_presets(self):
+    def load_presets(self) -> list[Preset]:
         """
-        プリセットのYAMLファイルを読み込む
+        プリセットのYAMLファイルを読み込む。
 
         Returns
         -------
-        ret: List[Preset]
+        ret : list[Preset]
             プリセットのリスト
         """
-
         with _PRESET_LOCK:
             # 外部編集がなければ検証済みのプリセットを再利用する。
             try:
@@ -73,8 +72,9 @@ class PresetManager:
             [stored_preset.model_dump() for stored_preset in self.presets],
         )
 
-    def add_preset(self, preset: Preset):
-        """プリセットを追加してYAMLファイルへ永続化し、登録されたIDを返す。
+    def add_preset(self, preset: Preset) -> int:
+        """
+        プリセットを追加してYAMLファイルへ永続化し、登録されたIDを返す。
 
         IDが負数または既存IDと重複する場合は、上書きを防ぐため`preset.id`を未使用IDへ書き換える。
 
@@ -88,9 +88,8 @@ class PresetManager:
         int
             登録されたプリセットID
         """
-
         with _PRESET_LOCK:
-            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す
+            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す。
             self.load_presets()
 
             # 負のIDと重複IDは自動採番し、既存プリセットの上書きを防ぐ。
@@ -101,33 +100,32 @@ class PresetManager:
 
             try:
                 self._write_presets()
-            except Exception as err:
+            except Exception as error:
                 self.presets.pop()
-                if isinstance(err, FileNotFoundError):
+                if isinstance(error, FileNotFoundError):
                     raise PresetError(
                         "プリセットの設定ファイルへの書き込みに失敗しました"
-                    ) from err
+                    ) from error
                 raise
 
             return preset.id
 
-    def update_preset(self, preset: Preset):
+    def update_preset(self, preset: Preset) -> int:
         """
-        YAMLファイルのプリセットを更新する
+        YAMLファイルのプリセットを更新する。
 
         Parameters
         ----------
         preset : Preset
-            更新するプリセットを渡す
+            更新するプリセット
 
         Returns
         -------
-        ret: int
+        ret : int
             更新したプリセットのプリセットID
         """
-
         with _PRESET_LOCK:
-            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す
+            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す。
             self.load_presets()
 
             for i, previous in enumerate(self.presets):
@@ -139,33 +137,32 @@ class PresetManager:
 
             try:
                 self._write_presets()
-            except Exception as err:
+            except Exception as error:
                 self.presets[i] = previous
-                if isinstance(err, FileNotFoundError):
+                if isinstance(error, FileNotFoundError):
                     raise PresetError(
                         "プリセットの設定ファイルへの書き込みに失敗しました"
-                    ) from err
+                    ) from error
                 raise
 
             return preset.id
 
-    def delete_preset(self, id: int):
+    def delete_preset(self, id: int) -> int:
         """
-        YAMLファイルのプリセットを削除する
+        YAMLファイルのプリセットを削除する。
 
         Parameters
         ----------
-        id: int
-            削除するプリセットのプリセットIDを渡す
+        id : int
+            削除するプリセットのプリセットID
 
         Returns
         -------
-        ret: int
+        ret : int
             削除したプリセットのプリセットID
         """
-
         with _PRESET_LOCK:
-            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す
+            # 手動でファイルが更新されているかもしれないので、最新のYAMLファイルを読み直す。
             self.load_presets()
 
             for i, previous in enumerate(self.presets):
@@ -177,12 +174,12 @@ class PresetManager:
 
             try:
                 self._write_presets()
-            except Exception as err:
+            except Exception as error:
                 self.presets.insert(i, previous)
-                if isinstance(err, FileNotFoundError):
+                if isinstance(error, FileNotFoundError):
                     raise PresetError(
                         "プリセットの設定ファイルへの書き込みに失敗しました"
-                    ) from err
+                    ) from error
                 raise
 
             return id

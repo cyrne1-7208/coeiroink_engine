@@ -1,4 +1,4 @@
-"""Sudachi full辞書を個別に検証するためのCLI。"""
+# Sudachi full辞書を個別に検証するためのCLI
 
 from __future__ import annotations
 
@@ -72,8 +72,8 @@ def _open_jtalk_sources(args: argparse.Namespace) -> tuple[list[Path], Path | No
     return csv_paths, user_json_path
 
 
+# 明示フラグの確認後にだけSudachiを起動する。
 def main(argv: list[str] | None = None) -> int:
-    """明示フラグの確認後にだけSudachiを起動する。"""
     parser = _build_parser()
     args = parser.parse_args(argv)
     if "sudachi" not in args.experimental:
