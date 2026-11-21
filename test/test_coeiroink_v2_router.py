@@ -235,11 +235,9 @@ def test_status_and_metadata_endpoints(v2_fake_audio_manager_cls: type) -> None:
     }
     assert client.get("/v1/speakers").json()[0]["speakerUuid"] == SPEAKER_UUID
     assert client.get("/v1/speakers_path_variant").status_code == 200
-    assert (
-        client.get("/v1/speaker_folder_path", params={"speakerUuid": SPEAKER_UUID})
-        .json()["speakerFolderPath"]
-        .endswith("/fake")
-    )
+    assert client.get(
+        "/v1/speaker_folder_path", params={"speakerUuid": SPEAKER_UUID}
+    ).json() == {"speakerFolderPath": str(FakeMetadata.speaker_info_dir / "fake")}
     assert client.get("/v1/speaker_folder_path").json() == {"speakerFolderPath": "None"}
     assert (
         client.post(
