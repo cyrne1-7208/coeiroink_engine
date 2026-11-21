@@ -14,6 +14,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from PyInstaller.utils.hooks import (
     collect_all,
     collect_data_files,
+    collect_dynamic_libs,
     copy_metadata,
 )
 
@@ -89,6 +90,19 @@ for package in optional_packages.get(backend, ()):
 
 if backend == "cuda":
     datas.extend(copy_metadata("cupy-cuda13x"))
+    if sys.platform == "win32":
+        # CuPyはNVRTCをsite-packagesのnvidia/cu13から探してCUDAのルートを決めるため、site-packagesと同じ構成で同梱する。
+        nvrtc_binaries = [
+            (source, str(Path("Lib/site-packages") / destination))
+            for source, destination in collect_dynamic_libs(
+                "nvidia", search_patterns=["nvrtc64_*_0.dll", "nvrtc-builtins64_*.dll"]
+            )
+        ]
+        if not nvrtc_binaries:
+            raise ModuleNotFoundError(
+                "nvidia-cuda-nvrtc is required for the cuda standalone package"
+            )
+        binaries.extend(nvrtc_binaries)
 
 a = Analysis(
     ["run.py"],
