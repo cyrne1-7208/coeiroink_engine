@@ -33,6 +33,8 @@ hiddenimports = [
     "espnet2.text.phoneme_tokenizer",
     "espnet2.text.token_id_converter",
     "pyworld.pyworld",
+    # omniioは公開名のomniio.kaldiを実行時に実体へ振り替えるため、PyInstallerが辿れない。
+    "omniio.tools.kaldi",
 ]
 
 
