@@ -1,7 +1,6 @@
 import os
 import sys
 import traceback
-from contextlib import suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -54,5 +53,4 @@ def atomic_write_text(path: Path, content: str) -> None:
         temporary_path = None
     finally:
         if temporary_path is not None:
-            with suppress(FileNotFoundError):
-                temporary_path.unlink()
+            temporary_path.unlink(missing_ok=True)

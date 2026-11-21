@@ -137,8 +137,10 @@ class ParseKanaBadRequest(BaseModel):
     )
     error_args: dict[str, str] = Field(title="エラーを起こした箇所")
 
-    def __init__(self, err: ParseKanaError) -> None:
-        super().__init__(text=err.text, error_name=err.errname, error_args=err.kwargs)
+    def __init__(self, error: ParseKanaError) -> None:
+        super().__init__(
+            text=error.text, error_name=error.errname, error_args=error.kwargs
+        )
 
 
 class MorphableTargetInfo(BaseModel):

@@ -7,6 +7,7 @@ import json
 import subprocess
 import tempfile
 import time
+from contextlib import suppress
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -72,14 +73,14 @@ def check_release_build(
                 for _ in range(30):
                     if process.poll() is not None:
                         break
-                    try:
-                        with urlopen(
+                    with (
+                        suppress(OSError, URLError, TimeoutError),
+                        urlopen(
                             "http://127.0.0.1:50032/voicevox/version", timeout=2
-                        ) as response:
-                            if json.loads(response.read()) == expected_version:
-                                return
-                    except OSError, URLError, TimeoutError:
-                        pass
+                        ) as response,
+                    ):
+                        if json.loads(response.read()) == expected_version:
+                            return
                     time.sleep(2)
             finally:
                 if process.poll() is None:

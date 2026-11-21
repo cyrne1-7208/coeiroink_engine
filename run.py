@@ -234,44 +234,44 @@ def _create_lifespan(
 def _add_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(CancellableRequestDisconnected)
     async def cancellable_disconnected_handler(
-        _request: Request, err: CancellableRequestDisconnected
+        _request: Request, error: CancellableRequestDisconnected
     ) -> JSONResponse:
         # クライアント切断は合成器の異常ではない。499は接続を閉じたクライアントを表す慣用的なコードである。
-        _LOGGER.info("Cancellable synthesis cancelled: %s", err)
-        return JSONResponse(status_code=499, content={"detail": str(err)})
+        _LOGGER.info("Cancellable synthesis cancelled: %s", error)
+        return JSONResponse(status_code=499, content={"detail": str(error)})
 
     @app.exception_handler(StyleNotFoundError)
     async def style_not_found_handler(
-        _request: Request, err: StyleNotFoundError
+        _request: Request, error: StyleNotFoundError
     ) -> JSONResponse:
-        return JSONResponse(status_code=404, content={"detail": str(err)})
+        return JSONResponse(status_code=404, content={"detail": str(error)})
 
     @app.exception_handler(ModelLoadError)
     @app.exception_handler(SynthesisError)
     async def synthesis_error_handler(
-        _request: Request, err: RuntimeError
+        _request: Request, error: RuntimeError
     ) -> JSONResponse:
-        _LOGGER.error("Core synthesis failed", exc_info=err)
-        return JSONResponse(status_code=500, content={"detail": str(err)})
+        _LOGGER.error("Core synthesis failed", exc_info=error)
+        return JSONResponse(status_code=500, content={"detail": str(error)})
 
     @app.exception_handler(InvalidSynthesisParameterError)
     async def invalid_synthesis_parameter_handler(
-        _request: Request, err: InvalidSynthesisParameterError
+        _request: Request, error: InvalidSynthesisParameterError
     ) -> JSONResponse:
-        return JSONResponse(status_code=422, content={"detail": str(err)})
+        return JSONResponse(status_code=422, content={"detail": str(error)})
 
     @app.exception_handler(CancellableWorkerSynthesisError)
     async def cancellable_synthesis_error_handler(
-        _request: Request, err: CancellableWorkerSynthesisError
+        _request: Request, error: CancellableWorkerSynthesisError
     ) -> JSONResponse:
         # ワーカーが返したCoreの既知エラーだけを通常合成と同じ扱いにし、実装上の不具合は500として記録する。
         status = {
             f"{StyleNotFoundError.__module__}.{StyleNotFoundError.__qualname__}": 404,
             f"{InvalidSynthesisParameterError.__module__}.{InvalidSynthesisParameterError.__qualname__}": 422,
-        }.get(err.exception_type, 500)
+        }.get(error.exception_type, 500)
         if status == 500:
-            _LOGGER.error("Cancellable synthesis failed", exc_info=err)
-        return JSONResponse(status_code=status, content={"detail": err.message})
+            _LOGGER.error("Cancellable synthesis failed", exc_info=error)
+        return JSONResponse(status_code=status, content={"detail": error.message})
 
 
 # CLI設定からCORSの許可リストを作り、許可されていないOriginを拒否する。

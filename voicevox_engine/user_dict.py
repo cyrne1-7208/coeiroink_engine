@@ -2,7 +2,6 @@ import importlib
 import json
 import os
 import threading
-from contextlib import suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import UUID, uuid4
@@ -18,8 +17,7 @@ from .utility import engine_root, get_save_dir
 root_dir = engine_root()
 save_dir = get_save_dir()
 
-if not save_dir.is_dir():
-    save_dir.mkdir(parents=True)
+save_dir.mkdir(parents=True, exist_ok=True)
 
 default_dict_path = root_dir / "default.csv"
 user_dict_path = save_dir / "user_dict.json"
@@ -57,8 +55,7 @@ def reset_user_dict() -> None:
 
 
 def _remove_file(path: Path) -> None:
-    with suppress(FileNotFoundError):
-        path.unlink()
+    path.unlink(missing_ok=True)
 
 
 def _write_json_atomic(user_dict_json: str, user_dict_path: Path) -> None:

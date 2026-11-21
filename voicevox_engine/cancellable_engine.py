@@ -118,11 +118,9 @@ def _stop_process(
     if not graceful:
         _close_connection(connection)
         connection = None
-        try:
+        with suppress(OSError, ValueError):
             if _is_process_alive(proc):
                 proc.terminate()
-        except OSError, ValueError:
-            pass
 
     _join_process(proc, max(0.0, deadline - time.monotonic()))
     if _is_process_alive(proc):
@@ -266,7 +264,7 @@ class CancellableEngine:
                     if self._shutting_down:
                         raise CancellableWorkerError(
                             "キャンセル用ワーカーは終了処理中です"
-                        )
+                        ) from None
                 continue
 
             proc, connection = worker

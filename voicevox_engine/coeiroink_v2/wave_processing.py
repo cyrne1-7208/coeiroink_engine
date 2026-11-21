@@ -4,6 +4,7 @@
 
 import math
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -216,12 +217,10 @@ class _ResolvedWaveProcessingOptions:
 def _optional_adjusted_f0(value: Sequence[float] | None) -> np.ndarray | None:
     if value is None:
         return None
-    try:
+    with suppress(TypeError):
         if len(value) == 0:
             # 公式リクエスト例の空配列はF0軌跡が指定されていないことを表す。
             return None
-    except TypeError:
-        pass
     return _validated_f0(value)
 
 
