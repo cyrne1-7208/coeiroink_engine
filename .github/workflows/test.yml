@@ -129,8 +129,6 @@ jobs:
 
   windows-cpu:
     name: Windows CPU unit
-    # Windowsでテスト全体が通ることを確かめるまでは、手動実行のときだけ動かす。
-    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-2022
     timeout-minutes: 45
 
