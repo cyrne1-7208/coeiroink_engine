@@ -7,6 +7,7 @@ on:
       - ".github/workflows/build-engine-container.yml"
       - ".github/workflows/test-engine-container.yml"
       - "build_util/check_container.sh"
+      - "build_util/make_ci_speaker.py"
       - "Dockerfile"
       - "Dockerfile.dockerignore"
       - "pyproject.toml"
@@ -16,6 +17,7 @@ on:
       - ".github/workflows/build-engine-container.yml"
       - ".github/workflows/test-engine-container.yml"
       - "build_util/check_container.sh"
+      - "build_util/make_ci_speaker.py"
       - "Dockerfile"
       - "Dockerfile.dockerignore"
       - "pyproject.toml"
@@ -59,7 +61,8 @@ on:
         default: main
 
 concurrency:
-  group: coeiroink-engine-container-test-${{ github.workflow }}-${{ github.ref }}-${{ inputs.backend || 'cpu' }}
+  # pull requestでは古い実行を取り消し、pushと手動実行はコミットごとに最後まで実行する。
+  group: coeiroink-engine-container-test-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}-${{ inputs.backend || 'cpu' }}
   cancel-in-progress: true
 
 permissions:

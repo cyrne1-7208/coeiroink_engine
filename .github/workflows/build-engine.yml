@@ -83,7 +83,7 @@ jobs:
             -C "${RUNNER_TEMP}" coeiroink-server-oss
 
       - name: Upload Engine package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coeiroink-engine-package
           path: coeiroink_engine/dist/*
@@ -131,7 +131,6 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix: ${{ fromJSON(needs.select-target.outputs.matrix) }}
     steps:
       - name: Check out Engine
