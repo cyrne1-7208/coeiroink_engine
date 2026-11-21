@@ -28,7 +28,6 @@ KNOWN_LICENSE_NAMES = {
     "coeirocore": "LGPL-3.0-only",
     "coeiroink-opencl": "LGPL-3.0-only",
     "cuda-toolkit": "LicenseRef-NVIDIA-Proprietary",
-    "espnet-tts-frontend": "Apache-2.0",
     "nvidia-nvshmem-cu12": "LicenseRef-NVIDIA-NVSHMEM",
     "pyworld": "MIT",
     "sentencepiece": "Apache-2.0",
@@ -121,21 +120,6 @@ def _unknown_license_text(name: str, version: str | None) -> str:
                 (
                     "licenses/torch_complex/ATTRIBUTION.txt",
                     Path("licenses/torch_complex/ATTRIBUTION.txt").read_text(
-                        encoding="utf-8"
-                    ),
-                ),
-            ]
-        )
-    if normalized_name == "espnet-tts-frontend":
-        return _combine_legal_documents(
-            [
-                (
-                    "licenses/Apache-2.0.txt",
-                    Path("licenses/Apache-2.0.txt").read_text(encoding="utf-8"),
-                ),
-                (
-                    "licenses/espnet_tts_frontend/ATTRIBUTION.txt",
-                    Path("licenses/espnet_tts_frontend/ATTRIBUTION.txt").read_text(
                         encoding="utf-8"
                     ),
                 ),
@@ -432,24 +416,6 @@ def _package_license(package: dict[str, Any], canonical_name: str) -> License:
         else _unknown_license_text(package["Name"], package["Version"])
     )
     license_name = KNOWN_LICENSE_NAMES.get(canonical_name, package["License"])
-    if canonical_name == "distance" and package["Version"] == "0.1.3":
-        # 上流のLICENSEとsetup.pyの版指定が異なるため、こちらで一方に決め直さない。
-        license_name = "GPL (upstream GPLv2/GPLv3 notices differ)"
-        license_text = _combine_legal_documents(
-            [
-                *documents,
-                (
-                    "licenses/distance/ATTRIBUTION.txt",
-                    Path("licenses/distance/ATTRIBUTION.txt").read_text(
-                        encoding="utf-8"
-                    ),
-                ),
-                (
-                    "licenses/GPL-3.0.txt",
-                    Path("licenses/GPL-3.0.txt").read_text(encoding="utf-8"),
-                ),
-            ]
-        )
     if not license_name or license_name == UNKNOWN_LICENSE:
         raise LicenseGenerationError(
             f"No license identifier provided for {package['Name']} {package['Version']}"

@@ -9,7 +9,6 @@ CoreとEngine本体のソースコードには、個別表記があるものを�
 | 本体ソースアーカイブ | `sources/coeiroink_core.zip`、`sources/coeiroink_engine.zip` |
 | GPL、LGPL、MPL依存ソース | `sources/`配下のアーカイブ、[sources/README.md](./sources/README.md) |
 | 依存ライブラリのライセンス本文 | `engine_manifest_assets/dependency_licenses.json` |
-| Distance 0.1.3の表記補足 | [distance/ATTRIBUTION.txt](./distance/ATTRIBUTION.txt) |
 | その他の依存とOpenCL拡張設定 | `uv.lock`の`sdist.url`と`source.git`、Coreの`native/opencl/CMakeLists.txt` |
 
 `sources/coeiroink_core.zip`と`sources/coeiroink_engine.zip`を同じディレクトリへ展開すると、CoreとEngineが隣同士に配置されます。

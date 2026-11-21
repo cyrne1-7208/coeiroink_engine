@@ -11,8 +11,6 @@ import pytest
 
 import generate_licenses
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-
 
 class _Distribution:
     def __init__(self, root: Path, files: list[Path], declared: list[str]) -> None:
@@ -101,23 +99,6 @@ def test_cuda_toolkit_uses_nvidia_cuda_runtime_eula(
 
     assert license_info.license == "LicenseRef-NVIDIA-Proprietary"
     assert license_info.text == "NVIDIA CUDA Toolkit EULA"
-
-
-def test_distance_notice_preserves_original_license(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.chdir(REPOSITORY_ROOT)
-    documents = generate_licenses._legal_documents("Distance")
-    license_info = generate_licenses._package_license(
-        {"Name": "Distance", "Version": "0.1.3", "License": "GPL"}, "distance"
-    )
-
-    assert "notices differ" in license_info.license
-    assert all(text in license_info.text for _path, text in documents)
-    assert "does not relicense Distance" in license_info.text
-    assert (REPOSITORY_ROOT / "licenses" / "GPL-3.0.txt").read_text(
-        encoding="utf-8"
-    ) in license_info.text
 
 
 @pytest.mark.parametrize("valid_hash", [True, False])
