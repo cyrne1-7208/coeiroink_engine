@@ -513,6 +513,8 @@ def start_synthesis_subprocess(
         generator_only=getattr(args, "generator_only", True),
         voice_smoothing=args.voice_smoothing,
         dangerous_skip_check=getattr(args, "dangerous_skip_check", False),
+        skip_trailing_silence=getattr(args, "skip_trailing_silence", False),
+        chunked_decoding=getattr(args, "chunked_decoding", False),
     )
     latest_core_version = get_latest_core_version(synthesis_engines)
     try:

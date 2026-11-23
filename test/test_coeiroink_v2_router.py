@@ -105,11 +105,13 @@ def _make_app(
     v2_fake_audio_manager_cls: type,
     *,
     voice_smoothing: bool = False,
+    skip_trailing_silence: bool = False,
     metadata: object | None = None,
     **callbacks: object,
 ) -> tuple[FastAPI, object, list[object]]:
     manager = v2_fake_audio_manager_cls(
         voice_smoothing=voice_smoothing,
+        skip_trailing_silence=skip_trailing_silence,
         expected_speaker_uuid=SPEAKER_UUID,
         expected_style_id=STYLE_ID,
     )
@@ -438,6 +440,24 @@ def test_v2_synthesis_voice_smoothing_gets_duration_and_runs_once(
     assert call["tokens"] == ["^", "a", "$"]
     assert call["duration_frames"] == [1, 2, 1]
     assert call["hop_length"] == 2
+
+
+def test_v2_trailing_silence_skip_is_requested_only_by_synthesis(
+    v2_fake_audio_manager_cls: type,
+) -> None:
+    app, manager, _ = _make_app(v2_fake_audio_manager_cls, skip_trailing_silence=True)
+    client = TestClient(app)
+
+    synthesized = client.post("/v1/synthesis", json=_synthesis_payload())
+    predicted = client.post("/v1/predict", json=_making_payload())
+
+    assert synthesized.status_code == 200
+    assert predicted.status_code == 200
+    # 未トリムの波形を返す/v1/predictでは、文末の無音を省かない。
+    assert [call.get("skip_trailing_silence") for call in manager.prediction_calls] == [
+        True,
+        None,
+    ]
 
 
 @pytest.mark.parametrize(

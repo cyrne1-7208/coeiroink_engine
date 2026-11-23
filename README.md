@@ -69,6 +69,8 @@ mkdir speaker_info
 
 | 指定値 | 内容 | 条件と対象外 |
 | --- | --- | --- |
+| `chunked-decoding` | 長い音声の波形生成を分割して実行 | 約9秒を超える音声だけが対象 |
+| `skip-trailing-silence` | `/v1/synthesis`とVOICEVOX互換合成で、文末の無音の波形生成を省略 | `/v1/predict`系は対象外 |
 | `soxr` | libsoxr VHQでリサンプリング | 導入時に`--extra soxr`が必要 |
 | `voice-smoothing` | `/v1/synthesis`とVOICEVOX互換合成の音声を補正 | `/v1/predict`系は対象外 |
 | `warmup` | ロード済みモデルを短い合成で事前準備 | `--max-loaded-models all`または値省略と併用し、未読込モデルと`--enable_cancellable_synthesis`は対象外 |

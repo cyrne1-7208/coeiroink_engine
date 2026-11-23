@@ -449,6 +449,8 @@ def test_subprocess_passes_device_without_preloading_every_model(
         max_loaded_models=None,
         voice_smoothing=True,
         dangerous_skip_check=True,
+        skip_trailing_silence=True,
+        chunked_decoding=True,
     )
     make_engines = Mock(side_effect=RuntimeError("stop before worker loop"))
     monkeypatch.setattr(cancellable_module, "make_synthesis_engines", make_engines)
@@ -471,6 +473,8 @@ def test_subprocess_passes_device_without_preloading_every_model(
         generator_only=True,
         voice_smoothing=True,
         dangerous_skip_check=True,
+        skip_trailing_silence=True,
+        chunked_decoding=True,
     )
 
 

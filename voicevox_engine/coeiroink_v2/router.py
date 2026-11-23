@@ -369,6 +369,7 @@ def _call_prediction(
     style_id: int,
     speed_scale: float,
     with_duration: bool,
+    skip_trailing_silence: bool,
 ) -> tuple[np.ndarray, list[int]]:
     arguments = {
         "text": list(tokens),
@@ -376,6 +377,9 @@ def _call_prediction(
         "speaker_uuid": speaker_uuid,
         "speed_scale": speed_scale,
     }
+    # AudioManager互換オブジェクトへの既定の呼び出しを変えないよう、有効な場合だけ指定する。
+    if skip_trailing_silence:
+        arguments["skip_trailing_silence"] = True
     if not with_duration:
         return _as_waveform(audio_manager.predict(**arguments)), []
 
@@ -509,6 +513,7 @@ class _V2RouterContext:
         self,
         param: WavMakingParam | SynthesisParam,
         with_duration: bool = False,
+        skip_trailing_silence: bool = False,
     ) -> tuple[np.ndarray, list[int], list[str], list[list[Any]], int]:
         plain, detail = self.request_detail(param)
         wave, frames = _call_prediction(
@@ -518,6 +523,7 @@ class _V2RouterContext:
             param.style_id,
             param.speed_scale,
             with_duration=with_duration,
+            skip_trailing_silence=skip_trailing_silence,
         )
         return wave, frames, plain, detail, _sampling_rate(self.audio_manager)
 
@@ -775,8 +781,11 @@ def _add_processing_routes(router: APIRouter, context: _V2RouterContext) -> None
             voice_smoothing = audio_manager.voice_smoothing
             needs_pause_durations = param.pause_length is not None
             needs_duration = voice_smoothing or needs_pause_durations
+            # 合成結果は後ろの無音をトリムするため、文末の無音の省略を許可する。
             wave, frames, plain, detail, sampling_rate = predict_request(
-                param, with_duration=needs_duration
+                param,
+                with_duration=needs_duration,
+                skip_trailing_silence=audio_manager.skip_trailing_silence,
             )
             mora_durations = None
             if needs_duration:

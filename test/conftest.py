@@ -156,10 +156,12 @@ class V2FakeAudioManager:
         self,
         *,
         voice_smoothing: bool = False,
+        skip_trailing_silence: bool = False,
         expected_speaker_uuid: str = "00000000-0000-0000-0000-000000000001",
         expected_style_id: int = 7,
     ) -> None:
         self.voice_smoothing = voice_smoothing
+        self.skip_trailing_silence = skip_trailing_silence
         self._expected_speaker_uuid = expected_speaker_uuid
         self._expected_style_id = expected_style_id
         self.prediction_calls: list[dict[str, object]] = []
@@ -171,6 +173,7 @@ class V2FakeAudioManager:
         style_id: int,
         speed_scale: float,
         speaker_uuid: str,
+        **options: object,
     ) -> np.ndarray:
         self.prediction_calls.append(
             {
@@ -179,6 +182,7 @@ class V2FakeAudioManager:
                 "style_id": style_id,
                 "speed_scale": speed_scale,
                 "speaker_uuid": speaker_uuid,
+                **options,
             }
         )
         return np.linspace(-0.25, 0.25, 8, dtype=np.float32)
@@ -189,6 +193,7 @@ class V2FakeAudioManager:
         style_id: int,
         speed_scale: float,
         speaker_uuid: str,
+        **options: object,
     ) -> PredictionResult:
         self.prediction_calls.append(
             {
@@ -197,6 +202,7 @@ class V2FakeAudioManager:
                 "style_id": style_id,
                 "speed_scale": speed_scale,
                 "speaker_uuid": speaker_uuid,
+                **options,
             }
         )
         return PredictionResult(

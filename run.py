@@ -446,7 +446,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--experimental",
         action="append",
-        choices=("generator-only", "soxr", "voice-smoothing", "warmup"),
+        choices=(
+            "chunked-decoding",
+            "generator-only",
+            "skip-trailing-silence",
+            "soxr",
+            "voice-smoothing",
+            "warmup",
+        ),
         default=[],
         help="実験的な機能を有効にします。複数指定する場合は、このオプションを繰り返してください。",
     )
@@ -577,6 +584,8 @@ def main() -> None:
     # generator-onlyは既定で有効だが、以前のCLIとの互換性を保つため同名の指定も受け付ける。
     args.generator_only = True
     args.voice_smoothing = "voice-smoothing" in args.experimental
+    args.skip_trailing_silence = "skip-trailing-silence" in args.experimental
+    args.chunked_decoding = "chunked-decoding" in args.experimental
 
     try:
         args.device = resolve_device(device=args.device, use_gpu=args.use_gpu)
@@ -613,6 +622,8 @@ def main() -> None:
         voice_smoothing=args.voice_smoothing,
         preload_models=False,
         dangerous_skip_check=args.dangerous_skip_check,
+        skip_trailing_silence=args.skip_trailing_silence,
+        chunked_decoding=args.chunked_decoding,
     )
     synthesis_engines = make_synthesis_engines(
         speaker_info_dir=speaker_info_dir,

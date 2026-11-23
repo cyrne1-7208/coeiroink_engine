@@ -63,6 +63,8 @@ def make_audio_manager(
     voice_smoothing: bool = False,
     preload_models: bool = True,
     dangerous_skip_check: bool = False,
+    skip_trailing_silence: bool = False,
+    chunked_decoding: bool = False,
 ) -> AudioManager:
     selected_device = resolve_device(device=device, use_gpu=use_gpu)
     return AudioManager(
@@ -79,6 +81,8 @@ def make_audio_manager(
         voice_smoothing=voice_smoothing,
         preload_models=preload_models,
         dangerous_skip_check=dangerous_skip_check,
+        skip_trailing_silence=skip_trailing_silence,
+        chunked_decoding=chunked_decoding,
     )
 
 
@@ -121,6 +125,8 @@ def make_synthesis_engines(
     audio_manager: AudioManager | None = None,
     voice_smoothing: bool = False,
     dangerous_skip_check: bool = False,
+    skip_trailing_silence: bool = False,
+    chunked_decoding: bool = False,
 ) -> dict[str, SynthesisEngineBase]:
     """
     Coreを準備し、音声合成エンジンを生成する。
@@ -162,6 +168,10 @@ def make_synthesis_engines(
         Coreの実験的な音声補正を有効化するか
     dangerous_skip_check : bool, optional, default=False
         推定メモリ不足を警告だけにし、メモリ不足による拒否と自動解放を省略するか
+    skip_trailing_silence : bool, optional, default=False
+        Coreの実験的な文末の無音の省略を有効化するか
+    chunked_decoding : bool, optional, default=False
+        Coreの実験的なdecoderの分割実行を有効化するか
 
     Returns
     -------
@@ -182,6 +192,8 @@ def make_synthesis_engines(
             generator_only=generator_only,
             voice_smoothing=voice_smoothing,
             dangerous_skip_check=dangerous_skip_check,
+            skip_trailing_silence=skip_trailing_silence,
+            chunked_decoding=chunked_decoding,
         )
     elif max_loaded_models is None:
         audio_manager.initialize_all_speakers()

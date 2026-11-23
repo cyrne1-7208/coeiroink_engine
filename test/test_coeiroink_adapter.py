@@ -80,6 +80,8 @@ def test_make_audio_manager_passes_complete_device_selection(
         voice_smoothing=True,
         preload_models=False,
         dangerous_skip_check=True,
+        skip_trailing_silence=True,
+        chunked_decoding=True,
     )
 
     factory.assert_called_once_with(
@@ -96,6 +98,8 @@ def test_make_audio_manager_passes_complete_device_selection(
         voice_smoothing=True,
         preload_models=False,
         dangerous_skip_check=True,
+        skip_trailing_silence=True,
+        chunked_decoding=True,
     )
 
 
